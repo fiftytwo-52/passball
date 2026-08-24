@@ -24,13 +24,20 @@ function groundPoint(e) {
     return ray.ray.intersectPlane(groundPlane, pt) ? pt : null;
 }
 
+/** Forgiving screen-space picking: nearest player within a finger-friendly radius. */
 function pickPlayer(e) {
     const r = renderer.domElement.getBoundingClientRect();
-    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-    ray.setFromCamera(ndc, camera);
-    const meshes = players.map(p => p.mesh);
-    const hit = ray.intersectObjects(meshes, true)[0];
-    return hit ? players.find(p => p.mesh === hit.object.userData.root) : null;
+    const px = e.clientX - r.left, py = e.clientY - r.top;
+    const radius = e.pointerType === 'touch' ? 42 : 30;   // generous touch target
+    const v = new THREE.Vector3();
+    let best = null, bd = radius;
+    for (const p of players) {
+        v.set(p.x, 1.2, p.z).project(camera);
+        const sx = (v.x + 1) / 2 * r.width, sy = (-v.y + 1) / 2 * r.height;
+        const d = Math.hypot(px - sx, py - sy);
+        if (d < bd) { bd = d; best = p; }
+    }
+    return best;
 }
 
 function setRunTarget(player, e) {
@@ -52,12 +59,13 @@ renderer.domElement.addEventListener('pointerdown', e => {
         // SWIPE your keeper to command his dive (left / stay / right)
         const kind = p.role === 'keeper' ? 'keeper' : 'move';
         state.drag = { kind, player: p, sx: e.clientX, sy: e.clientY };
-        renderer.domElement.setPointerCapture(e.pointerId);
         marker.visible = kind === 'move';
         marker.position.set(p.x, .07, p.z);
     } else {
         state.drag = { kind: 'guessTap', player: p, sx: e.clientX, sy: e.clientY };
     }
+    // capture so pointerup always fires, even if the finger drifts off the canvas
+    renderer.domElement.setPointerCapture(e.pointerId);
 });
 
 renderer.domElement.addEventListener('pointermove', e => {
