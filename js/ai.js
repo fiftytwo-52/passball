@@ -17,13 +17,13 @@ export function cpuAttackChoices() {
     for (let i = 1; i < aOut.length; i++) {
         const r = aOut[i];
         const pressure = defenders.reduce((s, d) => s + clamp(1 - dist2d(d, r) / 22, 0, 1), 0);
-        const score = r.z * .9 - Math.abs(r.x) * .25 - pressure * 14 + rand(0, 6);
+        const score = -r.z * .9 - Math.abs(r.x) * .25 - pressure * 14 + rand(0, 6); // CPU attacks -z
         if (score > bestScore) { bestScore = score; best = i; }
     }
     state.selected = best;
     const target = aOut[best];
     target.tx = clamp(target.x + rand(-6, 6), -18, 18);
-    target.tz = clamp(target.z + rand(6, 12), -40, 38);
+    target.tz = clamp(target.z - rand(6, 12), -38, 40);
 }
 
 /** CPU defense positioning during the window (its read happens at resolve). */
@@ -33,7 +33,7 @@ export function cpuDefendChoices() {
     let bestIdx = 1, bestScore = -1e9;
     for (let i = 1; i < aOut.length; i++) {
         const r = aOut[i];
-        const score = r.z * .8 - dist2d(r, state.carrier) * .3 + rand(0, 5);
+        const score = -r.z * .8 - dist2d(r, state.carrier) * .3 + rand(0, 5); // CPU attacks -z
         if (score > bestScore) { bestScore = score; bestIdx = i; }
     }
     const suspect = aOut[bestIdx];
@@ -48,7 +48,7 @@ export function cpuGuessReceiver(aOut) {
     let best = 1, bestScore = -1e9;
     for (let i = 1; i < aOut.length; i++) {
         const r = aOut[i];
-        const score = r.z * .7 - Math.abs(r.x) * .2 + rand(0, 8);
+        const score = -r.z * .7 - Math.abs(r.x) * .2 + rand(0, 8); // CPU attacks -z
         if (score > bestScore) { bestScore = score; best = i; }
     }
     return Math.random() < .75 ? best : 1 + Math.floor(Math.random() * (aOut.length - 1));

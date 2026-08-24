@@ -128,18 +128,23 @@ export function place(p, x, z) { p.x = p.tx = x; p.z = p.tz = z; p.diveX = null;
 export function holdBall(p) { ball.state = 'held'; ball.holder = p; ball.x = p.x; ball.z = p.z; }
 export function updateAnchors() { players.forEach(p => { p.anchor.x = p.x; p.anchor.z = p.z; }); }
 
+/** Attack direction of the possessing team in world z: YOU always attack +z, CPU always -z. */
+export const atkDir = () => state.possession === 'you' ? 1 : -1;
+
 export function setupPlay(kickoffPos = false) {
     const atk = kickoffPos ? kickoffSpots() : attackSpots(), def = defendSpots();
+    const d = atkDir();
     const attackTeam = state.possession, defendTeam = state.possession === 'you' ? 'cpu' : 'you';
     const aOut = outfield(attackTeam), dOut = outfield(defendTeam);
     state.carrier = aOut[0];
     aOut.forEach((p, i) => {
         const s = i === 0 ? atk.carrier : atk.mates[i - 1];
-        place(p, s.x, s.z);
+        place(p, s.x, s.z * d);
     });
-    dOut.forEach((p, i) => place(p, def.line[i].x, def.line[i].z));
-    place(teamPlayers(attackTeam).find(p => p.role === 'keeper'), 0, -41);
-    place(teamPlayers(defendTeam).find(p => p.role === 'keeper'), def.keeper.x, def.keeper.z);
+    dOut.forEach((p, i) => place(p, def.line[i].x, def.line[i].z * d));
+    // keepers guard FIXED goals: yours at -44, CPU's at +44 — they never swap
+    place(teamPlayers(attackTeam).find(p => p.role === 'keeper'), 0, -41 * d);
+    place(teamPlayers(defendTeam).find(p => p.role === 'keeper'), 0, 41 * d);
     state.selected = 1;
     holdBall(state.carrier);
     updateAnchors();

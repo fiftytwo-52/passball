@@ -25,12 +25,15 @@ export const camState = {
 
 /** TOP-DOWN view riding above the ball; zooms IN attacking, OUT defending. */
 export function updateCamera(dt) {
+    // camera always sits behind the ATTACKING team's fixed goal:
+    // you attack +z (camera at -z side), CPU attacks -z (camera at +z side)
     const attacking = state.role === 'attack';
+    const d = state.possession === 'you' ? 1 : -1;
     const cx = clamp(ball ? ball.x * .35 : 0, -7, 7);
     const bz = ball ? ball.z : 0;
     const height = attacking ? 44 : 62;
-    const desired = new THREE.Vector3(cx, height, clamp(bz, -40, 40) - 6);
-    const desiredLook = new THREE.Vector3(cx, 0, clamp(bz + (attacking ? 13 : 6), -42, 42));
+    const desired = new THREE.Vector3(cx, height, clamp(bz, -40, 40) - d * 6);
+    const desiredLook = new THREE.Vector3(cx, 0, clamp(bz + d * (attacking ? 13 : 6), -42, 42));
     const k = 1 - Math.pow(.002, dt);   // frame-rate independent smoothing
     camState.pos.lerp(desired, k);
     camState.look.lerp(desiredLook, k);

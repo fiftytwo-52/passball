@@ -5,7 +5,7 @@ import { state } from './state.js';
 import { THREE, camState, passLine, hideBannerSprite } from './world.js';
 import {
     players, ball, outfield, teamPlayers, setupPlay, holdBall,
-    updateAnchors, moveToward
+    updateAnchors, moveToward, atkDir
 } from './entities.js';
 import { sfx } from './audio.js';
 import { addLog, showBanner, updatePossessionChip, updateScores, setInstruction, updateDiveChip, ui } from './hud.js';
@@ -38,13 +38,14 @@ export function beginResolve() {
     sfx.pass();
 
     const attackTeam = state.possession, defendTeam = attackTeam === 'you' ? 'cpu' : 'you';
+    const d = atkDir();
     const aOut = outfield(attackTeam);
     const target = aOut[state.selected];
 
-    // attackers commit: everyone bursts forward onto the pass
+    // attackers commit: everyone bursts forward onto the pass (toward the attacked goal)
     aOut.forEach((p, i) => {
         if (i === 0) return; // carrier releases the ball
-        if (p !== target && p.tz === p.anchor.z) { p.tx = clamp(p.x + rand(-4, 4), -18, 18); p.tz = clamp(p.z + rand(2, 8), -40, 38); }
+        if (p !== target && p.tz === p.anchor.z) { p.tx = clamp(p.x + rand(-4, 4), -18, 18); p.tz = clamp(p.z + d * rand(2, 8), -40, 38); }
     });
 
     // DEFENSIVE READ: a correct guess converges defenders on the receiver (+ reach burst)
@@ -128,7 +129,7 @@ function intercept(defender, ctx) {
 function onReceive(ctx) {
     const recv = ctx.target;
     recv.x = ball.x; recv.z = ball.z;
-    if (recv.z >= T.shootZ) { beginShot(ctx, recv); return; }
+    if (recv.z * atkDir() >= T.shootZ) { beginShot(ctx, recv); return; }
     ball.state = 'held'; ctx.done = true;
     sfx.pass(); camState.trauma = .12; showBanner('COMPLETE', COL.you);
     state.carrier = recv;                 // receiver becomes the carrier
@@ -140,6 +141,7 @@ function onReceive(ctx) {
 function beginShot(ctx, shooter) {
     ctx.shot = {
         phase: 'flying',
+        dir: atkDir(),
         shotX: clamp(shooter.x * .45 + rand(-5.5, 5.5), -T.goalHalf + .8, T.goalHalf - .8),
         t: 0
     };
@@ -154,14 +156,14 @@ function beginShot(ctx, shooter) {
 
 function stepShot(ctx, dt) {
     const s = ctx.shot;
-    const gz = T.pitchL / 2;
+    const gz = s.dir * T.pitchL / 2;   // the attacked (defending team's) goal — fixed per team
     if (s.phase !== 'flying') return;
     const k = s.keeper;
     k.x += clamp(k.diveX - k.x, -T.playerSpeed * 1.35 * dt, T.playerSpeed * 1.35 * dt);
     const dx = s.shotX - ball.x, dz = gz - ball.z, d = Math.hypot(dx, dz) || 1;
     const sp = T.ballSpeed * 1.5;
     ball.x += dx / d * sp * dt; ball.z += dz / d * sp * dt;
-    if (ball.z >= gz - .6) {
+    if (s.dir > 0 ? ball.z >= gz - .6 : ball.z <= gz + .6) {
         const keeperClose = Math.abs(k.x - s.shotX) < T.keeperReach;
         ctx.done = true;
         if (keeperClose && Math.random() < T.saveSkill) {
@@ -183,13 +185,12 @@ function stepShot(ctx, dt) {
 
 /* ---------- outcome application ---------- */
 function flipPossessionTo(winnerPlayer) {
+    // ONLY possession changes: teams keep their players, colors and halves — no mirroring.
     state.possession = winnerPlayer.team;
-    players.forEach(p => { p.z = -p.z; p.tz = -p.tz; p.anchor.z = -p.anchor.z; });
-    ball.z = -ball.z;
     const newAtk = outfield(state.possession);
     state.carrier = winnerPlayer.role === 'keeper' ? newAtk[0] : winnerPlayer;
     holdBall(state.carrier);
-    advanceFormation(state.carrier);
+    updateAnchors();
     updatePossessionChip();
 }
 
@@ -200,16 +201,18 @@ function kickoff(newPossession) {
 }
 
 function advanceFormation(newCarrier) {
+    const d = atkDir();
     const atk = outfield(state.possession);
-    const shift = clamp(10, -40, 30 - newCarrier.z);
+    const shift = clamp(10, -40, 30 * d - newCarrier.z * d) * d;
     atk.forEach(p => {
         if (p === newCarrier) { p.tx = p.x; p.tz = p.z; return; }
         p.tx = clamp(p.x + rand(-5, 5), -18, 18);
-        p.tz = clamp(p.z + shift + rand(0, 4), -40, 36);
+        p.tz = clamp(p.z + d * (10 + rand(0, 4)), -40, 40);
     });
+    // defense drops toward its own (fixed) goal
     outfield(state.possession === 'you' ? 'cpu' : 'you').forEach(p => {
         p.tx = clamp(p.x + rand(-4, 4), -18, 18);
-        p.tz = clamp(p.z + 6, -40, 40);
+        p.tz = clamp(p.z + d * 6, -40, 40);
     });
     updateAnchors();
 }
