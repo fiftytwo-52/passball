@@ -77,17 +77,24 @@ window.addEventListener('pointerdown', e => {
     renderer.domElement.setPointerCapture(e.pointerId);
 });
 
-/* Dragging BLANK space pans your own view of the pitch (your side only). */
+/* Dragging BLANK space pans your own view of the pitch (your side only).
+   Strictly separate from player swipes: pan arms only after 14px of movement
+   starting away from any player, so the two gestures never mix. */
 window.addEventListener('pointerdown', e => {
     if (hitsHud(e)) return;
     if (state.mode !== 'decision' || state.locked || state.drag) return;
     if (pickPlayer(e)) return;                            // player drags are handled above
-    state.drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, panX: state.pan.x, panZ: state.pan.z };
+    state.drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, panX: state.pan.x, panZ: state.pan.z, armed: false };
 });
 
 window.addEventListener('pointermove', e => {
     if (!state.drag) return;
     if (state.drag.kind === 'pan') {
+        // arm only after a clear 14px drag so simple taps never pan
+        if (!state.drag.armed) {
+            if (Math.hypot(e.clientX - state.drag.sx, e.clientY - state.drag.sy) < 14) return;
+            state.drag.armed = true;
+        }
         // pixels → world units at current camera height
         const r = renderer.domElement.getBoundingClientRect();
         const wpp = 2 * camState.pos.y * Math.tan(THREE.MathUtils.degToRad(30)) / r.height;

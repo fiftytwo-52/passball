@@ -68,9 +68,25 @@ function tick(now) {
     try {
         tickBody(now);
     } catch (err) {
-        // never let one bad frame freeze the whole game
+        // never let one bad frame blank the whole game — always keep rendering
         console.error(err);
+        showErr(err && err.message || String(err));
+        try { renderer.render(scene, camera); } catch (_) { }
     }
+}
+
+let errTimer;
+function showErr(msg) {
+    let box = document.getElementById('errbox');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'errbox';
+        document.body.appendChild(box);
+    }
+    box.textContent = '⚠ ' + msg;
+    box.style.display = 'block';
+    clearTimeout(errTimer);
+    errTimer = setTimeout(() => { box.style.display = 'none'; }, 4000);
 }
 
 function tickBody(now) {

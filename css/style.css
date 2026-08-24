@@ -347,3 +347,20 @@ button {
     color: #102019;
     opacity: 1;
 }
+
+/* ---------- runtime error toast (diagnostics) ---------- */
+#errbox {
+    display: none;
+    position: fixed;
+    left: 50%;
+    bottom: calc(14px + var(--safe-bottom));
+    transform: translateX(-50%);
+    z-index: 99;
+    max-width: 86vw;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(80, 20, 20, .92);
+    color: #ffd9d9;
+    font-size: .7rem;
+    font-family: monospace;
+}
