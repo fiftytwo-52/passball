@@ -351,20 +351,19 @@ button {
 /* phones: latest 3 only */
 
 #bottom-panel {
-    margin-top: 8px;
+    margin-top: 6px;
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 12px;
+    border-radius: 12px;
+    padding: 7px 10px;
     -webkit-backdrop-filter: blur(6px);
     backdrop-filter: blur(6px);
 }
 
 #instruction {
     margin: 0;
-    font-size: .76rem;
-    line-height: 1.45;
-    min-height: 2.9em;
+    font-size: .68rem;
+    line-height: 1.35;
 }
 
 #dive {
@@ -394,7 +393,23 @@ button {
 }
 
 #lock {
-    margin-top: 10px;
+    margin-top: 7px;
+    min-height: 44px;
+}
+
+/* dive chips are passive indicators — the keeper is commanded by swiping him */
+#dive {
+    pointer-events: none;
+}
+
+#dive button {
+    flex: 1;
+    min-height: 30px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(120, 225, 208, .08);
+    font-weight: 800;
+    font-size: .62rem;
 }
 
 /* ---------- Larger screens ---------- */

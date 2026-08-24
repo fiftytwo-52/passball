@@ -10,7 +10,7 @@ import { T, clamp } from './config.js';
 import { state } from './state.js';
 import { players, outfield } from './entities.js';
 import { sfx } from './audio.js';
-import { setInstruction } from './hud.js';
+import { setInstruction, ui } from './hud.js';
 
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
@@ -49,10 +49,11 @@ renderer.domElement.addEventListener('pointerdown', e => {
         if (p.team !== 'you' || p.role !== 'outfield') return;
         state.drag = { kind: 'mate', player: p, sx: e.clientX, sy: e.clientY };
     } else if (p.team === 'you') {
-        if (p.role !== 'outfield') return;
-        state.drag = { kind: 'move', player: p, sx: e.clientX, sy: e.clientY };
+        // SWIPE your keeper to command his dive (left / stay / right)
+        const kind = p.role === 'keeper' ? 'keeper' : 'move';
+        state.drag = { kind, player: p, sx: e.clientX, sy: e.clientY };
         renderer.domElement.setPointerCapture(e.pointerId);
-        marker.visible = true;
+        marker.visible = kind === 'move';
         marker.position.set(p.x, .07, p.z);
     } else {
         state.drag = { kind: 'guessTap', player: p, sx: e.clientX, sy: e.clientY };
@@ -78,6 +79,12 @@ renderer.domElement.addEventListener('pointerup', e => {
                 setInstruction('Receiver locked (gold ring + line). SWIPE teammates for runs, or LOCK IN.');
             }
         } else setRunTarget(d.player, e);                   // SWIPE → run target
+    } else if (d.kind === 'keeper') {
+        // horizontal swipe direction commands the dive
+        const dx = e.clientX - d.sx;
+        state.diveChoice = !moved || Math.abs(dx) < 12 ? 0 : (dx < 0 ? -1 : 1);
+        [...ui.dive.children].forEach(b => b.classList.toggle('sel', parseInt(b.dataset.dive, 10) === state.diveChoice));
+        sfx.lock();
     } else if (d.kind === 'move') {
         if (moved) setRunTarget(d.player, e);
     } else if (d.kind === 'guessTap') {

@@ -26,7 +26,7 @@ export function startDecision() {
         setInstruction('ATTACK: TAP a teammate — he receives the pass (gold ring + line). SWIPE a teammate — he runs to that spot. If a defender touches the ball mid-pass, you lose it.');
         cpuDefendChoices();
     } else {
-        setInstruction('DEFEND: TAP the opponent you think will receive the pass (red ring). SWIPE your defenders toward danger. A correct read wins you the ball. Pick your keeper\'s dive for shots.');
+        setInstruction('DEFEND: TAP the opponent you think will receive (red ring). SWIPE defenders toward danger. SWIPE YOUR KEEPER left/right to command his dive. A correct read wins you the ball.');
         cpuAttackChoices();
     }
 }
