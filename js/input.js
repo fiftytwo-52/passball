@@ -117,8 +117,8 @@ window.addEventListener('pointerup', e => {
         if (!moved) {                                       // TAP → receiver
             if (d.player !== state.carrier) {
                 state.selected = outfield('you').indexOf(d.player);
+                state.userSelected = true;
                 sfx.lock();
-                setInstruction('Receiver locked (gold ring + line). SWIPE teammates for runs, or LOCK IN.');
             }
         } else setRunTarget(d.player, e);                   // SWIPE → run target
     } else if (d.kind === 'keeper') {

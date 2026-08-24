@@ -9,6 +9,7 @@ export const state = {
     remaining: 10.0,
     locked: false,
     selected: 0,             // index among attacking team's outfield (the receiver)
+    userSelected: false,     // has the human explicitly tapped a receiver this play?
     carrier: null,
     diveChoice: 0,           // human keeper command: -1 / 0 / +1
     guessIdx: null,          // human's guessed receiver index (defending)

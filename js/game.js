@@ -18,6 +18,7 @@ export function startDecision() {
     state.diveChoice = 0;
     state.guessIdx = null;
     state.shotCall = null;
+    state.userSelected = false;
     players.forEach(p => { p.runSet = false; });   // explicit runs marked fresh each play
     ui.role.textContent = state.role === 'attack' ? 'ATTACK' : 'DEFEND';
     ui.role.style.color = state.role === 'attack' ? cssColor(COL.aim) : cssColor(COL.you);
@@ -42,7 +43,27 @@ export function beginResolve() {
     const attackTeam = state.possession, defendTeam = attackTeam === 'you' ? 'cpu' : 'you';
     const d = atkDir();
     const aOut = outfield(attackTeam);
-    const target = aOut[state.selected];
+
+    // HUMAN DEFAULT: no receiver tapped → the kicker passes wherever he is FACING,
+    // and one random teammate makes a random run. The ball is loose until someone collects it.
+    let target;
+    if (attackTeam === 'you' && !state.userSelected) {
+        const yaw = state.carrier.yaw || 0;
+        target = {
+            x: clamp(state.carrier.x + Math.sin(yaw) * 24, -19, 19),
+            z: clamp(state.carrier.z + Math.cos(yaw) * 24, -42, 42),
+            loose: true
+        };
+        const mates = aOut.filter(p => p !== state.carrier);
+        const runner = mates[Math.floor(Math.random() * mates.length)];
+        if (runner) {
+            runner.tx = clamp(runner.x + rand(-14, 14), -17, 17);
+            runner.tz = clamp(runner.z + d * rand(4, 12), -40, 40);
+            runner.runSet = true;
+        }
+    } else {
+        target = aOut[state.selected];
+    }
 
     // attackers commit: anyone without an explicit run bursts forward onto the pass
     aOut.forEach((p, i) => {
@@ -97,8 +118,18 @@ export function stepResolve(dt) {
                 if (dist2d(d, ball) < reach) { ctx.readPerfect = ctx.readCorrect; intercept(d, ctx); return; }
             }
         }
-        // receiver collects
-        if (dist2d(ctx.target, ball) < T.contactRadius) { onReceive(ctx); return; }
+        // receiver collects (a facing-direction "loose" pass has no set receiver)
+        if (!ctx.target.loose && dist2d(ctx.target, ball) < T.contactRadius) { onReceive(ctx); return; }
+        // loose pass: any ATTACKER standing in the ball's path can collect it too
+        if (ctx.target.loose && ball.dist > 3) {
+            for (const a of outfield(ctx.attackTeam)) {
+                if (dist2d(a, ball) < T.contactRadius) {
+                    ctx.target = a;
+                    onReceive(ctx);
+                    return;
+                }
+            }
+        }
 
         // OUT OF PLAY → opponents restart with a kick from the edge line
         if (Math.abs(ball.z) > T.pitchL / 2 || Math.abs(ball.x) > T.pitchW / 2) {
@@ -183,9 +214,16 @@ function stepShot(ctx, dt) {
     const sp = T.ballSpeed * 1.5;
     ball.x += dx / d * sp * dt; ball.z += dz / d * sp * dt;
     if (s.dir > 0 ? ball.z >= gz - .6 : ball.z <= gz + .6) {
-        const keeperClose = Math.abs(k.x - s.shotX) < T.keeperReach;
+        // dive vs shot placement: matching side saves 95% of the time,
+        // diving the wrong way almost never stops it
+        const diveSide = Math.sign(k.diveX || 0);
+        const shotSide = Math.sign(s.shotX || 0);
+        let chance = .5;
+        if (diveSide !== 0 && diveSide === shotSide) chance = .95;
+        else if (diveSide !== 0 && diveSide !== shotSide) chance = .18;
+        const keeperClose = Math.abs(k.x - s.shotX) < T.keeperReach + 1.5;
         ctx.done = true;
-        if (keeperClose && Math.random() < T.saveSkill) {
+        if (keeperClose && Math.random() < chance) {
             ball.state = 'held';
             sfx.save(); camState.trauma = .3; showBanner('SAVED!', 0x9fd7ff);
             addLog(ctx.attackTeam === 'you' ? 'The keeper dives and holds it. Possession lost.' : 'YOUR KEEPER SAVES! You take over.', ctx.attackTeam === 'you' ? cssColor(COL.cpu) : cssColor(COL.you));
