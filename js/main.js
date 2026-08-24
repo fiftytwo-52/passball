@@ -28,6 +28,15 @@ let last = performance.now();
 
 function tick(now) {
     requestAnimationFrame(tick);
+    try {
+        tickBody(now);
+    } catch (err) {
+        // never let one bad frame freeze the whole game
+        console.error(err);
+    }
+}
+
+function tickBody(now) {
     const rawDt = Math.min((now - last) / 1000, .08);
     last = now;
 

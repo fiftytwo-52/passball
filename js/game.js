@@ -241,7 +241,7 @@ export function restartMatch() {
     state.banner = null; camState.trauma = 0;
     hideBannerSprite();
     updateScores();
-    ui.plays.textContent = 'PLAY 1'; ui.log.innerHTML = '';
+    ui.plays.textContent = 'PLAY 1';
     setupPlay(true);
     addLog('Kickoff at the center spot. You have the first possession.', cssColor(COL.aim));
     startDecision();
