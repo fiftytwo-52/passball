@@ -1,0 +1,1219 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Guess & Pass 3D</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --ink: #eef4f0;
+            --muted: #9daea6;
+            --panel: rgba(13, 27, 24, .86);
+            --line: rgba(206, 232, 218, .15);
+            --lime: #d6f36a;
+            --cyan: #78e1d0;
+            --coral: #ff836e;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+            background: #081513;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+            color: var(--ink);
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        }
+
+        button {
+            font: inherit;
+            color: inherit;
+            cursor: pointer;
+        }
+
+        #scene {
+            position: fixed;
+            inset: 0;
+        }
+
+        /* ---------- Main menu ---------- */
+        #menu {
+            position: fixed;
+            inset: 0;
+            z-index: 30;
+            display: grid;
+            place-items: center;
+            background: radial-gradient(120% 100% at 50% 0%, #123a30 0%, #081513 70%);
+        }
+
+        #menu .card {
+            text-align: center;
+            padding: 40px 34px;
+            border: 1px solid var(--line);
+            background: var(--panel);
+            border-radius: 12px;
+            max-width: 420px;
+            width: calc(100% - 40px);
+        }
+
+        .eyebrow {
+            color: var(--lime);
+            font-size: .72rem;
+            letter-spacing: .16em;
+            font-weight: 800;
+        }
+
+        #menu h1 {
+            margin: 8px 0 6px;
+            font-size: clamp(2rem, 6vw, 3rem);
+            line-height: 1;
+        }
+
+        #menu p {
+            color: var(--muted);
+            margin: 0 0 24px;
+            font-size: .9rem;
+            line-height: 1.5;
+        }
+
+        .mode-btn {
+            display: block;
+            width: 100%;
+            min-height: 56px;
+            margin-top: 10px;
+            border: 0;
+            border-radius: 8px;
+            background: var(--lime);
+            color: #102019;
+            font-weight: 850;
+            letter-spacing: .04em;
+        }
+
+        .mode-btn.secondary {
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid var(--line);
+            font-weight: 700;
+        }
+
+        .mode-btn:disabled {
+            opacity: .45;
+            cursor: default;
+        }
+
+        /* ---------- HUD ---------- */
+        #hud {
+            position: fixed;
+            inset: 0;
+            z-index: 10;
+            display: none;
+            grid-template-rows: auto auto 1fr auto;
+            gap: 10px;
+            max-width: 1220px;
+            margin: 0 auto;
+            padding: 14px clamp(12px, 3vw, 36px);
+            pointer-events: none;
+        }
+
+        #hud.on {
+            display: grid;
+        }
+
+        #hud>* {
+            pointer-events: auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            gap: 12px;
+        }
+
+        h1 {
+            margin: 2px 0 0;
+            font-size: clamp(1.2rem, 3vw, 1.9rem);
+            line-height: 1;
+        }
+
+        .scoreboard {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .score {
+            min-width: 64px;
+            text-align: center;
+            border: 1px solid var(--line);
+            background: var(--panel);
+            padding: 6px 10px;
+            border-radius: 6px;
+        }
+
+        .score strong {
+            display: block;
+            color: var(--lime);
+            font-size: 1.35rem;
+            line-height: 1;
+        }
+
+        .score span {
+            color: var(--muted);
+            font-size: .62rem;
+            font-weight: 700;
+            letter-spacing: .1em;
+        }
+
+        .versus {
+            color: var(--muted);
+            font-weight: 800;
+            font-size: .72rem;
+        }
+
+        .mid {
+            display: flex;
+            gap: 10px;
+            align-items: start;
+            justify-content: space-between;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 12px 14px;
+            -webkit-backdrop-filter: blur(4px);
+            backdrop-filter: blur(4px);
+        }
+
+        .panel-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            color: var(--muted);
+            font-size: .64rem;
+            font-weight: 800;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+        }
+
+        #role {
+            color: var(--lime);
+        }
+
+        .chip {
+            padding: 3px 8px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            font-size: .58rem;
+            letter-spacing: .1em;
+        }
+
+        .chip.you {
+            color: var(--cyan);
+            border-color: rgba(120, 225, 208, .45);
+        }
+
+        .chip.cpu {
+            color: var(--coral);
+            border-color: rgba(255, 131, 110, .45);
+        }
+
+        .timer {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            margin-top: 4px;
+        }
+
+        #timer {
+            font-size: 2.2rem;
+            font-variant-numeric: tabular-nums;
+            line-height: 1;
+        }
+
+        #timer.urgent {
+            color: var(--coral);
+        }
+
+        .timer small {
+            color: var(--muted);
+        }
+
+        .progress {
+            height: 4px;
+            margin-top: 8px;
+            background: #29433b;
+            overflow: hidden;
+            border-radius: 4px;
+        }
+
+        #progress-bar {
+            display: block;
+            height: 100%;
+            width: 100%;
+            transform-origin: left;
+            background: var(--lime);
+        }
+
+        #decision-panel {
+            max-width: 340px;
+            flex: 1;
+        }
+
+        #instruction {
+            margin: 0;
+            line-height: 1.45;
+            font-size: .82rem;
+        }
+
+        #lock {
+            width: 100%;
+            min-height: 48px;
+            margin-top: 10px;
+            border: 0;
+            border-radius: 6px;
+            background: var(--lime);
+            color: #102019;
+            font-weight: 850;
+        }
+
+        #lock:disabled {
+            opacity: .45;
+            cursor: default;
+        }
+
+        /* keeper dive controls */
+        #dive {
+            display: none;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        #dive.on {
+            display: flex;
+        }
+
+        #dive button {
+            flex: 1;
+            min-height: 46px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: rgba(120, 225, 208, .1);
+            font-weight: 750;
+            font-size: .78rem;
+        }
+
+        #dive button.sel {
+            background: var(--cyan);
+            color: #102019;
+            border-color: transparent;
+        }
+
+        .logwrap {
+            align-self: end;
+            width: min(360px, 60%);
+        }
+
+        #log {
+            list-style: none;
+            padding: 0;
+            margin: 8px 0 0;
+            display: grid;
+            gap: 6px;
+            color: var(--muted);
+            font-size: .72rem;
+        }
+
+        #log li {
+            border-left: 2px solid var(--line);
+            padding-left: 8px;
+        }
+
+        footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            color: var(--muted);
+            font-size: .7rem;
+        }
+
+        #restart {
+            min-height: 38px;
+            padding: 0 16px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: rgba(13, 27, 24, .86);
+            font-weight: 700;
+        }
+
+        @media (max-width: 640px) {
+            .logwrap {
+                display: none;
+            }
+
+            #decision-panel {
+                max-width: none;
+            }
+
+            .mid {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="scene"></div>
+
+    <!-- ---------- Main menu ---------- -->
+    <div id="menu">
+        <div class="card">
+            <div class="eyebrow">FOOTBALL · DUEL EDITION</div>
+            <h1>Guess & Pass 3D</h1>
+            <p>Every play freezes time for 3 seconds. The attacker commits a pass, the defender commits a
+                guess — read your opponent to win the ball.</p>
+            <button class="mode-btn" id="btn-vs-cpu">VS COMPUTER</button>
+            <button class="mode-btn secondary" id="btn-pvp" disabled>PVP · COMING IN PHASE 2</button>
+        </div>
+    </div>
+
+    <!-- ---------- HUD ---------- -->
+    <div id="hud">
+        <header>
+            <div>
+                <div class="eyebrow">GUESS & PASS 3D</div>
+                <h1 id="match-state">VS CPU</h1>
+            </div>
+            <div class="scoreboard" aria-label="Score">
+                <div class="score"><strong id="human-score">0</strong><span>YOU</span></div>
+                <div class="versus">VS</div>
+                <div class="score"><strong id="cpu-score">0</strong><span>CPU</span></div>
+            </div>
+        </header>
+
+        <div class="mid">
+            <section class="panel" id="clock-panel">
+                <div class="panel-title">
+                    <span>Decision window<span id="possession" class="chip you">YOU · BALL</span></span>
+                    <span id="role">ATTACK</span>
+                </div>
+                <div class="timer"><strong id="timer">10.0</strong><small>seconds</small></div>
+                <div class="progress"><span id="progress-bar"></span></div>
+            </section>
+            <section class="panel logwrap">
+                <div class="panel-title"><span>Match log</span><span id="plays">PLAY 1</span></div>
+                <ul id="log"></ul>
+            </section>
+        </div>
+
+        <div></div>
+
+        <section class="panel" id="decision-panel">
+            <p id="instruction">Drag from the carrier onto a teammate to commit the pass. Drag any teammate to send them
+                on a run.</p>
+            <div id="dive">
+                <button data-dive="-1">◀ DIVE LEFT</button>
+                <button data-dive="0">STAY</button>
+                <button data-dive="1">DIVE RIGHT ▶</button>
+            </div>
+            <button id="lock">LOCK IN</button>
+        </section>
+
+        <footer>
+            <span>First to 3 goals · 24 play limit</span>
+            <button id="restart">Restart match</button>
+        </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script>
+        (() => {
+            'use strict';
+
+            /* ================= Tunables ================= */
+            const T = {
+                window: 10.0, winScore: 3, maxPlays: 24,
+                pitchW: 42, pitchL: 88,          // world units (x width, z length)
+                goalHalf: 6, goalH: 3.4,
+                playerSpeed: 11,                  // every player AND the ball share this speed
+                ballSpeed: 11,
+                contactRadius: 1.9,               // physical interception distance
+                shootZ: 24,                       // receiving the ball at z >= this triggers a shot
+                keeperReach: 4.2,                 // lateral reach of a committed dive
+                saveSkill: .8                     // chance a correctly-placed dive turns into a save
+            };
+
+            const COL = { you: 0x78e1d0, cpu: 0xff836e, aim: 0xd6f36a, line: 0xffffff };
+
+            /* ================= DOM ================= */
+            const $ = id => document.getElementById(id);
+            const ui = {
+                scene: $('scene'), menu: $('menu'), hud: $('hud'),
+                timer: $('timer'), bar: $('progress-bar'), role: $('role'),
+                instruction: $('instruction'), lock: $('lock'), log: $('log'),
+                plays: $('plays'), human: $('human-score'), cpu: $('cpu-score'),
+                possession: $('possession'), dive: $('dive'), restart: $('restart')
+            };
+
+            /* ================= Audio ================= */
+            let audioCtx;
+            function tone(freq, dur, type = 'sine', vol = .05, delay = 0) {
+                try {
+                    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+                    const t0 = audioCtx.currentTime + delay;
+                    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+                    o.type = type; o.frequency.setValueAtTime(freq, t0);
+                    g.gain.setValueAtTime(.0001, t0);
+                    g.gain.exponentialRampToValueAtTime(vol, t0 + .012);
+                    g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
+                    o.connect(g).connect(audioCtx.destination);
+                    o.start(t0); o.stop(t0 + dur + .02);
+                } catch (_) { /* optional */ }
+            }
+            const sfx = {
+                pass: () => { tone(300, .09, 'triangle', .04); tone(430, .12, 'triangle', .03, .06); },
+                intercept: () => { tone(150, .16, 'sawtooth', .06); tone(92, .22, 'sawtooth', .05, .08); },
+                goal: () => { tone(392, .18, 'triangle', .06); tone(523, .22, 'triangle', .06, .12); tone(659, .32, 'triangle', .05, .25); },
+                save: () => { tone(220, .14, 'sine', .05); tone(160, .2, 'sine', .04, .1); },
+                whistle: () => { tone(880, .12, 'square', .03); tone(880, .22, 'square', .03, .18); },
+                lock: () => tone(520, .07, 'triangle', .03),
+                lost: () => { tone(200, .2, 'square', .04); tone(140, .28, 'square', .035, .1); }
+            };
+
+            /* ================= Three.js scene ================= */
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+            renderer.setSize(innerWidth, innerHeight);
+            ui.scene.appendChild(renderer.domElement);
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x07130f);
+            scene.fog = new THREE.Fog(0x07130f, 90, 190);
+
+            const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, .1, 400);
+            const CAM = { base: new THREE.Vector3(0, 34, -50), look: new THREE.Vector3(0, 0, 12), trauma: 0 };
+            camera.position.copy(CAM.base);
+            camera.lookAt(CAM.look);
+
+            scene.add(new THREE.HemisphereLight(0xeafff2, 0x0c2018, 1.05));
+            const sun = new THREE.DirectionalLight(0xfff6df, 1.15);
+            sun.position.set(30, 60, -20);
+            scene.add(sun);
+
+            /* ---- pitch with painted markings (CanvasTexture) ---- */
+            function makePitchTexture() {
+                const c = document.createElement('canvas');
+                c.width = 512; c.height = 1024;
+                const g = c.getContext('2d');
+                // mowed stripes
+                for (let i = 0; i < 12; i++) {
+                    g.fillStyle = i % 2 ? '#1b4a3d' : '#173f35';
+                    g.fillRect(0, i * c.height / 12, c.width, c.height / 12);
+                }
+                g.strokeStyle = 'rgba(240,255,245,.75)';
+                g.lineWidth = 4;
+                const m = 18; // margin px
+                g.strokeRect(m, m, c.width - m * 2, c.height - m * 2);
+                g.beginPath(); g.moveTo(m, c.height / 2); g.lineTo(c.width - m, c.height / 2); g.stroke();
+                g.beginPath(); g.arc(c.width / 2, c.height / 2, 74, 0, Math.PI * 2); g.stroke();
+                // penalty boxes both ends
+                const bw = c.width * .58, bh = c.height * .17;
+                g.strokeRect((c.width - bw) / 2, m, bw, bh);
+                g.strokeRect((c.width - bw) / 2, c.height - m - bh, bw, bh);
+                const tex = new THREE.CanvasTexture(c);
+                tex.anisotropy = 4;
+                return tex;
+            }
+            const pitch = new THREE.Mesh(
+                new THREE.PlaneGeometry(T.pitchW + 4, T.pitchL + 4),
+                new THREE.MeshLambertMaterial({ map: makePitchTexture() })
+            );
+            pitch.rotation.x = -Math.PI / 2;
+            scene.add(pitch);
+            // surrounding apron
+            const apron = new THREE.Mesh(
+                new THREE.PlaneGeometry(220, 260),
+                new THREE.MeshLambertMaterial({ color: 0x0d2b23 })
+            );
+            apron.rotation.x = -Math.PI / 2;
+            apron.position.y = -.05;
+            scene.add(apron);
+
+            /* ---- goals ---- */
+            function addGoal(z) {
+                const mat = new THREE.MeshLambertMaterial({ color: 0xf4fff8 });
+                const post = new THREE.CylinderGeometry(.22, .22, T.goalH, 10);
+                const left = new THREE.Mesh(post, mat), right = new THREE.Mesh(post, mat);
+                left.position.set(-T.goalHalf, T.goalH / 2, z);
+                right.position.set(T.goalHalf, T.goalH / 2, z);
+                const bar = new THREE.Mesh(new THREE.CylinderGeometry(.22, .22, T.goalHalf * 2, 10), mat);
+                bar.rotation.z = Math.PI / 2;
+                bar.position.set(0, T.goalH, z);
+                // net hint
+                const net = new THREE.Mesh(
+                    new THREE.PlaneGeometry(T.goalHalf * 2, T.goalH),
+                    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .08, side: THREE.DoubleSide })
+                );
+                net.position.set(0, T.goalH / 2, z + (z > 0 ? 1.6 : -1.6));
+                scene.add(left, right, bar, net);
+            }
+            addGoal(T.pitchL / 2);
+            addGoal(-T.pitchL / 2);
+
+            /* ---- players & ball ---- */
+            const ringGeo = new THREE.RingGeometry(1.5, 1.95, 32);
+            const youMat = new THREE.MeshLambertMaterial({ color: COL.you });
+            const cpuMat = new THREE.MeshLambertMaterial({ color: COL.cpu });
+            const gkYouMat = new THREE.MeshLambertMaterial({ color: 0x9fd7ff });
+            const gkCpuMat = new THREE.MeshLambertMaterial({ color: 0xffd28a });
+
+            /** Low-poly humanoid: head, torso, shorts, swinging arms & legs. */
+            const skinTones = [0xf1c9a5, 0xdba579, 0x8d5524, 0xc68642];
+            function makeHuman(kitMat) {
+                const g = new THREE.Group();
+                const skin = new THREE.MeshLambertMaterial({ color: skinTones[Math.floor(Math.random() * skinTones.length)] });
+                const shorts = new THREE.MeshLambertMaterial({ color: 0x12261f });
+                const torso = new THREE.Mesh(new THREE.CylinderGeometry(.34, .42, 1.0, 10), kitMat);
+                torso.position.y = 1.45;
+                const head = new THREE.Mesh(new THREE.SphereGeometry(.30, 12, 10), skin);
+                head.position.y = 2.22;
+                const hips = new THREE.Mesh(new THREE.CylinderGeometry(.37, .30, .38, 10), shorts);
+                hips.position.y = .86;
+                const limb = r => { const geo = new THREE.CylinderGeometry(r, r * .82, .8, 8); geo.translate(0, -.4, 0); return geo; };
+                const legL = new THREE.Mesh(limb(.15), skin); legL.position.set(-.18, .74, 0);
+                const legR = new THREE.Mesh(limb(.15), skin); legR.position.set(.18, .74, 0);
+                const armL = new THREE.Mesh(limb(.11), kitMat); armL.position.set(-.53, 1.88, 0);
+                const armR = new THREE.Mesh(limb(.11), kitMat); armR.position.set(.53, 1.88, 0);
+                g.add(torso, head, hips, legL, legR, armL, armR);
+                g.userData.limbs = { legL, legR, armL, armR };
+                return g;
+            }
+
+            const players = [];   // {mesh,ring,x,z,tx,tz,team,role,idx,anchor:{x,z},yaw,walk,px,pz}
+            function addPlayer(team, role, idx, x, z) {
+                const isGK = role === 'keeper';
+                const mesh = makeHuman(isGK ? (team === 'you' ? gkYouMat : gkCpuMat) : (team === 'you' ? youMat : cpuMat));
+                mesh.position.set(x, 0, z);
+                const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: COL.aim, transparent: true, opacity: 0, side: THREE.DoubleSide }));
+                ring.rotation.x = -Math.PI / 2;
+                ring.position.set(x, .06, z);
+                scene.add(mesh, ring);
+                const p = { mesh, ring, x, z, tx: x, tz: z, team, role, idx, anchor: { x, z }, diveX: null, yaw: 0, walk: 0, px: x, pz: z };
+                mesh.traverse(o => { o.userData.root = mesh; });
+                players.push(p);
+                return p;
+            }
+            /** Facing + run-cycle animation (legs/arms swing, slight bob). */
+            function animatePlayer(p, dt) {
+                const dx = p.x - p.px, dz = p.z - p.pz;
+                p.px = p.x; p.pz = p.z;
+                const sp = Math.hypot(dx, dz) / Math.max(dt, .001);
+                const f = clamp(sp / T.playerSpeed, 0, 1);
+                p.walk += sp * dt * 1.7;
+                const s = Math.sin(p.walk * 6) * .8 * f;
+                const L = p.mesh.userData.limbs;
+                L.legL.rotation.x = s; L.legR.rotation.x = -s;
+                L.armL.rotation.x = -s * .75; L.armR.rotation.x = s * .75;
+                p.mesh.position.y = Math.abs(Math.sin(p.walk * 6)) * .09 * f;
+                if (sp > .4) {
+                    const targetYaw = Math.atan2(dx, dz);
+                    let d = targetYaw - p.yaw;
+                    while (d > Math.PI) d -= Math.PI * 2;
+                    while (d < -Math.PI) d += Math.PI * 2;
+                    p.yaw += d * Math.min(1, dt * 10);
+                    p.mesh.rotation.y = p.yaw;
+                }
+            }
+            // 5 outfield + keeper per side
+            for (let i = 0; i < 5; i++) addPlayer('you', 'outfield', i, 0, 0);
+            addPlayer('you', 'keeper', 5, 0, 0);
+            for (let i = 0; i < 5; i++) addPlayer('cpu', 'outfield', i, 0, 0);
+            addPlayer('cpu', 'keeper', 5, 0, 0);
+
+            const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(.55, 16, 12), new THREE.MeshLambertMaterial({ color: 0xffffff }));
+            scene.add(ballMesh);
+            const ball = { x: 0, z: 0, state: 'held', vx: 0, vz: 0, tx: 0, tz: 0, holder: null, dist: 0 };
+
+            /* ---- target marker for drags ---- */
+            const marker = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.7, 28), new THREE.MeshBasicMaterial({ color: COL.aim, transparent: true, opacity: .9, side: THREE.DoubleSide }));
+            marker.rotation.x = -Math.PI / 2; marker.visible = false;
+            scene.add(marker);
+
+            /* ================= Game state ================= */
+            const state = {
+                mode: 'menu',            // menu | decision | resolve | result | end
+                role: 'attack',          // human role this play
+                possession: 'you',
+                score: [0, 0], play: 1,
+                remaining: T.window, locked: false,
+                selected: 0,             // index among attacking team's outfield receivers
+                carrier: null,
+                diveChoice: 0,           // human keeper command: -1 left, 0 stay, 1 right
+                drag: null,              // {kind:'pass'|'move', player}
+                banner: null, bannerAge: 0,
+                shake: 0, flashEl: null
+            };
+
+            const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+            const dist2d = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+            const rand = (a, b) => a + Math.random() * (b - a);
+            const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+
+            const teamPlayers = team => players.filter(p => p.team === team);
+            const outfield = team => teamPlayers(team).filter(p => p.role === 'outfield');
+
+            /* ================= Formations ================= */
+            /** Attacking shape (world coords; possession always attacks +z). */
+            function attackSpots() {
+                return {
+                    carrier: { x: 0, z: -26 },
+                    mates: [{ x: -13, z: -8 }, { x: 13, z: -6 }, { x: 0, z: 6 }, { x: -8, z: 18 }],
+                    runnerHint: { x: 9, z: 20 }
+                };
+            }
+            function defendSpots() {
+                return {
+                    line: [{ x: -11, z: 2 }, { x: 11, z: 4 }, { x: 0, z: 14 }, { x: -15, z: 24 }, { x: 15, z: 24 }],
+                    keeper: { x: 0, z: 41 }
+                };
+            }
+            function setupPlay() {
+                const atk = attackSpots(), def = defendSpots();
+                const attackTeam = state.possession, defendTeam = state.possession === 'you' ? 'cpu' : 'you';
+                const aOut = outfield(attackTeam), dOut = outfield(defendTeam);
+                state.carrier = aOut[0];
+                aOut.forEach((p, i) => {
+                    const s = i === 0 ? atk.carrier : atk.mates[i - 1];
+                    place(p, s.x, s.z);
+                });
+                dOut.forEach((p, i) => place(p, def.line[i].x, def.line[i].z));
+                place(teamPlayers(attackTeam).find(p => p.role === 'keeper'), 0, -41);
+                place(teamPlayers(defendTeam).find(p => p.role === 'keeper'), def.keeper.x, def.keeper.z);
+                state.selected = 1;
+                holdBall(state.carrier);
+                updateAnchors();
+            }
+            function place(p, x, z) { p.x = p.tx = x; p.z = p.tz = z; p.diveX = null; syncMesh(p); }
+            function syncMesh(p) { p.mesh.position.set(p.x, p.mesh.position.y, p.z); p.ring.position.set(p.x, .06, p.z); }
+            function holdBall(p) { ball.state = 'held'; ball.holder = p; ball.x = p.x; ball.z = p.z; }
+            function updateAnchors() {
+                players.forEach(p => { p.anchor.x = p.x; p.anchor.z = p.z; });
+            }
+
+            /* ================= HUD helpers ================= */
+            function addLog(text, color) {
+                const li = document.createElement('li');
+                li.textContent = `[P${state.play}] ${text}`;
+                if (color) li.style.color = color;
+                ui.log.prepend(li);
+                while (ui.log.children.length > 6) ui.log.lastChild.remove();
+            }
+            function cssColor(hex) { return '#' + hex.toString(16).padStart(6, '0'); }
+            function showBanner(text, hex) { state.banner = { text, hex }; state.bannerAge = 0; }
+            function updatePossessionChip() {
+                ui.possession.textContent = state.possession === 'you' ? 'YOU · BALL' : 'CPU · BALL';
+                ui.possession.className = 'chip ' + state.possession;
+            }
+            function setInstruction(text) { ui.instruction.textContent = text; }
+
+            /* ================= Decision phase ================= */
+            function startDecision() {
+                state.mode = 'decision';
+                state.remaining = T.window; state.locked = false; state.drag = null;
+                state.diveChoice = 0;
+                ui.lock.disabled = false; ui.lock.textContent = 'LOCK IN';
+                ui.role.textContent = state.role === 'attack' ? 'ATTACK' : 'DEFEND';
+                ui.role.style.color = state.role === 'attack' ? cssColor(COL.aim) : cssColor(COL.you);
+                ui.dive.classList.toggle('on', state.role === 'defend');
+                [...ui.dive.children].forEach(b => b.classList.remove('sel'));
+                if (state.role === 'attack') {
+                    setInstruction('Drag FROM the carrier ONTO a teammate to commit the pass. Drag any teammate to send them on a run.');
+                    cpuDefendChoices();
+                } else {
+                    setInstruction('Drag YOUR defenders toward the lanes you expect. Command your keeper\'s dive for shots.');
+                    cpuAttackChoices();
+                }
+            }
+
+            /* ---- CPU choices (weighted, never random coin flips) ---- */
+            function cpuAttackChoices() {
+                const aOut = outfield('cpu');
+                // keep continuity: an existing CPU carrier (from a completed pass) stays on the ball
+                const carrier = state.carrier && state.carrier.team === 'cpu' ? state.carrier : aOut[0];
+                state.carrier = carrier;
+                holdBall(carrier);
+                const defenders = outfield('you');
+                // weight receivers by forward progress, spacing, and defensive pressure
+                let best = 1, bestScore = -1e9;
+                for (let i = 1; i < aOut.length; i++) {
+                    const r = aOut[i];
+                    const pressure = defenders.reduce((s, d) => s + clamp(1 - dist2d(d, r) / 22, 0, 1), 0);
+                    const score = r.z * .9 - Math.abs(r.x) * .25 - pressure * 14 + rand(0, 6);
+                    if (score > bestScore) { bestScore = score; best = i; }
+                }
+                state.selected = best;
+                // CPU sends a runner beyond the target
+                const target = aOut[best];
+                target.tx = clamp(target.x + rand(-6, 6), -18, 18);
+                target.tz = clamp(target.z + rand(6, 12), -40, 38);
+            }
+            function cpuDefendChoices() {
+                const defenders = outfield('cpu');
+                const aOut = outfield('you');
+                // guess the most dangerous receiver and converge two defenders on that lane
+                let bestIdx = 1, bestScore = -1e9;
+                for (let i = 1; i < aOut.length; i++) {
+                    const r = aOut[i];
+                    const score = r.z * .8 - dist2d(r, state.carrier) * .3 + rand(0, 5);
+                    if (score > bestScore) { bestScore = score; bestIdx = i; }
+                }
+                const suspect = aOut[bestIdx];
+                defenders.forEach((d, i) => {
+                    if (i === 0) return; // nearest marker tracks its anchor man automatically
+                    if (i <= 2) { d.tx = clamp(suspect.x + rand(-5, 5), -18, 18); d.tz = clamp(suspect.z + rand(2, 8), -40, 40); }
+                });
+            }
+
+            /* ---- autonomous drift: nobody ever stands still ---- */
+            function drift(dt, now) {
+                players.forEach(p => {
+                    if (state.drag && state.drag.player === p) return;      // human-controlled right now
+                    if (p.role === 'keeper') return;                        // keeper holds his line until a dive
+                    if (state.mode !== 'decision') return;                  // resolve drives its own targets
+                    // tactical anchor + slow orbit; defenders shade toward nearest opponent
+                    let ax = p.anchor.x, az = p.anchor.z;
+                    if (p.team !== state.possession && p.role === 'outfield') {
+                        let near = null, nd = 1e9;
+                        outfield(state.possession).forEach(o => { const d = dist2d(o, p); if (d < nd) { nd = d; near = o; } });
+                        if (near && nd < 26) { ax = ax * .55 + near.x * .45; az = az * .55 + near.z * .45; }
+                    }
+                    ax += Math.sin(now * .0009 + p.idx * 2.1 + (p.team === 'you' ? 0 : 3)) * 2.2;
+                    az += Math.cos(now * .0007 + p.idx * 1.7) * 1.6;
+                    moveToward(p, ax, az, T.playerSpeed * .45, dt);
+                });
+            }
+            function moveToward(p, tx, tz, speed, dt) {
+                const dx = tx - p.x, dz = tz - p.z, d = Math.hypot(dx, dz);
+                if (d < .05) return;
+                const step = Math.min(speed * dt, d);
+                p.x += dx / d * step; p.z += dz / d * step;
+                p.x = clamp(p.x, -T.pitchW / 2 + 1, T.pitchW / 2 - 1);
+                p.z = clamp(p.z, -T.pitchL / 2 + 1, T.pitchL / 2 - 1);
+            }
+
+            /* ================= Input (raycast swipes) ================= */
+            const ray = new THREE.Raycaster();
+            const ndc = new THREE.Vector2();
+            const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+            function groundPoint(e) {
+                const r = renderer.domElement.getBoundingClientRect();
+                ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+                ray.setFromCamera(ndc, camera);
+                const pt = new THREE.Vector3();
+                return ray.ray.intersectPlane(groundPlane, pt) ? pt : null;
+            }
+            function pickPlayer(e, teamFilter) {
+                const r = renderer.domElement.getBoundingClientRect();
+                ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+                ray.setFromCamera(ndc, camera);
+                const meshes = players
+                    .filter(p => !teamFilter || p.team === teamFilter)
+                    .map(p => p.mesh);
+                const hit = ray.intersectObjects(meshes, true)[0];
+                return hit ? players.find(p => p.mesh === hit.object.userData.root) : null;
+            }
+
+            renderer.domElement.addEventListener('pointerdown', e => {
+                if (state.mode !== 'decision' || state.locked) return;
+                const humanTeam = 'you';
+                const p = pickPlayer(e, humanTeam);
+                if (!p) return;
+                if (state.role === 'attack') {
+                    if (p === state.carrier) state.drag = { kind: 'pass', player: p };
+                    else if (p.role === 'outfield') state.drag = { kind: 'move', player: p };
+                    else return;
+                } else {
+                    if (p.role !== 'outfield') return;
+                    state.drag = { kind: 'move', player: p };
+                }
+                renderer.domElement.setPointerCapture(e.pointerId);
+                marker.visible = true;
+                marker.position.set(p.x, .07, p.z);
+            });
+            renderer.domElement.addEventListener('pointermove', e => {
+                if (!state.drag) return;
+                const g = groundPoint(e);
+                if (g) marker.position.set(clamp(g.x, -T.pitchW / 2, T.pitchW / 2), .07, clamp(g.z, -T.pitchL / 2, T.pitchL / 2));
+            });
+            renderer.domElement.addEventListener('pointerup', e => {
+                if (!state.drag) return;
+                const g = groundPoint(e);
+                const d = state.drag; state.drag = null; marker.visible = false;
+                if (!g) return;
+                const gx = clamp(g.x, -T.pitchW / 2 + 1, T.pitchW / 2 - 1);
+                const gz = clamp(g.z, -T.pitchL / 2 + 1, T.pitchL / 2 - 1);
+                if (d.kind === 'pass') {
+                    // landed on/near a teammate? commit the pass to them
+                    const mates = outfield('you').filter(p => p !== state.carrier);
+                    let best = null, bd = 5;
+                    mates.forEach(m => { const dd = Math.hypot(m.x - gx, m.z - gz); if (dd < bd) { bd = dd; best = m; } });
+                    if (best) {
+                        state.selected = outfield('you').indexOf(best);
+                        sfx.lock();
+                        setInstruction(`Pass committed to #${state.selected}. Drag teammates to adjust runs, then LOCK IN.`);
+                    }
+                } else {
+                    d.player.tx = gx; d.player.tz = gz;
+                    sfx.lock();
+                }
+            });
+
+            /* keeper dive buttons */
+            [...ui.dive.children].forEach(btn => {
+                btn.addEventListener('click', () => {
+                    state.diveChoice = parseInt(btn.dataset.dive, 10);
+                    [...ui.dive.children].forEach(b => b.classList.toggle('sel', b === btn));
+                    sfx.lock();
+                });
+            });
+
+            /* ================= Resolve: physical simulation ================= */
+            function beginResolve() {
+                if (state.mode !== 'decision') return;
+                state.mode = 'resolve'; state.locked = true;
+                ui.lock.disabled = true; ui.lock.textContent = 'RESOLVING…';
+                ui.dive.classList.remove('on');
+                sfx.pass();
+
+                const attackTeam = state.possession, defendTeam = attackTeam === 'you' ? 'cpu' : 'you';
+                const aOut = outfield(attackTeam);
+                const target = aOut[state.selected];
+
+                // everyone commits: attackers run onto the pass, defenders break on their guesses
+                aOut.forEach((p, i) => {
+                    if (i === 0) return; // carrier stays to release the ball
+                    if (p !== target && p.tz === p.anchor.z) { p.tx = clamp(p.x + rand(-4, 4), -18, 18); p.tz = clamp(p.z + rand(2, 8), -40, 38); }
+                });
+                const dOut = outfield(defendTeam);
+                if (defendTeam === 'cpu') {
+                    // CPU defenders break toward the lane they guessed
+                    const suspect = target;
+                    dOut.forEach((d, i) => {
+                        if (i === 0) { d.tx = clamp(suspect.x, -18, 18); d.tz = clamp(suspect.z + 2, -40, 40); }
+                        else if (i % 2 === 0) { d.tx = clamp(target.x + rand(-6, 6), -18, 18); d.tz = clamp(target.z + rand(0, 6), -40, 40); }
+                    });
+                }
+
+                // launch the ball toward the receiver's committed spot (equal speed rule)
+                ball.state = 'flying'; ball.dist = 0;
+                ball.tx = target.tx; ball.tz = target.tz;
+                const dir = Math.hypot(ball.tx - ball.x, ball.tz - ball.z) || 1;
+                ball.vx = (ball.tx - ball.x) / dir * T.ballSpeed;
+                ball.vz = (ball.tz - ball.z) / dir * T.ballSpeed;
+                state.resolveCtx = { attackTeam, defendTeam, target, shot: null, done: false };
+            }
+
+            function stepResolve(dt) {
+                const ctx = state.resolveCtx;
+                if (!ctx || ctx.done) return;
+
+                // move every outfield player toward commitments
+                players.forEach(p => {
+                    if (p.role === 'keeper') return;
+                    moveToward(p, p.tx, p.tz, T.playerSpeed, dt);
+                });
+
+                if (ball.state === 'flying') {
+                    // slight homing so a moving receiver can actually meet the equal-speed ball
+                    const tgt = ctx.target;
+                    const dx = tgt.x - ball.x, dz = tgt.z - ball.z, d = Math.hypot(dx, dz) || 1;
+                    ball.vx += (dx / d * T.ballSpeed - ball.vx) * Math.min(1, dt * 2.2);
+                    ball.vz += (dz / d * T.ballSpeed - ball.vz) * Math.min(1, dt * 2.2);
+                    const sp = Math.hypot(ball.vx, ball.vz) || 1;
+                    ball.vx = ball.vx / sp * T.ballSpeed; ball.vz = ball.vz / sp * T.ballSpeed;
+                    ball.x += ball.vx * dt; ball.z += ball.vz * dt;
+                    ball.dist += T.ballSpeed * dt;
+
+                    // PHYSICAL CONTACT: any defender touching the ball wins it (after it leaves the feet)
+                    if (ball.dist > 3) {
+                        for (const d of outfield(ctx.defendTeam)) {
+                            if (dist2d(d, ball) < T.contactRadius) { intercept(d, ctx); return; }
+                        }
+                    }
+                    // receiver collects
+                    if (dist2d(ctx.target, ball) < T.contactRadius) { onReceive(ctx); return; }
+                    // safety: ball out of play
+                    // safety: ball out of play → turnover
+                    if (Math.abs(ball.z) > T.pitchL / 2 || Math.abs(ball.x) > T.pitchW / 2) {
+                        ctx.done = true; ball.state = 'held';
+                        sfx.lost(); showBanner('OUT OF PLAY', COL.cpu);
+                        addLog(ctx.attackTeam === 'you' ? 'The pass sailed out of play.' : 'CPU sprays the pass out of play.', '');
+                        flipPossessionTo(outfield(ctx.defendTeam)[0]);
+                        afterResult();
+                    }
+                }
+
+                if (ctx.shot) stepShot(ctx, dt);
+            }
+
+            function intercept(defender, ctx) {
+                ball.state = 'held'; ctx.done = true;
+                sfx.intercept(); CAM.trauma = .5; showBanner('LOST THE BALL!', COL.cpu);
+                addLog(ctx.attackTeam === 'you' ? 'Your pass was cut out — CPU takes over.' : 'You read the lane and won the ball!', ctx.attackTeam === 'you' ? cssColor(COL.cpu) : cssColor(COL.you));
+                flipPossessionTo(defender);
+                afterResult();
+            }
+
+            function onReceive(ctx) {
+                const recv = ctx.target;
+                recv.x = ball.x; recv.z = ball.z;
+                if (recv.z >= T.shootZ) { beginShot(ctx, recv); return; }
+                ball.state = 'held'; ctx.done = true;
+                sfx.pass(); CAM.trauma = .12; showBanner('COMPLETE', COL.you);
+                // receiver becomes the carrier; play advances up-field
+                state.carrier = recv;
+                advanceFormation(recv);
+                addLog(ctx.attackTeam === 'you' ? 'Pass completed — the attack advances.' : 'CPU completes the pass.', ctx.attackTeam === 'you' ? cssColor(COL.you) : cssColor(COL.cpu));
+                afterResult();
+            }
+
+            function beginShot(ctx, shooter) {
+                ctx.shot = {
+                    phase: 'flying',
+                    shotX: clamp(shooter.x * .45 + rand(-5.5, 5.5), -T.goalHalf + .8, T.goalHalf - .8),
+                    t: 0
+                };
+                ball.state = 'shot';
+                // keeper commits to the commanded dive
+                const keepTeam = ctx.defendTeam;
+                const keeper = teamPlayers(keepTeam).find(p => p.role === 'keeper');
+                const cmd = keepTeam === 'you' ? state.diveChoice : cpuDiveGuess(ctx.shot.shotX);
+                keeper.diveX = cmd * T.keeperReach;
+                ctx.shot.keeper = keeper;
+                sfx.pass();
+            }
+            function cpuDiveGuess(shotX) {
+                // weighted guess: favors center and the likely side of the shot
+                const r = Math.random();
+                if (shotX < -2) return r < .62 ? -1 : (r < .85 ? 0 : 1);
+                if (shotX > 2) return r < .62 ? 1 : (r < .85 ? 0 : -1);
+                return r < .5 ? 0 : (r < .78 ? -1 : 1);
+            }
+            function stepShot(ctx, dt) {
+                const s = ctx.shot;
+                const gz = T.pitchL / 2;
+                if (s.phase === 'flying') {
+                    // keeper dives laterally at dedicated dive speed
+                    const k = s.keeper;
+                    k.x += clamp(k.diveX - k.x, -T.playerSpeed * 1.35 * dt, T.playerSpeed * 1.35 * dt);
+                    // ball flies to its chosen corner
+                    const dx = s.shotX - ball.x, dz = gz - ball.z, d = Math.hypot(dx, dz) || 1;
+                    const sp = T.ballSpeed * 1.5;
+                    ball.x += dx / d * sp * dt; ball.z += dz / d * sp * dt;
+                    if (ball.z >= gz - .6) {
+                        const keeperClose = Math.abs(k.x - s.shotX) < T.keeperReach;
+                        if (keeperClose && Math.random() < T.saveSkill) {
+                            s.phase = 'saved';
+                            ball.state = 'held';
+                            sfx.save(); CAM.trauma = .3; showBanner('SAVED!', 0x9fd7ff);
+                            addLog(ctx.attackTeam === 'you' ? 'The keeper dives and holds it. Possession lost.' : 'YOUR KEEPER SAVES! You take over.', ctx.attackTeam === 'you' ? cssColor(COL.cpu) : cssColor(COL.you));
+                            flipPossessionTo(k);
+                            afterResult();
+                        } else {
+                            s.phase = 'goal';
+                            sfx.goal(); CAM.trauma = .85; showBanner('GOAL!', COL.aim);
+                            state.score[state.possession === 'you' ? 0 : 1]++;
+                            ui.human.textContent = state.score[0]; ui.cpu.textContent = state.score[1];
+                            addLog(`GOAL — ${state.possession === 'you' ? 'YOU' : 'CPU'} strike${state.possession === 'you' ? '' : 's'} home!`, cssColor(COL.aim));
+                            kickoff(state.possession === 'you' ? 'cpu' : 'you');
+                            afterResult();
+                        }
+                        ctx.done = true;
+                    }
+                }
+            }
+
+            /* ================= Outcome application ================= */
+            function flipPossessionTo(winnerPlayer) {
+                // winner's team takes possession at the spot; roles swap; coordinate frame flips (+z attack)
+                state.possession = winnerPlayer.team;
+                players.forEach(p => { p.z = -p.z; p.tz = -p.tz; p.anchor.z = -p.anchor.z; });
+                ball.z = -ball.z;
+                // rebuild shapes around the new context
+                const newAtk = outfield(state.possession);
+                state.carrier = winnerPlayer.role === 'keeper' ? newAtk[0] : winnerPlayer;
+                if (winnerPlayer.role === 'keeper') { winnerPlayer = state.carrier; }
+                holdBall(state.carrier);
+                advanceFormation(state.carrier);
+                updatePossessionChip();
+            }
+            function kickoff(newPossession) {
+                state.possession = newPossession;
+                setupPlay();
+                updatePossessionChip();
+            }
+            function advanceFormation(newCarrier) {
+                // push the whole attacking shape up-field around the new carrier
+                const atk = outfield(state.possession);
+                const shift = clamp(10, -40, 30 - newCarrier.z);
+                atk.forEach((p, i) => {
+                    if (p === newCarrier) { p.tx = p.x; p.tz = p.z; return; }
+                    p.tx = clamp(p.x + rand(-5, 5), -18, 18);
+                    p.tz = clamp(p.z + shift + rand(0, 4), -40, 36);
+                });
+                // defense drops toward its own goal
+                outfield(state.possession === 'you' ? 'cpu' : 'you').forEach(p => {
+                    p.tx = clamp(p.x + rand(-4, 4), -18, 18);
+                    p.tz = clamp(p.z + 6, -40, 40);
+                });
+                updateAnchors();
+            }
+            function afterResult() {
+                state.mode = 'result';
+                setTimeout(() => {
+                    if (state.score[0] >= T.winScore || state.score[1] >= T.winScore || state.play >= T.maxPlays) {
+                        state.mode = 'end';
+                        const [a, b] = state.score;
+                        setInstruction(`${a === b ? 'Match drawn' : a > b ? 'YOU WIN THE MATCH!' : 'CPU WINS THE MATCH.'} Final score ${a}–${b}. Press PLAY AGAIN.`);
+                        ui.lock.disabled = false; ui.lock.textContent = 'PLAY AGAIN';
+                        sfx.whistle();
+                        showBanner(a === b ? 'DRAW' : a > b ? 'YOU WIN' : 'CPU WINS', a > b ? COL.aim : COL.cpu);
+                        return;
+                    }
+                    nextPlay();
+                }, 1250);
+            }
+            function nextPlay() {
+                state.play++;
+                state.role = state.possession === 'you' ? 'attack' : 'defend';
+                ui.plays.textContent = 'PLAY ' + state.play;
+                if (state.possession === 'cpu' && !state.carrier) kickoff('cpu');
+                startDecision();
+            }
+
+            /* ================= Match control ================= */
+            ui.lock.addEventListener('click', () => {
+                if (state.mode === 'decision') beginResolve();
+                else if (state.mode === 'end') restartMatch();
+            });
+            ui.restart.addEventListener('click', restartMatch);
+            function restartMatch() {
+                state.score = [0, 0]; state.play = 1; state.possession = 'you'; state.role = 'attack';
+                state.banner = null; CAM.trauma = 0;
+                ui.human.textContent = '0'; ui.cpu.textContent = '0';
+                ui.plays.textContent = 'PLAY 1'; ui.log.innerHTML = '';
+                setupPlay();
+                addLog('New match. You have the first possession.', cssColor(COL.aim));
+                startDecision();
+                updatePossessionChip();
+            }
+            $('btn-vs-cpu').addEventListener('click', () => {
+                ui.menu.style.display = 'none';
+                ui.hud.classList.add('on');
+                try { (audioCtx ||= new (window.AudioContext || window.webkitAudioContext))(); } catch (_) { }
+                restartMatch();
+            });
+
+            /* ================= Banner sprite (canvas overlay in 3D) ================= */
+            const bannerCanvas = document.createElement('canvas');
+            bannerCanvas.width = 1024; bannerCanvas.height = 256;
+            const bannerTex = new THREE.CanvasTexture(bannerCanvas);
+            const bannerSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: bannerTex, transparent: true, depthTest: false }));
+            bannerSprite.scale.set(46, 11.5, 1);
+            bannerSprite.position.set(0, 16, 6);
+            bannerSprite.visible = false;
+            scene.add(bannerSprite);
+            function drawBanner(text, hex, alpha, scale) {
+                const g = bannerCanvas.getContext('2d');
+                g.clearRect(0, 0, 1024, 256);
+                g.font = '900 150px system-ui, sans-serif';
+                g.textAlign = 'center'; g.textBaseline = 'middle';
+                g.lineWidth = 18; g.strokeStyle = 'rgba(8,21,19,.9)';
+                g.strokeText(text, 512, 132);
+                g.fillStyle = '#' + hex.toString(16).padStart(6, '0');
+                g.fillText(text, 512, 132);
+                bannerTex.needsUpdate = true;
+                bannerSprite.material.opacity = alpha;
+                bannerSprite.scale.set(46 * scale, 11.5 * scale, 1);
+                bannerSprite.visible = true;
+            }
+
+            /* ================= Main loop ================= */
+            let last = performance.now();
+            function tick(now) {
+                requestAnimationFrame(tick);
+                const rawDt = Math.min((now - last) / 1000, .08);
+                last = now;
+
+                // camera shake (visual only)
+                CAM.trauma = Math.max(0, CAM.trauma - rawDt * 2.2);
+                const sh = CAM.trauma * CAM.trauma;
+                camera.position.set(
+                    CAM.base.x + Math.sin(now * .027) * 2.4 * sh,
+                    CAM.base.y + Math.sin(now * .021) * 1.6 * sh,
+                    CAM.base.z + Math.cos(now * .019) * 1.8 * sh
+                );
+                camera.lookAt(CAM.look);
+
+                if (state.mode === 'decision' && !state.locked) {
+                    state.remaining -= rawDt;
+                    if (state.remaining <= 0) { state.remaining = 0; beginResolve(); }
+                    ui.timer.textContent = Math.max(0, state.remaining).toFixed(1);
+                    ui.timer.classList.toggle('urgent', state.remaining < 1);
+                    ui.bar.style.transform = `scaleX(${Math.max(0, state.remaining / T.window)})`;
+                    drift(rawDt, now);
+                }
+                if (state.mode === 'resolve') stepResolve(rawDt);
+
+                // sync visuals
+                players.forEach(p => { syncMesh(p); animatePlayer(p, rawDt); });
+                ballMesh.position.set(ball.x, .6, ball.z);
+
+                // selection highlight
+                players.forEach(p => {
+                    const isSel = state.mode === 'decision' && state.role === 'attack' &&
+                        p.team === state.possession && outfield(state.possession)[state.selected] === p;
+                    const isCarrier = p === state.carrier && state.mode === 'decision';
+                    p.ring.material.opacity = isSel ? .85 : isCarrier ? .5 : 0;
+                    p.ring.material.color.setHex(isSel ? COL.aim : COL.you);
+                });
+
+                // banner lifecycle
+                if (state.banner) {
+                    state.bannerAge += rawDt;
+                    const inT = clamp(state.bannerAge / .16, 0, 1);
+                    const outT = clamp((state.bannerAge - .95) / .35, 0, 1);
+                    drawBanner(state.banner.text, state.banner.hex, 1 - outT, easeOutCubic(inT) * (1 + .08 * (1 - outT)));
+                    if (state.bannerAge > 1.3) { state.banner = null; bannerSprite.visible = false; }
+                }
+
+                renderer.render(scene, camera);
+            }
+
+            addEventListener('resize', () => {
+                camera.aspect = innerWidth / innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(innerWidth, innerHeight);
+            });
+
+            requestAnimationFrame(tick);
+        })();
+    </script>
+</body>
+
+</html>

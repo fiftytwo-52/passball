@@ -1,0 +1,995 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Guess & Pass</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --ink: #eef4f0;
+            --muted: #9daea6;
+            --panel: rgba(13, 27, 24, .86);
+            --line: rgba(206, 232, 218, .15);
+            --lime: #d6f36a;
+            --cyan: #78e1d0;
+            --coral: #ff836e;
+            --pitch: #173f35;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+            background: #081513;
+        }
+
+        body {
+            font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+            color: var(--ink);
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        }
+
+        button {
+            font: inherit;
+            color: inherit;
+            cursor: pointer;
+        }
+
+        .app {
+            min-height: 100vh;
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            max-width: 1220px;
+            margin: auto;
+            padding: 20px clamp(14px, 3vw, 40px) 18px;
+            gap: 16px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: end;
+            gap: 18px;
+        }
+
+        .eyebrow {
+            color: var(--lime);
+            font-size: .72rem;
+            letter-spacing: .16em;
+            font-weight: 800;
+        }
+
+        h1 {
+            margin: 3px 0 0;
+            font-size: clamp(1.7rem, 3vw, 2.7rem);
+            line-height: 1;
+        }
+
+        .subtitle {
+            color: var(--muted);
+            margin: 8px 0 0;
+            font-size: .88rem;
+        }
+
+        .scoreboard {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .score {
+            min-width: 78px;
+            text-align: center;
+            border: 1px solid var(--line);
+            background: var(--panel);
+            padding: 8px 12px;
+            border-radius: 6px;
+        }
+
+        .score strong {
+            display: block;
+            color: var(--lime);
+            font-size: 1.6rem;
+            line-height: 1;
+        }
+
+        .score span {
+            color: var(--muted);
+            font-size: .7rem;
+            font-weight: 700;
+            letter-spacing: .1em;
+        }
+
+        .versus {
+            color: var(--muted);
+            font-weight: 800;
+            font-size: .75rem;
+        }
+
+        main {
+            min-height: 0;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 280px;
+            gap: 16px;
+        }
+
+        .play-area {
+            min-height: 540px;
+            display: grid;
+            place-items: center;
+            background: #0b211d;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: clamp(10px, 2vw, 24px);
+            overflow: hidden;
+            transition: background-color .09s ease;
+        }
+
+        .play-area.impact {
+            background: #2c5142;
+        }
+
+        #pitch {
+            width: min(100%, 620px);
+            height: auto;
+            aspect-ratio: 3 / 4;
+            display: block;
+            touch-action: none;
+            border-radius: 4px;
+            box-shadow: 0 18px 50px rgba(0, 0, 0, .3);
+        }
+
+        aside {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-width: 0;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 16px;
+        }
+
+        .panel-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--muted);
+            font-size: .7rem;
+            font-weight: 800;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+        }
+
+        #role {
+            color: var(--lime);
+        }
+
+        .chip {
+            display: inline-block;
+            margin-left: 8px;
+            padding: 3px 8px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            font-size: .62rem;
+            letter-spacing: .1em;
+            color: var(--ink);
+        }
+
+        .chip.you {
+            color: var(--cyan);
+            border-color: rgba(120, 225, 208, .45);
+        }
+
+        .chip.cpu {
+            color: var(--coral);
+            border-color: rgba(255, 131, 110, .45);
+        }
+
+        .timer {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        #timer {
+            font-size: 3.2rem;
+            font-variant-numeric: tabular-nums;
+            line-height: 1;
+        }
+
+        #timer.urgent {
+            color: var(--coral);
+        }
+
+        .timer small {
+            color: var(--muted);
+        }
+
+        .progress {
+            height: 5px;
+            margin-top: 12px;
+            background: #29433b;
+            overflow: hidden;
+            border-radius: 4px;
+        }
+
+        #progress-bar {
+            display: block;
+            height: 100%;
+            width: 100%;
+            transform-origin: left;
+            background: var(--lime);
+        }
+
+        #instruction {
+            margin: 0;
+            line-height: 1.45;
+            color: var(--ink);
+            font-size: .9rem;
+        }
+
+        #lock {
+            width: 100%;
+            min-height: 52px;
+            margin-top: 12px;
+            border: 0;
+            border-radius: 5px;
+            background: var(--lime);
+            color: #102019;
+            font-weight: 850;
+        }
+
+        #lock:active {
+            transform: translateY(1px);
+        }
+
+        #lock:disabled {
+            opacity: .45;
+            cursor: default;
+        }
+
+        #restart {
+            width: 100%;
+            min-height: 44px;
+            border: 1px solid var(--line);
+            border-radius: 5px;
+            background: transparent;
+            font-weight: 750;
+        }
+
+        .log {
+            flex: 1;
+            min-height: 150px;
+        }
+
+        #log {
+            list-style: none;
+            padding: 0;
+            margin: 12px 0 0;
+            display: grid;
+            gap: 9px;
+            color: var(--muted);
+            font-size: .78rem;
+        }
+
+        #log li {
+            border-left: 2px solid var(--line);
+            padding-left: 9px;
+        }
+
+        footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            color: var(--muted);
+            font-size: .75rem;
+        }
+
+        .legend {
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        .dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .cyan {
+            background: var(--cyan);
+        }
+
+        .coral {
+            background: var(--coral);
+        }
+
+        .lime {
+            background: var(--lime);
+        }
+
+        @media (max-width: 780px) {
+            .app {
+                padding-top: 14px;
+                gap: 12px;
+            }
+
+            header {
+                align-items: start;
+            }
+
+            .subtitle {
+                max-width: 220px;
+            }
+
+            .scoreboard {
+                gap: 6px;
+            }
+
+            .score {
+                min-width: 58px;
+                padding: 7px 8px;
+            }
+
+            .score strong {
+                font-size: 1.3rem;
+            }
+
+            main {
+                grid-template-columns: 1fr;
+            }
+
+            .play-area {
+                min-height: 0;
+                padding: 8px;
+            }
+
+            aside {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .panel:first-child,
+            .log {
+                grid-column: span 2;
+            }
+
+            .log {
+                min-height: 100px;
+            }
+
+            footer {
+                align-items: start;
+                flex-direction: column;
+            }
+        }
+
+        @media (max-width: 430px) {
+            h1 {
+                font-size: 1.55rem;
+            }
+
+            .subtitle {
+                display: none;
+            }
+
+            .timer {
+                margin-top: 4px;
+            }
+
+            #timer {
+                font-size: 2.6rem;
+            }
+
+            .panel {
+                padding: 12px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <header>
+            <div>
+                <div class="eyebrow">PHASE 1 · VS CPU</div>
+                <h1>Guess & Pass</h1>
+                <p class="subtitle">Read the lane. Commit the pass. Break the pattern.</p>
+            </div>
+            <div class="scoreboard" aria-label="Score">
+                <div class="score"><strong id="human-score">0</strong><span>YOU</span></div>
+                <div class="versus">VS</div>
+                <div class="score"><strong id="cpu-score">0</strong><span>CPU</span></div>
+            </div>
+        </header>
+        <main>
+            <section class="play-area"><canvas id="pitch" aria-label="Interactive football pitch"></canvas></section>
+            <aside>
+                <section class="panel">
+                    <div class="panel-title"><span>Decision window<span id="possession" class="chip you">YOU ·
+                                BALL</span></span><span id="role">ATTACK</span></div>
+                    <div class="timer"><strong id="timer">3.0</strong><small>seconds</small></div>
+                    <div class="progress"><span id="progress-bar"></span></div>
+                </section>
+                <section class="panel">
+                    <p id="instruction">Swipe from the carrier to a receiver to choose your pass. Swipe the runner to
+                        open space.</p>
+                    <button id="lock">LOCK IN</button>
+                </section>
+                <section class="panel log">
+                    <div class="panel-title"><span>Match log</span><span id="plays">PLAY 1</span></div>
+                    <ul id="log"></ul>
+                </section>
+                <button id="restart">Restart match</button>
+            </aside>
+        </main>
+        <footer>
+            <div class="legend"><span><i class="dot cyan"></i>Your players</span><span><i class="dot coral"></i>CPU
+                    players</span><span><i class="dot lime"></i>Swipe target</span></div><span>First to 3 · 24 play
+                limit</span>
+        </footer>
+    </div>
+    <script>
+        (() => {
+            'use strict';
+            /* ---------- DOM ---------- */
+            const canvas = document.getElementById('pitch'), ctx = canvas.getContext('2d');
+            const ui = {
+                timer: document.getElementById('timer'), bar: document.getElementById('progress-bar'),
+                role: document.getElementById('role'), instruction: document.getElementById('instruction'),
+                lock: document.getElementById('lock'), log: document.getElementById('log'),
+                plays: document.getElementById('plays'), human: document.getElementById('human-score'),
+                cpu: document.getElementById('cpu-score'), possession: document.getElementById('possession'),
+                app: document.querySelector('.app'), playArea: document.querySelector('.play-area')
+            };
+
+            /* ---------- Tunables (football-guess-game-design.md §4 — canonical, do not redesign) ---------- */
+            const T = {
+                window: 3.0, winScore: 3, maxPlays: 24,
+                R_cover: 14, lengthGain: 0.9, baseGuess: 0.35, guessGain: 0.65, alignThreshold: 0.0,
+                shootRange: 30, keeperReach: 20, baseGoal: 0.8, keeperStop: 0.7
+            };
+
+            const colors = { own: '#78e1d0', cpu: '#ff836e', aim: '#d6f36a', pitch: '#173f35', line: 'rgba(225,247,232,.3)', text: '#eef4f0', keeper: '#f2c94c' };
+
+            /* ---------- State ---------- */
+            const state = {
+                phase: 'decision',        // decision | anim | result | end
+                role: 'attack',           // human's role this play
+                possession: 'you',
+                score: [0, 0], play: 1,
+                locked: false, remaining: T.window,
+                selected: 0,
+                runner: { x: 34, y: 52 },
+                guesses: [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }],
+                drag: null,
+                // juice
+                trauma: 0, flash: 0, timeScale: 1, slowUntil: 0,
+                banner: null, particles: [],
+                ball: { x: 50, y: 22, visible: true },
+                animClock: 0, timeline: [], tweens: []
+            };
+
+            /* ---------- Pieces ---------- */
+            const own = { carrier: { x: 50, y: 22 }, receivers: [{ x: 26, y: 42 }, { x: 74, y: 46 }, { x: 50, y: 64 }] };
+            let defenders = [{ x: 30, y: 58 }, { x: 70, y: 64 }, { x: 48, y: 78 }];
+            let keeper = { x: 50, y: 93 }; // keeper of the DEFENDING side, guards y=100 goal
+
+            let raf, last = performance.now(), audioContext;
+
+            /* ---------- Helpers ---------- */
+            const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+            const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+            const lerp = (a, b, t) => a + (b - a) * t;
+            const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+            const easeOutBack = t => { const c = 1.70158; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+            function toVector(a, b) { const d = Math.hypot(b.x - a.x, b.y - a.y) || 1; return { x: (b.x - a.x) / d, y: (b.y - a.y) / d }; }
+            function nearest(p, list, max = 14) { let hit = -1, best = max; list.forEach((item, i) => { const d = distance(p, item); if (d < best) { best = d; hit = i; } }); return hit; }
+            function weightedIndex(weights) { const total = weights.reduce((s, w) => s + w, 0); let roll = Math.random() * total; return weights.findIndex(w => (roll -= w) <= 0); }
+            /** Perpendicular distance from point p to segment a→b (used for keeper line coverage). */
+            function segDistance(p, a, b) {
+                const len2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2 || 1;
+                const t = clamp(((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / len2, 0, 1);
+                return distance(p, { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+            }
+
+            /* ---------- Audio (feedback layer only) ---------- */
+            function tone(frequency, duration, type = 'sine', volume = .045, delay = 0) {
+                try {
+                    audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+                    const now = audioContext.currentTime + delay;
+                    const osc = audioContext.createOscillator(), gain = audioContext.createGain();
+                    osc.type = type; osc.frequency.setValueAtTime(frequency, now);
+                    gain.gain.setValueAtTime(.0001, now);
+                    gain.gain.exponentialRampToValueAtTime(volume, now + .012);
+                    gain.gain.exponentialRampToValueAtTime(.0001, now + duration);
+                    osc.connect(gain).connect(audioContext.destination);
+                    osc.start(now); osc.stop(now + duration + .02);
+                } catch (_) { /* Audio is optional until a gesture unlocks it. */ }
+            }
+            function playSfx(event) {
+                if (event === 'pass') { tone(280, .09, 'triangle', .035); tone(420, .12, 'triangle', .025, .06); }
+                if (event === 'interception') { tone(145, .16, 'sawtooth', .06); tone(90, .2, 'sawtooth', .045, .08); }
+                if (event === 'goal') { tone(392, .18, 'triangle', .05); tone(523, .22, 'triangle', .05, .12); tone(659, .3, 'triangle', .045, .25); }
+                if (event === 'save') { tone(220, .14, 'sine', .04); tone(165, .18, 'sine', .03, .1); }
+                if (event === 'whistle') { tone(880, .12, 'square', .03); tone(880, .2, 'square', .03, .18); }
+                if (event === 'lock') tone(520, .07, 'triangle', .03);
+            }
+
+            /* ---------- Juice (game-feel: layered, transient, scaled to importance) ---------- */
+            function screenShake(amount, duration) { state.trauma = clamp(state.trauma + amount, 0, 1); }
+            function slowMo(scale, duration) { state.timeScale = scale; state.slowUntil = performance.now() + duration * 1000; }
+            function spawnBurst(p, color, n = 16, speed = 26) {
+                for (let i = 0; i < n; i++) {
+                    const a = Math.random() * Math.PI * 2, v = speed * (.35 + Math.random());
+                    state.particles.push({ x: p.x, y: p.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: .5 + Math.random() * .3, age: 0, color });
+                }
+            }
+            function showBanner(text, color) { state.banner = { text, color, age: 0, life: 1.15 }; }
+            /** Feedback bundle per outcome tier — rides ON TOP of resolution, never inside it. */
+            function feedback(outcome, at) {
+                if (outcome === 'COMPLETE') { playSfx('pass'); screenShake(.08, .12); showBanner('COMPLETE', colors.cyan); spawnBurst(at, colors.cyan, 8, 16); }
+                if (outcome === 'INTERCEPTION') { playSfx('interception'); screenShake(.45, .3); slowMo(.14, .32); showBanner('INTERCEPTED!', colors.cpu); spawnBurst(at, colors.cpu, 22, 30); state.flash = .5; }
+                if (outcome === 'GOAL') { playSfx('goal'); screenShake(.8, .45); slowMo(.1, .42); showBanner('GOAL!', colors.aim); spawnBurst(at, colors.aim, 34, 38); state.flash = 1; }
+                if (outcome === 'SAVE') { playSfx('save'); screenShake(.25, .2); slowMo(.3, .2); showBanner('SAVED', colors.keeper); spawnBurst(at, colors.keeper, 14, 22); }
+            }
+
+            /* ---------- Tween mini-engine (scaled time; juice never blocks logic) ---------- */
+            function tween(obj, to, dur, ease = easeOutCubic, done) {
+                const from = {}; for (const k in to) from[k] = obj[k];
+                state.tweens.push({ obj, from, to, dur, t: 0, ease, done });
+            }
+            function schedule(delay, fn) { state.timeline.push({ at: state.animClock + delay, fn }); }
+
+            /* ---------- CPU choices (§5 target weightings — never touches §4) ---------- */
+            function cpuChoosePass() {
+                const weights = own.receivers.map(receiver => {
+                    const forward = clamp((receiver.y - own.carrier.y) / 60, 0, 1);
+                    const distanceScore = 1 - clamp(distance(own.carrier, receiver) / 65, 0, 1);
+                    const lanePressure = defenders.reduce((p, d) => p + clamp(1 - distance(d, receiver) / 30, 0, 1), 0) / defenders.length;
+                    return .35 + forward * .9 + distanceScore * .55 + (1 - lanePressure) * .8;
+                });
+                state.selected = weightedIndex(weights);
+                const target = own.receivers[state.selected];
+                state.runner = { x: clamp(target.x + (target.x > 50 ? -12 : 12), 10, 90), y: clamp(target.y + 7, 12, 88) };
+            }
+            function cpuChooseDefensiveGuess() {
+                const likely = own.receivers.map((receiver, index) => {
+                    const progress = clamp((receiver.y - own.carrier.y) / 60, 0, 1);
+                    const laneLength = distance(own.carrier, receiver);
+                    const nearestCover = Math.min(...defenders.map(d => distance(d, receiver)));
+                    return .4 + progress * .8 + clamp(laneLength / 55, 0, 1) * .35 + clamp(1 - nearestCover / 45, 0, 1) * .45 + (index === state.selected ? .35 : 0);
+                });
+                const likelyReceiver = own.receivers[weightedIndex(likely)];
+                const di = defenders.reduce((best, d, i) => distance(d, likelyReceiver) < distance(defenders[best], likelyReceiver) ? i : best, 0);
+                state.guesses = defenders.map(() => ({ x: 0, y: 0 }));
+                state.guesses[di] = toVector(defenders[di], likelyReceiver);
+            }
+
+            /* ---------- Canonical resolution (§4 + §4.4) ---------- */
+            function computeOutcome() {
+                const C = own.carrier, Tr = own.receivers[state.selected];
+                const laneLen = distance(C, Tr);
+                let pIntercept = 0, best = { pd: -1, q: { x: lerp(C.x, Tr.x, .5), y: lerp(C.y, Tr.y, .5) }, d: 0 };
+                defenders.forEach((d, i) => {
+                    // 4.2.1 closest lane point
+                    const len2 = laneLen * laneLen || 1;
+                    const t = clamp(((d.x - C.x) * (Tr.x - C.x) + (d.y - C.y) * (Tr.y - C.y)) / len2, 0, 1);
+                    const Q = { x: C.x + (Tr.x - C.x) * t, y: C.y + (Tr.y - C.y) * t };
+                    const dist = distance(d, Q);
+                    // 4.2.2 reach grows with pass length
+                    const R_eff = T.R_cover * (1 + T.lengthGain * laneLen / 100);
+                    // 4.2.3 geometric coverage
+                    const geo = clamp(1 - dist / R_eff, 0, 1);
+                    // 4.2.4 guess alignment (zero/unset vector ⇒ a = 0)
+                    const u = dist > .001 ? toVector(d, Q) : { x: 0, y: 0 };
+                    const g = state.guesses[i], gl = Math.hypot(g.x, g.y);
+                    const a = gl > .01 ? (g.x / gl) * u.x + (g.y / gl) * u.y : 0;
+                    const guessFactor = clamp((a - T.alignThreshold + 1) / 2, 0, 1);
+                    // 4.2.5 combine
+                    const pd = clamp(geo * (T.baseGuess + T.guessGain * guessFactor), 0, 1);
+                    if (pd > best.pd) best = { pd, q: Q, d: i };
+                    pIntercept = 1 - (1 - pIntercept) * (1 - pd); // 4.3 independent chances
+                });
+                pIntercept = clamp(pIntercept, 0, .95);
+                if (Math.random() < pIntercept) return { type: 'INTERCEPTION', at: best.q, defender: best.d };
+                // 4.4 completed pass → shot?
+                const G = { x: 50, y: 100 };
+                if (distance(Tr, G) <= T.shootRange) {
+                    const distFactor = clamp(1 - distance(Tr, G) / T.shootRange, 0, 1);
+                    const angleFactor = clamp(1 - Math.abs(Tr.x - 50) / 50, .3, 1);
+                    const keeperDist = segDistance(keeper, C, Tr);
+                    const keeperCover = clamp(1 - keeperDist / T.keeperReach, 0, 1);
+                    const pGoal = clamp(T.baseGoal * (.5 + .5 * distFactor) * angleFactor - keeperCover * T.keeperStop, .03, .97);
+                    return Math.random() < pGoal ? { type: 'GOAL', at: { x: Tr.x, y: 99 } } : { type: 'SAVE', at: { x: Tr.x, y: Tr.y }, defender: -1 };
+                }
+                return { type: 'COMPLETE', at: { x: Tr.x, y: Tr.y } };
+            }
+
+            /* ---------- Outcome application (§3 applying outcomes) ---------- */
+            function mirror(p) { return { x: p.x, y: 100 - p.y }; }
+            function applyOutcome(o) {
+                if (o.type === 'COMPLETE') {
+                    addLog('Pass completed. The attack keeps moving.', 'cyan');
+                    // receiver becomes the new carrier; play advances up-field
+                    own.carrier = { ...own.receivers[state.selected] };
+                    own.receivers.forEach(r => { r.y = clamp(r.y + 11, 30, 84); r.x = clamp(r.x + (r.x > own.carrier.x ? 4 : -4), 12, 88); });
+                    own.receivers[state.selected] = { x: clamp(own.carrier.x + (own.carrier.x > 50 ? -14 : 14), 12, 88), y: clamp(own.carrier.y + 9, 30, 84) };
+                    state.runner = { x: clamp(own.carrier.x + (own.carrier.x > 50 ? -10 : 10), 10, 90), y: clamp(own.carrier.y + 6, 12, 88) };
+                    defenders.forEach(d => { d.y = clamp(d.y + 7, 40, 92); });
+                } else if (o.type === 'GOAL') {
+                    state.score[state.possession === 'you' ? 0 : 1]++;
+                    addLog(`GOAL — ${state.possession === 'you' ? 'YOU' : 'CPU'} score${state.possession === 'you' ? '' : 's'}. Kickoff.`, 'aim');
+                    formation(); // ball returns to kickoff; possession goes to the conceding side below
+                    state.possession = state.possession === 'you' ? 'cpu' : 'you';
+                } else { // INTERCEPTION / SAVE — possession flips at the spot; roles swap
+                    addLog(o.type === 'INTERCEPTION' ? 'INTERCEPTION. The lane was read.' : 'SAVE. The keeper holds the shot.', 'coral');
+                    const prevCarrier = { ...own.carrier };
+                    const prevReceivers = own.receivers.map(r => ({ ...r }));
+                    // intercepting side becomes the attack, mirrored so it advances toward y=100
+                    const newAttackers = defenders.map(mirror);
+                    const carrierIdx = o.defender >= 0 ? o.defender : 0;
+                    own.carrier = newAttackers[carrierIdx];
+                    own.receivers = newAttackers.filter((_, i) => i !== carrierIdx).slice(0, 2);
+                    while (own.receivers.length < 3) own.receivers.push({ x: clamp(own.carrier.x + (own.carrier.x > 50 ? -16 : 16), 10, 90), y: clamp(own.carrier.y + 12, 12, 88) });
+                    state.runner = { x: clamp(own.carrier.x + (own.carrier.x > 50 ? -12 : 12), 10, 90), y: clamp(own.carrier.y + 8, 12, 88) };
+                    // former attackers drop back as the defending unit (mirrored into their own half)
+                    defenders = [prevCarrier, ...prevReceivers].slice(0, 3)
+                        .map(mirror)
+                        .map(p => ({ x: clamp(p.x, 10, 90), y: clamp(p.y, 30, 92) }));
+                    // the keeper always guards the far (y=100) goal in the fixed frame
+                    keeper = { x: 50, y: 93 };
+                    state.possession = state.possession === 'you' ? 'cpu' : 'you';
+                }
+                ui.human.textContent = state.score[0]; ui.cpu.textContent = state.score[1];
+                updatePossessionChip();
+            }
+
+            /* ---------- Resolve sequence: animate, then apply ---------- */
+            let pendingOutcome = null;
+            function beginResolve() {
+                if (state.phase !== 'decision') return;
+                state.phase = 'anim'; state.locked = true; state.animClock = 0;
+                state.timeline = []; state.tweens = [];
+                ui.lock.disabled = true; ui.lock.textContent = 'RESOLVING…';
+                playSfx('lock');
+                pendingOutcome = computeOutcome();
+                const C = { ...own.carrier }, Tr = { ...own.receivers[state.selected] };
+                const laneLen = distance(C, Tr);
+
+                // 1) runner finishes moving to its commitment (§3 RESOLVE)
+                schedule(.05, () => tween(state.runner, state.runnerTarget || state.runner, .3));
+
+                // 2) ball flight along the lane
+                const flight = clamp(.35 + laneLen / 100 * .55, .35, .85);
+                const o = pendingOutcome;
+                const landAt = o.type === 'INTERCEPTION' ? o.at : (o.type === 'GOAL' ? { x: Tr.x, y: 99 } : Tr);
+                const flightToLand = o.type === 'INTERCEPTION' ? flight * clamp(distance(C, o.at) / (laneLen || 1), .3, .9) : flight;
+                schedule(.32, () => {
+                    playSfx('pass');
+                    tween(state.ball, landAt, flightToLand, easeOutCubic, () => {
+                        // 3) impact — outcome hooks fire here (§3/§7)
+                        if (o.type === 'INTERCEPTION') {
+                            const d = defenders[o.defender];
+                            tween(d, { x: o.at.x, y: o.at.y }, .12);
+                            feedback('INTERCEPTION', o.at);
+                        } else if (o.type === 'GOAL') { feedback('GOAL', o.at); }
+                        else if (o.type === 'SAVE') { tween(keeper, { x: o.at.x, y: clamp(o.at.y + 2, 88, 96) }, .12); feedback('SAVE', o.at); }
+                        else feedback('COMPLETE', o.at);
+                        state.ball.visible = o.type !== 'COMPLETE';
+                        finishPlay(o);
+                    });
+                });
+            }
+            function finishPlay(o) {
+                state.phase = 'result';
+                applyOutcome(o);
+                setTimeout(() => {
+                    if (state.score[0] >= T.winScore || state.score[1] >= T.winScore || state.play >= T.maxPlays) {
+                        state.phase = 'end';
+                        const [a, b] = state.score;
+                        const verdict = a === b ? 'Match drawn.' : (a > b ? 'YOU WIN THE MATCH!' : 'CPU WINS THE MATCH.');
+                        ui.instruction.textContent = `${verdict} Final score ${a}–${b}.`;
+                        ui.lock.disabled = false; ui.lock.textContent = 'PLAY AGAIN';
+                        playSfx('whistle');
+                        showBanner(a === b ? 'DRAW' : (a > b ? 'YOU WIN' : 'CPU WINS'), a > b ? colors.aim : a === b ? colors.text : colors.cpu);
+                        return;
+                    }
+                    nextPlay();
+                }, 1150);
+            }
+            function nextPlay() {
+                state.play++;
+                state.role = state.possession === 'you' ? 'attack' : 'defend';
+                ui.plays.textContent = 'PLAY ' + state.play;
+                startDecision();
+            }
+
+            /* ---------- Decision setup ---------- */
+            function formation() {
+                own.carrier = { x: 50, y: 22 };
+                own.receivers = [{ x: 26, y: 42 }, { x: 74, y: 46 }, { x: 50, y: 64 }];
+                state.runner = { x: 34, y: 52 };
+                defenders = [{ x: 30, y: 58 }, { x: 70, y: 64 }, { x: 48, y: 78 }];
+                keeper = { x: 50, y: 93 };
+                state.ball = { x: 50, y: 22, visible: true };
+            }
+            function startDecision() {
+                state.phase = 'decision'; state.remaining = T.window; state.locked = false; state.drag = null;
+                state.ball.visible = true; state.ball.x = own.carrier.x; state.ball.y = own.carrier.y;
+                state.guesses = defenders.map(() => ({ x: 0, y: 0 }));
+                ui.lock.disabled = false; ui.lock.textContent = 'LOCK IN';
+                ui.role.textContent = state.role === 'attack' ? 'ATTACK' : 'DEFEND';
+                ui.role.style.color = state.role === 'attack' ? colors.aim : colors.cyan;
+                ui.instruction.textContent = state.role === 'attack'
+                    ? 'Swipe from the carrier to a receiver to choose your pass. Swipe the runner to open space.'
+                    : 'Swipe from any defender toward a lane to commit its guess.';
+                // attacker default: nearest safe (most central-forward) receiver pre-selected
+                state.selected = own.receivers.reduce((best, r, i) => (r.y - Math.abs(r.x - 50) * .3 > own.receivers[best].y - Math.abs(own.receivers[best].x - 50) * .3 ? i : best), 0);
+                state.runnerTarget = { ...state.runner };
+                if (state.role === 'attack') cpuChooseDefensiveGuess(); else cpuChoosePass();
+            }
+            function updatePossessionChip() {
+                ui.possession.textContent = state.possession === 'you' ? 'YOU · BALL' : 'CPU · BALL';
+                ui.possession.className = 'chip ' + (state.possession === 'you' ? 'you' : 'cpu');
+            }
+
+            /* ---------- Log ---------- */
+            function addLog(text, toneName = '') {
+                const li = document.createElement('li');
+                li.textContent = `[P${state.play}] ${text}`;
+                if (toneName) li.style.color = colors[toneName];
+                ui.log.prepend(li);
+                while (ui.log.children.length > 6) ui.log.lastChild.remove();
+            }
+
+            /* ---------- Input: unified pointer swipes (mouse + touch) ---------- */
+            function point(e) {
+                const r = canvas.getBoundingClientRect();
+                return { x: clamp((e.clientX - r.left) / r.width * 100, 0, 100), y: clamp((e.clientY - r.top) / r.height * 100, 0, 100) };
+            }
+            canvas.addEventListener('pointerdown', e => {
+                if (state.phase !== 'decision') return;
+                canvas.setPointerCapture(e.pointerId);
+                const p = point(e);
+                let kind = 'pitch', index = -1;
+                if (state.role === 'attack') {
+                    if (distance(p, state.runner) < 14) kind = 'runner';
+                    else if (distance(p, own.carrier) < 14) kind = 'carrier';
+                } else {
+                    index = nearest(p, defenders);
+                    if (index >= 0) kind = 'defender';
+                }
+                state.drag = { kind, index, start: p, current: p };
+                draw();
+            });
+            canvas.addEventListener('pointermove', e => {
+                if (!state.drag) return;
+                state.drag.current = point(e);
+                draw();
+            });
+            canvas.addEventListener('pointerup', e => {
+                if (!state.drag) return;
+                const d = state.drag, p = point(e);
+                const moved = distance(d.start, p) > 6;
+                if (d.kind === 'runner') {
+                    if (moved) { state.runner = { x: p.x, y: p.y }; state.runnerTarget = { ...state.runner }; }
+                } else if (d.kind === 'carrier') {
+                    const i = nearest(p, own.receivers, 24);
+                    if (moved && i >= 0) state.selected = i;
+                    else if (!moved) { const t = nearest(d.start, own.receivers, 24); if (t >= 0) state.selected = t; } // tap-to-select
+                } else if (d.kind === 'defender' && moved) {
+                    state.guesses[d.index] = toVector(d.start, p);
+                }
+                state.drag = null;
+                draw();
+            });
+
+            /* ---------- Buttons ---------- */
+            ui.lock.addEventListener('click', () => {
+                if (state.phase === 'decision') beginResolve();
+                else if (state.phase === 'end') restartMatch();
+            });
+            document.getElementById('restart').addEventListener('click', restartMatch);
+            function restartMatch() {
+                state.score = [0, 0]; state.play = 1; state.possession = 'you'; state.role = 'attack';
+                state.timeScale = 1; state.slowUntil = 0; state.banner = null; state.particles = [];
+                ui.human.textContent = '0'; ui.cpu.textContent = '0';
+                ui.plays.textContent = 'PLAY 1'; ui.log.innerHTML = '';
+                formation();
+                addLog('New match. You have the first possession.', 'aim');
+                startDecision();
+            }
+
+            /* ---------- Rendering ---------- */
+            function resize() {
+                const dpr = Math.min(devicePixelRatio || 1, 2);
+                const r = canvas.getBoundingClientRect();
+                canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                draw();
+            }
+            const X = (x, w) => x / 100 * w, Y = (y, h) => y / 100 * h;
+
+            function drawPlayer(p, color, label, active = false, w = 0, h = 0) {
+                const radius = Math.max(10, w * .026);
+                ctx.beginPath(); ctx.arc(X(p.x, w), Y(p.y, h), radius, 0, Math.PI * 2);
+                ctx.fillStyle = color; ctx.fill();
+                if (active) { ctx.lineWidth = 3; ctx.strokeStyle = colors.aim; ctx.stroke(); }
+                ctx.fillStyle = '#09201a'; ctx.font = 'bold 10px system-ui';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(label, X(p.x, w), Y(p.y, h));
+            }
+            function drawArrow(from, dir, color, w, h) {
+                const len = Math.max(w, h) * .09;
+                const ax = X(from.x, w), ay = Y(from.y, h);
+                const bx = ax + dir.x * len, by = ay + dir.y * len;
+                ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2.5;
+                ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+                const ang = Math.atan2(dir.y, dir.x);
+                ctx.beginPath();
+                ctx.moveTo(bx, by);
+                ctx.lineTo(bx - 7 * Math.cos(ang - .45), by - 7 * Math.sin(ang - .45));
+                ctx.lineTo(bx - 7 * Math.cos(ang + .45), by - 7 * Math.sin(ang + .45));
+                ctx.closePath(); ctx.fill();
+            }
+
+            function draw() {
+                const w = canvas.clientWidth, h = canvas.clientHeight;
+                if (!w) return;
+                ctx.clearRect(0, 0, w, h);
+                ctx.fillStyle = colors.pitch; ctx.fillRect(0, 0, w, h);
+                ctx.strokeStyle = colors.line; ctx.lineWidth = 1.5;
+                ctx.strokeRect(10, 10, w - 20, h - 20);
+                ctx.beginPath(); ctx.moveTo(10, h / 2); ctx.lineTo(w - 10, h / 2); ctx.stroke();
+                ctx.beginPath(); ctx.arc(w / 2, h / 2, Math.min(w, h) * .12, 0, Math.PI * 2); ctx.stroke();
+                ctx.strokeRect(w * .22, 10, w * .56, h * .18);
+                ctx.strokeRect(w * .22, h * .82, w * .56, h * .18);
+                ctx.fillStyle = '#eff7d0';
+                ctx.fillRect(w * .39, 0, w * .22, 8);
+                ctx.fillRect(w * .39, h - 8, w * .22, 8);
+
+                const attackingColor = state.possession === 'you' ? colors.own : colors.cpu;
+                const defendingColor = state.possession === 'you' ? colors.cpu : colors.own;
+
+                // keeper guards the far (y=100) goal
+                drawPlayer(keeper, colors.keeper, 'K', false, w, h);
+
+                // committed guess arrows revealed once the play resolves (hidden intent during decision)
+                if (state.phase !== 'decision') {
+                    state.guesses.forEach((g, i) => { if (Math.hypot(g.x, g.y) > .01) drawArrow(defenders[i], g, defendingColor, w, h); });
+                }
+
+                // pass lane hint while deciding
+                if (state.phase === 'decision') {
+                    const Tr = own.receivers[state.selected];
+                    ctx.setLineDash([4, 7]);
+                    ctx.strokeStyle = 'rgba(214,243,106,.35)'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(X(own.carrier.x, w), Y(own.carrier.y, h)); ctx.lineTo(X(Tr.x, w), Y(Tr.y, h)); ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+
+                // players
+                own.receivers.forEach((p, i) => drawPlayer(p, attackingColor, String(i + 1), i === state.selected && state.role === 'attack', w, h));
+                drawPlayer(state.runner, colors.aim, 'R', true, w, h);
+                defenders.forEach((p, i) => drawPlayer(p, defendingColor, 'D', state.role === 'defend' && !!state.drag && state.drag.index === i, w, h));
+                drawPlayer(own.carrier, attackingColor, 'B', true, w, h);
+
+                // ball
+                if (state.ball.visible) {
+                    ctx.beginPath(); ctx.arc(X(state.ball.x, w), Y(state.ball.y, h), Math.max(4, w * .011), 0, Math.PI * 2);
+                    ctx.fillStyle = '#ffffff'; ctx.fill();
+                    ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = 1; ctx.stroke();
+                }
+
+                // live swipe line
+                if (state.drag) {
+                    const a = state.drag.start, b = state.drag.current;
+                    ctx.beginPath(); ctx.moveTo(X(a.x, w), Y(a.y, h)); ctx.lineTo(X(b.x, w), Y(b.y, h));
+                    ctx.strokeStyle = colors.aim; ctx.lineWidth = 3; ctx.setLineDash([7, 5]); ctx.stroke(); ctx.setLineDash([]);
+                    ctx.beginPath(); ctx.arc(X(b.x, w), Y(b.y, h), 7, 0, Math.PI * 2); ctx.fillStyle = colors.aim; ctx.fill();
+                }
+
+                // particles
+                state.particles.forEach(pt => {
+                    const alpha = 1 - pt.age / pt.life;
+                    ctx.globalAlpha = Math.max(0, alpha);
+                    ctx.beginPath(); ctx.arc(X(pt.x, w), Y(pt.y, h), 2.6, 0, Math.PI * 2);
+                    ctx.fillStyle = pt.color; ctx.fill();
+                });
+                ctx.globalAlpha = 1;
+
+                // outcome banner (overshoot pop, fade out)
+                if (state.banner) {
+                    const b = state.banner;
+                    const inT = clamp(b.age / .18, 0, 1), outT = clamp((b.age - (b.life - .3)) / .3, 0, 1);
+                    const scale = easeOutBack(inT) * (1 - outT * .15);
+                    ctx.save();
+                    ctx.translate(w / 2, h * .44);
+                    ctx.scale(scale, scale);
+                    ctx.globalAlpha = 1 - outT;
+                    ctx.font = `900 ${Math.round(w * .11)}px system-ui`;
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.lineWidth = 8; ctx.strokeStyle = 'rgba(8,21,19,.85)';
+                    ctx.strokeText(b.text, 0, 0);
+                    ctx.fillStyle = b.color; ctx.fillText(b.text, 0, 0);
+                    ctx.restore();
+                    ctx.globalAlpha = 1;
+                }
+            }
+
+            /* ---------- Main loop ---------- */
+            function tick(now) {
+                const rawDt = Math.min((now - last) / 1000, .1); last = now;
+
+                // slow-mo eases back to real time (real-time restore — never a scaled timer)
+                if (now > state.slowUntil) state.timeScale = Math.min(1, state.timeScale + rawDt * 3);
+                const dt = rawDt * state.timeScale;
+
+                // camera shake — visual offset only, decays every frame
+                state.trauma = Math.max(0, state.trauma - rawDt * 2.4);
+                const shake = state.trauma * state.trauma;
+                const sx = Math.sin(now * .027) * 12 * shake, sy = Math.cos(now * .021) * 8 * shake;
+                ui.app.style.transform = `translate(${sx}px, ${sy}px) rotate(${Math.sin(now * .014) * .5 * shake}deg)`;
+                ui.playArea.classList.toggle('impact', state.flash > 0);
+                state.flash = Math.max(0, state.flash - rawDt * 4);
+
+                // tweens + timeline run on scaled time
+                state.animClock += dt;
+                state.timeline = state.timeline.filter(ev => { if (state.animClock >= ev.at) { ev.fn(); return false; } return true; });
+                state.tweens = state.tweens.filter(tw => {
+                    tw.t += dt;
+                    const k = tw.ease(clamp(tw.t / tw.dur, 0, 1));
+                    for (const key in tw.to) tw.obj[key] = lerp(tw.from[key], tw.to[key], k);
+                    if (tw.t >= tw.dur) { for (const key in tw.to) tw.obj[key] = tw.to[key]; tw.done && tw.done(); return false; }
+                    return true;
+                });
+
+                // particles
+                state.particles.forEach(pt => { pt.age += dt; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vx *= .96; pt.vy *= .96; });
+                state.particles = state.particles.filter(pt => pt.age < pt.life);
+
+                // banner
+                if (state.banner) { state.banner.age += rawDt; if (state.banner.age >= state.banner.life) state.banner = null; }
+
+                // decision countdown (real time — the window is sacred, §3)
+                if (state.phase === 'decision' && !state.locked) {
+                    state.remaining -= rawDt;
+                    if (state.remaining <= 0) { state.remaining = 0; beginResolve(); }
+                    ui.timer.textContent = Math.max(0, state.remaining).toFixed(1);
+                    ui.timer.classList.toggle('urgent', state.remaining < 1);
+                    ui.bar.style.transform = 'scaleX(' + Math.max(0, state.remaining / T.window) + ')';
+                }
+
+                draw();
+                raf = requestAnimationFrame(tick);
+            }
+
+            /* ---------- Boot ---------- */
+            addEventListener('resize', resize);
+            formation();
+            addLog('New match. You have the first possession.', 'aim');
+            startDecision();
+            updatePossessionChip();
+            resize();
+            requestAnimationFrame(tick);
+        })();
+    </script>
+</body>
+
+</html>
