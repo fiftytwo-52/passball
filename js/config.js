@@ -1,7 +1,7 @@
 /* ================= Tunables & shared helpers ================= */
 
 export const T = {
-    window: 10.0, winScore: 3, maxPlays: 24,
+    window: 5.0, winScore: 3, maxPlays: 24,
     pitchW: 42, pitchL: 88,          // world units (x width, z length)
     goalHalf: 6, goalH: 3.4,
     playerSpeed: 11,                 // every player AND the ball share this speed
