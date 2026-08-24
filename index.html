@@ -30,26 +30,25 @@
         <div class="card">
             <div class="eyebrow">TUTORIAL</div>
             <h2>How to play</h2>
-            <p class="muted">Every play freezes time for a <b class="lime">10-second window</b>. Both sides commit
-                secretly, then everything resolves at once. Players and the ball move at the same speed.</p>
+            <p class="muted">Every play freezes for <b class="lime">10 seconds</b>. Both sides commit secretly,
+                then everything resolves at once. Players and the ball move at the same speed.</p>
             <h3 class="cyan">ATTACKING — you have the ball</h3>
             <ul>
                 <li><b>TAP</b> a teammate — he receives the pass <span class="muted">(gold ring + line)</span>.</li>
-                <li><b>SWIPE</b> any teammate to a spot — he sprints there when play resumes.</li>
+                <li><b>SWIPE</b> any teammate — a drawn line shows where he'll run.</li>
                 <li>Receiver collecting the ball deep near goal = <b>shot</b>.</li>
             </ul>
             <h3 class="coral">DEFENDING — CPU has the ball</h3>
             <ul>
                 <li><b>TAP</b> the opponent you think will receive <span class="muted">(red ring)</span>.</li>
                 <li><b>SWIPE</b> your defenders toward danger zones.</li>
-                <li>A <b>correct read</b> converges your defenders onto the receiver — touch the ball and it's yours!
-                </li>
-                <li>Pick your keeper's <b>dive</b> for shots: ◀ / STAY / ▶.</li>
+                <li><b>SWIPE YOUR KEEPER</b> left / right to command his dive.</li>
+                <li>A <b>correct read</b> converges your defenders — touch the ball and it's yours!</li>
             </ul>
             <h3 class="lime">RULES</h3>
             <ul>
                 <li>First to <b>3 goals</b> · 24-play limit tiebreaker.</li>
-                <li>Every match kicks off from the center spot.</li>
+                <li>Restart any time with the ↻ button.</li>
             </ul>
             <button class="btn primary" id="btn-tutorial-close">GOT IT — LET'S PLAY</button>
         </div>
@@ -59,7 +58,6 @@
     <div id="hud">
         <header id="topbar">
             <div class="tb-left">
-                <span class="eyebrow">GUESS&PASS</span>
                 <span id="plays" class="muted small">PLAY 1</span>
             </div>
             <div class="scoreboard">
@@ -73,22 +71,10 @@
             <div class="tb-chips">
                 <span id="possession" class="chip you">YOU · BALL</span>
                 <span id="role" class="chip role">ATTACK</span>
+                <span id="divechip" class="chip you" hidden>STAY</span>
                 <span class="timer-num"><strong id="timer">10.0</strong><small>s</small></span>
             </div>
-            <div class="progress"><span id="progress-bar"></span></div>
         </div>
-
-        <ul id="log"></ul>
-
-        <section id="bottom-panel">
-            <p id="instruction"></p>
-            <div id="dive" hidden>
-                <button data-dive="-1">◀ LEFT</button>
-                <button data-dive="0">STAY</button>
-                <button data-dive="1">RIGHT ▶</button>
-            </div>
-            <button id="lock" class="btn primary">LOCK IN</button>
-        </section>
     </div>
 
     <script type="module" src="js/main.js"></script>

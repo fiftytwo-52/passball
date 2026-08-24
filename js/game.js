@@ -8,7 +8,7 @@ import {
     updateAnchors, moveToward
 } from './entities.js';
 import { sfx } from './audio.js';
-import { addLog, showBanner, updatePossessionChip, updateScores, setInstruction, ui } from './hud.js';
+import { addLog, showBanner, updatePossessionChip, updateScores, setInstruction, updateDiveChip, ui } from './hud.js';
 import { cpuAttackChoices, cpuDefendChoices, cpuGuessReceiver, cpuDiveGuess } from './ai.js';
 
 /* ---------- decision setup ---------- */
@@ -17,11 +17,10 @@ export function startDecision() {
     state.remaining = T.window; state.locked = false; state.drag = null;
     state.diveChoice = 0;
     state.guessIdx = null;
-    ui.lock.disabled = false; ui.lock.textContent = 'LOCK IN';
     ui.role.textContent = state.role === 'attack' ? 'ATTACK' : 'DEFEND';
     ui.role.style.color = state.role === 'attack' ? cssColor(COL.aim) : cssColor(COL.you);
-    ui.dive.hidden = state.role !== 'defend';
-    [...ui.dive.children].forEach(b => b.classList.remove('sel'));
+    ui.divechip.hidden = state.role !== 'defend';
+    if (state.role === 'defend') updateDiveChip(state.diveChoice);
     if (state.role === 'attack') {
         setInstruction('ATTACK: TAP a teammate — he receives the pass (gold ring + line). SWIPE a teammate — he runs to that spot. If a defender touches the ball mid-pass, you lose it.');
         cpuDefendChoices();
@@ -35,8 +34,7 @@ export function startDecision() {
 export function beginResolve() {
     if (state.mode !== 'decision') return;
     state.mode = 'resolve'; state.locked = true;
-    ui.lock.disabled = true; ui.lock.textContent = 'RESOLVING…';
-    ui.dive.hidden = true;
+    ui.divechip.hidden = true;
     sfx.pass();
 
     const attackTeam = state.possession, defendTeam = attackTeam === 'you' ? 'cpu' : 'you';
@@ -222,8 +220,6 @@ function afterResult() {
         if (state.score[0] >= T.winScore || state.score[1] >= T.winScore || state.play >= T.maxPlays) {
             state.mode = 'end';
             const [a, b] = state.score;
-            setInstruction(`${a === b ? 'Match drawn' : a > b ? 'YOU WIN THE MATCH!' : 'CPU WINS THE MATCH.'} Final score ${a}–${b}. Press PLAY AGAIN.`);
-            ui.lock.disabled = false; ui.lock.textContent = 'PLAY AGAIN';
             sfx.whistle();
             showBanner(a === b ? 'DRAW' : a > b ? 'YOU WIN' : 'CPU WINS', a > b ? COL.aim : COL.cpu);
             return;

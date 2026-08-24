@@ -116,6 +116,14 @@ export const passLine = new THREE.Line(
 passLine.visible = false;
 scene.add(passLine);
 
+/* live swipe "drawing" line */
+export const swipeLine = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: .9, gapSize: .6, transparent: true, opacity: .85 })
+);
+swipeLine.visible = false;
+scene.add(swipeLine);
+
 /* ---- outcome banner sprite ---- */
 const bannerCanvas = document.createElement('canvas');
 bannerCanvas.width = 1024; bannerCanvas.height = 256;
@@ -137,7 +145,7 @@ export function drawBannerSprite(text, hex, alpha, scale) {
     g.fillText(text, 512, 132);
     bannerTex.needsUpdate = true;
     bannerSprite.material.opacity = alpha;
-    bannerSprite.scale.set(46 * scale, 11.5 * scale, 1);
+    bannerSprite.scale.set(24 * scale, 6 * scale, 1);
     bannerSprite.visible = true;
 }
 export function hideBannerSprite() { bannerSprite.visible = false; }

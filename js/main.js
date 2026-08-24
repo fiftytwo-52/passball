@@ -21,19 +21,7 @@ ui.menu.querySelector('#btn-vs-cpu').addEventListener('click', () => {
 document.getElementById('btn-tutorial').addEventListener('click', () => { ui.tutorial.hidden = false; });
 document.getElementById('btn-tutorial-close').addEventListener('click', () => { ui.tutorial.hidden = true; });
 
-ui.lock.addEventListener('click', () => {
-    if (state.mode === 'decision') beginResolve();
-    else if (state.mode === 'end') restartMatch();
-});
 ui.restart.addEventListener('click', restartMatch);
-
-[...ui.dive.children].forEach(btn => {
-    btn.addEventListener('click', () => {
-        state.diveChoice = parseInt(btn.dataset.dive, 10);
-        [...ui.dive.children].forEach(b => b.classList.toggle('sel', b === btn));
-        sfx.lock();
-    });
-});
 
 /* ---------- main loop ---------- */
 let last = performance.now();
@@ -60,14 +48,13 @@ function tick(now) {
         if (state.remaining <= 0) { state.remaining = 0; beginResolve(); }
         ui.timer.textContent = Math.max(0, state.remaining).toFixed(1);
         ui.timer.classList.toggle('urgent', state.remaining < 3);
-        ui.bar.style.transform = `scaleX(${Math.max(0, state.remaining / T.window)})`;
         // game is FROZEN during the window — commands are planned, nothing moves until resolve
     }
     if (state.mode === 'resolve') stepResolve(rawDt);
 
     // sync visuals
     players.forEach(p => { syncMesh(p); animatePlayer(p, rawDt); });
-    ballMesh.position.set(ball.x, .6, ball.z);
+    ballMesh.position.set(ball.x, .35, ball.z);
 
     // ring highlights: gold = selected receiver · red = your guessed receiver
     players.forEach(p => {

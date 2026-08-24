@@ -57,7 +57,7 @@ addPlayer('cpu', 'keeper', 5, 0, 0);
 
 /* ---- ball ---- */
 export const ballMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(.55, 16, 12),
+    new THREE.SphereGeometry(.32, 14, 10),
     new THREE.MeshLambertMaterial({ color: 0xffffff })
 );
 scene.add(ballMesh);

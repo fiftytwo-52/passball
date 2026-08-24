@@ -5,12 +5,12 @@
 ======================================================================================== */
 
 import { THREE } from './world.js';
-import { renderer, camera, marker } from './world.js';
+import { renderer, camera, marker, swipeLine } from './world.js';
 import { T, clamp } from './config.js';
 import { state } from './state.js';
 import { players, outfield } from './entities.js';
 import { sfx } from './audio.js';
-import { setInstruction, ui } from './hud.js';
+import { setInstruction, updateDiveChip } from './hud.js';
 
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
@@ -61,14 +61,23 @@ renderer.domElement.addEventListener('pointerdown', e => {
 });
 
 renderer.domElement.addEventListener('pointermove', e => {
-    if (!state.drag || state.drag.kind !== 'move') return;
+    if (!state.drag) return;
     const g = groundPoint(e);
-    if (g) marker.position.set(clamp(g.x, -T.pitchW / 2, T.pitchW / 2), .07, clamp(g.z, -T.pitchL / 2, T.pitchL / 2));
+    if (g && state.drag.kind === 'move') marker.position.set(clamp(g.x, -T.pitchW / 2, T.pitchW / 2), .07, clamp(g.z, -T.pitchL / 2, T.pitchL / 2));
+    // live "drawing" line while swiping any player
+    if (g && state.drag.kind !== 'guessTap') {
+        swipeLine.geometry.setFromPoints([
+            new THREE.Vector3(state.drag.player.x, .5, state.drag.player.z),
+            new THREE.Vector3(clamp(g.x, -T.pitchW / 2, T.pitchW / 2), .5, clamp(g.z, -T.pitchL / 2, T.pitchL / 2))
+        ]);
+        swipeLine.computeLineDistances();
+        swipeLine.visible = true;
+    }
 });
 
 renderer.domElement.addEventListener('pointerup', e => {
     if (!state.drag) return;
-    const d = state.drag; state.drag = null; marker.visible = false;
+    const d = state.drag; state.drag = null; marker.visible = false; swipeLine.visible = false;
     const moved = Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 10;
 
     if (d.kind === 'mate') {
@@ -83,7 +92,7 @@ renderer.domElement.addEventListener('pointerup', e => {
         // horizontal swipe direction commands the dive
         const dx = e.clientX - d.sx;
         state.diveChoice = !moved || Math.abs(dx) < 12 ? 0 : (dx < 0 ? -1 : 1);
-        [...ui.dive.children].forEach(b => b.classList.toggle('sel', parseInt(b.dataset.dive, 10) === state.diveChoice));
+        updateDiveChip(state.diveChoice);
         sfx.lock();
     } else if (d.kind === 'move') {
         if (moved) setRunTarget(d.player, e);
