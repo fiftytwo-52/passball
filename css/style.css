@@ -118,6 +118,15 @@ button {
     inset: 0;
     z-index: 30;
     display: grid;
+}
+
+/* the hidden attribute must win over the display: grid above */
+#tutorial[hidden] {
+    display: none;
+}
+
+#menu,
+#tutorial {
     place-items: center;
     padding: calc(16px + var(--safe-top)) 16px calc(16px + var(--safe-bottom));
     background: radial-gradient(120% 100% at 50% 0%, #123a30 0%, #081513 70%);
