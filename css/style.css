@@ -1,4 +1,6 @@
-/* Guess & Pass 3D — mobile-first UI */
+/* ============================================================
+   Guess & Pass 3D — one clean layout for every screen size
+   ============================================================ */
 
 :root {
     color-scheme: dark;
@@ -9,6 +11,7 @@
     --lime: #d6f36a;
     --cyan: #78e1d0;
     --coral: #ff836e;
+    --radius: 12px;
     --safe-top: env(safe-area-inset-top, 0px);
     --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -56,7 +59,7 @@ button {
 }
 
 .small {
-    font-size: .68rem;
+    font-size: clamp(.62rem, 1.4vw, .74rem);
 }
 
 .lime {
@@ -73,7 +76,7 @@ button {
 
 .eyebrow {
     color: var(--lime);
-    font-size: .66rem;
+    font-size: clamp(.6rem, 1.4vw, .72rem);
     letter-spacing: .16em;
     font-weight: 800;
 }
@@ -82,7 +85,7 @@ button {
 .btn {
     display: block;
     width: 100%;
-    min-height: 54px;
+    min-height: 52px;
     margin-top: 10px;
     border: 0;
     border-radius: 10px;
@@ -111,48 +114,43 @@ button {
     transform: translateY(1px);
 }
 
-/* ---------- Menu & tutorial ---------- */
+/* ---------- Menu & tutorial (identical on all screens) ---------- */
 #menu,
 #tutorial {
     position: fixed;
     inset: 0;
     z-index: 30;
     display: grid;
-}
-
-/* the hidden attribute must win over the display: grid above */
-#tutorial[hidden] {
-    display: none;
-}
-
-#menu,
-#tutorial {
     place-items: center;
     padding: calc(16px + var(--safe-top)) 16px calc(16px + var(--safe-bottom));
     background: radial-gradient(120% 100% at 50% 0%, #123a30 0%, #081513 70%);
     overflow: auto;
 }
 
+#tutorial[hidden] {
+    display: none;
+}
+
 #menu .card,
 #tutorial .card {
-    width: 100%;
-    max-width: 420px;
-    padding: 26px 22px;
+    width: min(420px, 100%);
+    padding: clamp(20px, 4vw, 30px);
     border: 1px solid var(--line);
     background: var(--panel);
     border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
 }
 
 #menu h1 {
     margin: 8px 0 6px;
-    font-size: clamp(2rem, 8vw, 3rem);
+    font-size: clamp(2rem, 7vw, 3rem);
     line-height: 1;
 }
 
 #menu p {
     color: var(--muted);
     margin: 0 0 18px;
-    font-size: .86rem;
+    font-size: clamp(.82rem, 2vw, .9rem);
     line-height: 1.5;
 }
 
@@ -168,23 +166,26 @@ button {
 #tutorial ul {
     margin: 0 0 6px;
     padding-left: 18px;
-    font-size: .82rem;
+    font-size: .84rem;
     line-height: 1.55;
 }
 
 #tutorial p {
-    font-size: .84rem;
+    font-size: .86rem;
     line-height: 1.5;
 }
 
-/* ---------- HUD (portrait phones first) ---------- */
+/* ---------- HUD — same structure & proportions everywhere ---------- */
 #hud {
     position: fixed;
     inset: 0;
     z-index: 10;
     display: none;
-    grid-template-rows: auto auto 1fr auto;
-    padding: calc(8px + var(--safe-top)) 10px calc(10px + var(--safe-bottom));
+    grid-template-rows: auto auto 1fr;
+    gap: clamp(6px, 1.2vw, 12px);
+    max-width: 1220px;
+    margin: 0 auto;
+    padding: calc(10px + var(--safe-top)) clamp(10px, 2.5vw, 32px) calc(10px + var(--safe-bottom));
     pointer-events: none;
 }
 
@@ -200,38 +201,40 @@ button {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 10px;
 }
 
 .tb-left {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    gap: 10px;
     min-width: 0;
 }
 
 .scoreboard {
     display: flex;
-    gap: 6px;
+    gap: clamp(5px, 1vw, 10px);
+    margin-left: auto;
 }
 
 .score {
-    min-width: 52px;
+    min-width: clamp(50px, 7vw, 68px);
     text-align: center;
     border: 1px solid var(--line);
     background: var(--panel);
-    padding: 5px 9px;
-    border-radius: 9px;
+    padding: clamp(4px, 1vw, 7px) clamp(8px, 1.4vw, 12px);
+    border-radius: 10px;
 }
 
 .score strong {
     display: block;
-    font-size: 1.15rem;
-    line-height: 1.1;
+    font-size: clamp(1.05rem, 2.6vw, 1.45rem);
+    line-height: 1.15;
+    color: var(--lime);
 }
 
 .score span {
-    font-size: .56rem;
+    font-size: clamp(.54rem, 1.2vw, .64rem);
     font-weight: 800;
     letter-spacing: .12em;
     color: var(--muted);
@@ -246,33 +249,34 @@ button {
 }
 
 #restart {
-    min-width: 44px;
-    min-height: 44px;
+    min-width: 42px;
+    min-height: 42px;
     border: 1px solid var(--line);
     border-radius: 10px;
     background: var(--panel);
-    font-size: 1.05rem;
+    font-size: 1rem;
 }
 
 #timerbar {
-    margin-top: 8px;
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 7px 10px;
+    border-radius: var(--radius);
+    padding: clamp(6px, 1.2vw, 10px) clamp(9px, 1.6vw, 14px);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
 }
 
 .tb-chips {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: clamp(5px, 1vw, 9px);
 }
 
 .chip {
-    padding: 3px 8px;
+    padding: clamp(2px, .5vw, 4px) clamp(7px, 1.2vw, 10px);
     border-radius: 999px;
     border: 1px solid var(--line);
-    font-size: .58rem;
+    font-size: clamp(.56rem, 1.3vw, .66rem);
     font-weight: 800;
     letter-spacing: .1em;
 }
@@ -297,7 +301,7 @@ button {
 }
 
 .timer-num strong {
-    font-size: 1.25rem;
+    font-size: clamp(1.05rem, 2.6vw, 1.5rem);
 }
 
 .timer-num strong.urgent {
@@ -307,154 +311,4 @@ button {
 .timer-num small {
     color: var(--muted);
     margin-left: 2px;
-}
-
-.progress {
-    height: 4px;
-    margin-top: 6px;
-    background: #29433b;
-    border-radius: 4px;
-    overflow: hidden;
-}
-
-#progress-bar {
-    display: block;
-    height: 100%;
-    width: 100%;
-    transform-origin: left;
-    background: var(--lime);
-}
-
-#log {
-    list-style: none;
-    margin: 8px 0 0;
-    padding: 0;
-    display: grid;
-    gap: 4px;
-    align-content: start;
-    justify-self: start;
-    max-width: 75%;
-    font-size: .66rem;
-    color: var(--muted);
-    pointer-events: none !important;
-}
-
-#log li {
-    border-left: 2px solid var(--line);
-    padding-left: 7px;
-}
-
-#log li:nth-child(n+4) {
-    display: none;
-}
-
-/* phones: latest 3 only */
-
-#bottom-panel {
-    margin-top: 6px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 7px 10px;
-    -webkit-backdrop-filter: blur(6px);
-    backdrop-filter: blur(6px);
-}
-
-#instruction {
-    margin: 0;
-    font-size: .68rem;
-    line-height: 1.35;
-}
-
-#dive {
-    display: flex;
-    gap: 8px;
-    margin-top: 10px;
-}
-
-#dive[hidden] {
-    display: none;
-}
-
-#dive button {
-    flex: 1;
-    min-height: 48px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: rgba(120, 225, 208, .1);
-    font-weight: 800;
-    font-size: .8rem;
-}
-
-#dive button.sel {
-    background: var(--cyan);
-    color: #102019;
-    border-color: transparent;
-}
-
-#lock {
-    margin-top: 7px;
-    min-height: 44px;
-}
-
-/* dive chips are passive indicators — the keeper is commanded by swiping him */
-#dive {
-    pointer-events: none;
-}
-
-#dive button {
-    flex: 1;
-    min-height: 30px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: rgba(120, 225, 208, .08);
-    font-weight: 800;
-    font-size: .62rem;
-}
-
-/* ---------- Larger screens ---------- */
-@media (min-width: 700px) and (orientation: landscape) {
-    #hud {
-        max-width: 1220px;
-        margin: 0 auto;
-        grid-template-columns: 300px 1fr;
-        grid-template-rows: auto 1fr auto;
-        padding: calc(14px + var(--safe-top)) clamp(14px, 3vw, 36px) calc(14px + var(--safe-bottom));
-    }
-
-    #topbar {
-        grid-column: 1 / -1;
-    }
-
-    #timerbar {
-        grid-column: 1;
-        grid-row: 2 / span 2;
-        align-self: start;
-        margin-top: 12px;
-        padding: 12px;
-    }
-
-    .timer-num strong {
-        font-size: 2rem;
-    }
-
-    #log {
-        grid-column: 1;
-        grid-row: 3;
-        align-self: end;
-        font-size: .74rem;
-        max-width: 100%;
-    }
-
-    #log li:nth-child(n+4) {
-        display: block;
-    }
-
-    #bottom-panel {
-        grid-column: 2;
-        grid-row: 3;
-        align-self: end;
-        justify-self: end;
-        width: min(380px, 90%);
-    }
 }
