@@ -70,12 +70,17 @@ function tick(now) {
     } catch (err) {
         // never let one bad frame blank the whole game — always keep rendering
         console.error(err);
-        showErr(err && err.message || String(err));
+        showErr(err && (err.stack || err.message) || String(err));
         try { renderer.render(scene, camera); } catch (_) { }
+        // self-heal: if the play could not start, restart the decision window
+        if (state.mode === 'resolve' && !state.resolveCtx) {
+            state.mode = 'decision';
+            state.remaining = T.window;
+        }
     }
 }
 
-let errTimer;
+/* persistent toast — stays visible so the message can be read & reported */
 function showErr(msg) {
     let box = document.getElementById('errbox');
     if (!box) {
@@ -85,9 +90,10 @@ function showErr(msg) {
     }
     box.textContent = '⚠ ' + msg;
     box.style.display = 'block';
-    clearTimeout(errTimer);
-    errTimer = setTimeout(() => { box.style.display = 'none'; }, 4000);
 }
+
+addEventListener('error', e => showErr(e.message));
+addEventListener('unhandledrejection', e => showErr(e.reason && (e.reason.stack || e.reason.message) || 'async error'));
 
 function tickBody(now) {
     const rawDt = Math.min((now - last) / 1000, .08);
@@ -145,6 +151,19 @@ function tickBody(now) {
         const outT = clamp((t - .95) / .35, 0, 1);
         drawBannerSprite(state.banner.text, state.banner.hex, 1 - outT, inScale * (1 + .08 * (1 - outT)));
         if (t > 1.3) { state.banner = null; hideBannerSprite(); }
+    }
+
+    // temporary debug readout (top-left) — reveals NaN/position issues instantly
+    if ((now | 0) % 10 < 2) {
+        let dbg = document.getElementById('dbg');
+        if (!dbg) {
+            dbg = document.createElement('div');
+            dbg.id = 'dbg';
+            dbg.style.cssText = 'position:fixed;top:2px;left:4px;z-index:50;font:10px monospace;color:#8ff;pointer-events:none;';
+            document.body.appendChild(dbg);
+        }
+        dbg.textContent = `m=${state.mode} cam=${camState.pos.x.toFixed(1)},${camState.pos.y.toFixed(1)},${camState.pos.z.toFixed(1)}` +
+            ` ball=${ball.x.toFixed(1)},${ball.z.toFixed(1)} sel=${state.selected} pan=${state.pan.x.toFixed(1)},${state.pan.z.toFixed(1)}`;
     }
 
     renderer.render(scene, camera);
