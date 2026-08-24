@@ -48,7 +48,15 @@ function setRunTarget(player, e) {
     sfx.lock();
 }
 
-renderer.domElement.addEventListener('pointerdown', e => {
+/* Listen at window level so nothing (HUD overlay, capture quirks, mobile quirks)
+   can ever swallow gameplay input. HUD controls are explicitly excluded. */
+function hitsHud(e) {
+    const t = e.target;
+    return !!(t && t.closest && t.closest('#topbar, #timerbar, button'));
+}
+
+window.addEventListener('pointerdown', e => {
+    if (hitsHud(e)) return;
     if (state.mode !== 'decision' || state.locked) return;
     const p = pickPlayer(e);
     if (!p) return;
@@ -68,7 +76,7 @@ renderer.domElement.addEventListener('pointerdown', e => {
     renderer.domElement.setPointerCapture(e.pointerId);
 });
 
-renderer.domElement.addEventListener('pointermove', e => {
+window.addEventListener('pointermove', e => {
     if (!state.drag) return;
     const g = groundPoint(e);
     if (g && state.drag.kind === 'move') marker.position.set(clamp(g.x, -T.pitchW / 2, T.pitchW / 2), .07, clamp(g.z, -T.pitchL / 2, T.pitchL / 2));
@@ -83,7 +91,7 @@ renderer.domElement.addEventListener('pointermove', e => {
     }
 });
 
-renderer.domElement.addEventListener('pointerup', e => {
+window.addEventListener('pointerup', e => {
     if (!state.drag) return;
     const d = state.drag; state.drag = null; marker.visible = false; swipeLine.visible = false;
     const moved = Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 10;
