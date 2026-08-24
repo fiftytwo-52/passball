@@ -6,7 +6,7 @@ import {
     renderer, scene, camera, camState,
     updateCamera, marker, drawBannerSprite, hideBannerSprite
 } from './world.js';
-import { players, ballMesh, ball, syncMesh, animatePlayer, drift } from './entities.js';
+import { players, ballMesh, ball, syncMesh, animatePlayer } from './entities.js';
 import { ui, showBanner } from './hud.js';
 import { unlockAudio, sfx } from './audio.js';
 import { startDecision, beginResolve, stepResolve, restartMatch, updatePassLine } from './game.js';
@@ -61,7 +61,7 @@ function tick(now) {
         ui.timer.textContent = Math.max(0, state.remaining).toFixed(1);
         ui.timer.classList.toggle('urgent', state.remaining < 3);
         ui.bar.style.transform = `scaleX(${Math.max(0, state.remaining / T.window)})`;
-        drift(rawDt, now);
+        // game is FROZEN during the window — commands are planned, nothing moves until resolve
     }
     if (state.mode === 'resolve') stepResolve(rawDt);
 
