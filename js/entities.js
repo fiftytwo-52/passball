@@ -111,10 +111,10 @@ export function attackSpots() {
         mates: [{ x: -13, z: -8 }, { x: 13, z: -6 }, { x: 0, z: 6 }, { x: -8, z: 18 }]
     };
 }
-/** Center-kickoff shape: ball on the center spot, shape packed in the own half. */
+/** Center-kickoff shape: kicker stands ON the center spot, rest packed in the own half. */
 function kickoffSpots() {
     return {
-        carrier: { x: 0, z: -2.5 },
+        carrier: { x: 0, z: -1.4 },
         mates: [{ x: -12, z: -12 }, { x: 12, z: -10 }, { x: 0, z: -22 }, { x: -7, z: -30 }]
     };
 }
@@ -147,6 +147,7 @@ export function setupPlay(kickoffPos = false) {
     place(teamPlayers(defendTeam).find(p => p.role === 'keeper'), 0, 41 * d);
     state.selected = 1;
     holdBall(state.carrier);
+    if (kickoffPos) { ball.x = 0; ball.z = 0; }   // ball sits exactly on the center spot
     updateAnchors();
 }
 
