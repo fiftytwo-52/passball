@@ -17,6 +17,7 @@ export function startDecision() {
     state.remaining = T.window; state.locked = false; state.drag = null;
     state.diveChoice = 0;
     state.guessIdx = null;
+    state.shotCall = null;
     ui.role.textContent = state.role === 'attack' ? 'ATTACK' : 'DEFEND';
     ui.role.style.color = state.role === 'attack' ? cssColor(COL.aim) : cssColor(COL.you);
     ui.divechip.hidden = state.role !== 'defend';
@@ -139,10 +140,12 @@ function onReceive(ctx) {
 }
 
 function beginShot(ctx, shooter) {
+    // aim at the corner called with the edge buttons; random if no call was made
+    const corner = state.shotCall != null ? state.shotCall : (Math.random() < .5 ? -1 : 1);
     ctx.shot = {
         phase: 'flying',
         dir: atkDir(),
-        shotX: clamp(shooter.x * .45 + rand(-5.5, 5.5), -T.goalHalf + .8, T.goalHalf - .8),
+        shotX: corner * (T.goalHalf - 1.2),
         t: 0
     };
     ball.state = 'shot';

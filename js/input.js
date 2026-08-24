@@ -5,7 +5,7 @@
 ======================================================================================== */
 
 import { THREE } from './world.js';
-import { renderer, camera, marker, swipeLine } from './world.js';
+import { renderer, camera, marker, swipeLine, camState } from './world.js';
 import { T, clamp } from './config.js';
 import { state } from './state.js';
 import { players, outfield } from './entities.js';
@@ -28,7 +28,7 @@ function groundPoint(e) {
 function pickPlayer(e) {
     const r = renderer.domElement.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
-    const radius = e.pointerType === 'touch' ? 42 : 30;   // generous touch target
+    const radius = e.pointerType === 'touch' ? 60 : 44;   // generous touch target
     const v = new THREE.Vector3();
     let best = null, bd = radius;
     for (const p of players) {
@@ -76,8 +76,24 @@ window.addEventListener('pointerdown', e => {
     renderer.domElement.setPointerCapture(e.pointerId);
 });
 
+/* Dragging BLANK space pans your own view of the pitch (your side only). */
+window.addEventListener('pointerdown', e => {
+    if (hitsHud(e)) return;
+    if (state.mode !== 'decision' || state.locked || state.drag) return;
+    if (pickPlayer(e)) return;                            // player drags are handled above
+    state.drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, panX: state.pan.x, panZ: state.pan.z };
+});
+
 window.addEventListener('pointermove', e => {
     if (!state.drag) return;
+    if (state.drag.kind === 'pan') {
+        // pixels → world units at current camera height
+        const r = renderer.domElement.getBoundingClientRect();
+        const wpp = 2 * camState.pos.y * Math.tan(THREE.MathUtils.degToRad(30)) / r.height;
+        state.pan.x = clamp(state.drag.panX - (e.clientX - state.drag.sx) * wpp, -14, 14);
+        state.pan.z = clamp(state.drag.panZ - (e.clientY - state.drag.sy) * wpp * .8, -24, 24);
+        return;
+    }
     const g = groundPoint(e);
     if (g && state.drag.kind === 'move') marker.position.set(clamp(g.x, -T.pitchW / 2, T.pitchW / 2), .07, clamp(g.z, -T.pitchL / 2, T.pitchL / 2));
     // live "drawing" line while swiping any player

@@ -312,3 +312,45 @@ button {
     color: var(--muted);
     margin-left: 2px;
 }
+/* ---------- Edge shot / dive buttons ---------- */
+#edge {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    justify-content: space-between;
+    pointer-events: none;
+    z-index: 15;
+}
+
+#edge[hidden] {
+    display: none;
+}
+
+#edge button {
+    pointer-events: auto;
+    width: clamp(52px, 9vw, 68px);
+    height: clamp(64px, 12vw, 92px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(13, 27, 24, .82);
+    color: var(--lime);
+    font-size: clamp(1rem, 2.4vw, 1.3rem);
+    font-weight: 900;
+}
+
+#edge button.sel {
+    background: var(--lime);
+    color: #102019;
+    border-color: transparent;
+}
+
+#edge button:first-child {
+    border-radius: 0 14px 14px 0;
+}
+
+#edge button:last-child {
+    border-radius: 14px 0 0 14px;
+}

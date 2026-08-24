@@ -6,8 +6,8 @@ import {
     renderer, scene, camera, camState,
     updateCamera, marker, drawBannerSprite, hideBannerSprite
 } from './world.js';
-import { players, ballMesh, ball, syncMesh, animatePlayer } from './entities.js';
-import { ui, showBanner } from './hud.js';
+import { players, ballMesh, ball, syncMesh, animatePlayer, outfield, atkDir } from './entities.js';
+import { ui, updateDiveChip } from './hud.js';
 import { unlockAudio, sfx } from './audio.js';
 import { startDecision, beginResolve, stepResolve, restartMatch, updatePassLine } from './game.js';
 
@@ -22,6 +22,43 @@ document.getElementById('btn-tutorial').addEventListener('click', () => { ui.tut
 document.getElementById('btn-tutorial-close').addEventListener('click', () => { ui.tutorial.hidden = true; });
 
 ui.restart.addEventListener('click', restartMatch);
+
+/* ---------- edge SHOT (attacking) / DIVE (defending) buttons ---------- */
+const edgeWrap = document.getElementById('edge');
+const edgeL = document.getElementById('edgeL');
+const edgeR = document.getElementById('edgeR');
+
+function setEdgeCall(v) {
+    if (state.role === 'attack') state.shotCall = v;
+    else { state.diveChoice = v; updateDiveChip(v); }
+    sfx.lock();
+    refreshEdgeSel();
+}
+function refreshEdgeSel() {
+    const cur = state.role === 'attack' ? state.shotCall : state.diveChoice;
+    edgeL.classList.toggle('sel', cur === -1);
+    edgeR.classList.toggle('sel', cur === 1);
+}
+edgeL.addEventListener('click', () => setEdgeCall(-1));
+edgeR.addEventListener('click', () => setEdgeCall(1));
+
+/** Show edge buttons when attacking deep enough to shoot, or whenever defending. */
+function updateEdgeButtons() {
+    let show = false, label = 'SHOT';
+    if (state.mode === 'decision' && !state.locked) {
+        if (state.role === 'defend') { show = true; label = 'DIVE'; }
+        else {
+            const t = outfield(state.possession)[state.selected];
+            if (t && t.tz * atkDir() >= T.shootZ - 10) { show = true; label = 'SHOT'; }
+        }
+    }
+    edgeWrap.hidden = !show;
+    if (show) {
+        edgeL.textContent = '◀ ' + label;
+        edgeR.textContent = label + ' ▶';
+        refreshEdgeSel();
+    }
+}
 
 /* ---------- main loop ---------- */
 let last = performance.now();
@@ -60,6 +97,7 @@ function tickBody(now) {
         // game is FROZEN during the window — commands are planned, nothing moves until resolve
     }
     if (state.mode === 'resolve') stepResolve(rawDt);
+    updateEdgeButtons();
 
     // sync visuals
     players.forEach(p => { syncMesh(p); animatePlayer(p, rawDt); });

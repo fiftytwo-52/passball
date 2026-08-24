@@ -13,6 +13,8 @@ export const state = {
     diveChoice: 0,           // human keeper command: -1 / 0 / +1
     guessIdx: null,          // human's guessed receiver index (defending)
     drag: null,
+    pan: { x: 0, z: 0 },     // camera pan offset from dragging blank space
+    shotCall: null,          // -1 left corner · +1 right corner · null none
     banner: null,
     bannerAge: 0,
     resolveCtx: null
