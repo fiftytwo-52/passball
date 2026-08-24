@@ -388,7 +388,42 @@
             <p>Every play freezes time for 3 seconds. The attacker commits a pass, the defender commits a
                 guess — read your opponent to win the ball.</p>
             <button class="mode-btn" id="btn-vs-cpu">VS COMPUTER</button>
+            <button class="mode-btn" id="btn-tutorial" style="background:var(--cyan)">HOW TO PLAY</button>
             <button class="mode-btn secondary" id="btn-pvp" disabled>PVP · COMING IN PHASE 2</button>
+        </div>
+    </div>
+
+    <!-- ---------- Tutorial ---------- -->
+    <div id="tutorial"
+        style="display:none; position:fixed; inset:0; z-index:40; background:rgba(4,12,10,.92); overflow:auto; padding:28px 18px;">
+        <div
+            style="max-width:560px; margin:0 auto; border:1px solid var(--line); background:var(--panel); border-radius:12px; padding:26px;">
+            <div class="eyebrow">TUTORIAL</div>
+            <h2 style="margin:6px 0 14px;">How to play Guess & Pass</h2>
+            <p style="color:var(--muted); font-size:.86rem; line-height:1.55; margin:0 0 14px;">
+                Every play freezes time for a <b style="color:var(--lime)">10-second decision window</b>. Both sides
+                commit secretly, then everything resolves at once. All players and the ball move at the same speed.</p>
+            <h3 style="color:var(--cyan); margin:14px 0 6px; font-size:.95rem;">ATTACKING (you have the ball)</h3>
+            <ul style="color:var(--ink); font-size:.84rem; line-height:1.6; padding-left:18px; margin:0 0 14px;">
+                <li><b>Commit the pass:</b> TAP a teammate — he becomes the receiver (gold ring + pass line).</li>
+                <li><b>Send runners:</b> SWIPE any teammate to a spot — they'll sprint there when play resumes.</li>
+                <li>Press <b>LOCK IN</b> early, or wait for the timer.</li>
+                <li>If the receiver collects the ball deep near the far goal, it becomes a <b>shot</b>.</li>
+            </ul>
+            <h3 style="color:var(--coral); margin:14px 0 6px; font-size:.95rem;">DEFENDING (CPU has the ball)</h3>
+            <ul style="color:var(--ink); font-size:.84rem; line-height:1.6; padding-left:18px; margin:0 0 14px;">
+                <li><b>Guess the receiver:</b> TAP the opponent you think will get the pass (red ring). A correct read
+                    sends your defenders converging with a reach burst — touch the ball and you win possession!</li>
+                <li><b>Command your keeper:</b> choose ◀ DIVE LEFT / STAY / DIVE RIGHT ▶. A correctly-placed dive saves
+                    the shot.</li>
+            </ul>
+            <h3 style="color:var(--lime); margin:14px 0 6px; font-size:.95rem;">RULES</h3>
+            <ul style="color:var(--ink); font-size:.84rem; line-height:1.6; padding-left:18px; margin:0;">
+                <li>First to <b>3 goals</b> wins · 24-play limit as tiebreaker.</li>
+                <li>Completed passes advance the attack; interceptions and saves hand possession to the other side.</li>
+                <li>Every match kicks off from the center spot.</li>
+            </ul>
+            <button class="mode-btn" id="btn-tutorial-close" style="margin-top:20px;">GOT IT — LET'S PLAY</button>
         </div>
     </div>
 
@@ -505,10 +540,47 @@
             scene.background = new THREE.Color(0x07130f);
             scene.fog = new THREE.Fog(0x07130f, 90, 190);
 
-            const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, .1, 400);
-            const CAM = { base: new THREE.Vector3(0, 34, -50), look: new THREE.Vector3(0, 0, 12), trauma: 0 };
-            camera.position.copy(CAM.base);
-            camera.lookAt(CAM.look);
+            const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, .1, 400);
+            const CAM = { trauma: 0 };
+            // dynamic follow camera: tracks the ball, zooms IN when attacking, OUT when defending
+            const camState = {
+                pos: new THREE.Vector3(0, 62, -6),
+                look: new THREE.Vector3(0, 0, 0)
+            };
+            function updateCamera(dt) {
+                // TOP-DOWN view: near-vertical overhead camera riding above the ball.
+                // Attack direction (+z) is up-screen. Zooms IN when attacking, OUT when defending.
+                const attacking = state.role === 'attack';
+                const cx = clamp(ball.x * .35, -7, 7);
+                const height = attacking ? 44 : 62;
+                const desired = new THREE.Vector3(cx, height, clamp(ball.z, -40, 40) - 6);
+                const desiredLook = new THREE.Vector3(cx, 0, clamp(ball.z + (attacking ? 13 : 6), -42, 42));
+                const k = 1 - Math.pow(.002, dt);                          // frame-rate independent smoothing
+                camState.pos.lerp(desired, k);
+                camState.look.lerp(desiredLook, k);
+            }
+            camera.position.copy(camState.pos);
+            camera.lookAt(camState.look);
+
+            /* ---- live pass line so the committed pass is always readable ---- */
+            const passLineGeo = new THREE.BufferGeometry();
+            const passLine = new THREE.Line(passLineGeo, new THREE.LineDashedMaterial({
+                color: COL.aim, dashSize: 1.3, gapSize: .9, transparent: true, opacity: .95
+            }));
+            passLine.visible = false;
+            scene.add(passLine);
+            function updatePassLine() {
+                const show = state.mode === 'decision' && state.role === 'attack' && state.carrier;
+                passLine.visible = !!show;
+                if (!show) return;
+                const tgt = outfield(state.possession)[state.selected];
+                if (!tgt) { passLine.visible = false; return; }
+                passLine.geometry.setFromPoints([
+                    new THREE.Vector3(state.carrier.x, .5, state.carrier.z),
+                    new THREE.Vector3(tgt.tx, .5, tgt.tz)
+                ]);
+                passLine.computeLineDistances();
+            }
 
             scene.add(new THREE.HemisphereLight(0xeafff2, 0x0c2018, 1.05));
             const sun = new THREE.DirectionalLight(0xfff6df, 1.15);
@@ -567,7 +639,7 @@
                 // net hint
                 const net = new THREE.Mesh(
                     new THREE.PlaneGeometry(T.goalHalf * 2, T.goalH),
-                    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .08, side: THREE.DoubleSide })
+                    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .16, side: THREE.DoubleSide })
                 );
                 net.position.set(0, T.goalH / 2, z + (z > 0 ? 1.6 : -1.6));
                 scene.add(left, right, bar, net);
@@ -692,8 +764,16 @@
                     keeper: { x: 0, z: 41 }
                 };
             }
-            function setupPlay() {
-                const atk = attackSpots(), def = defendSpots();
+            /** Center-kickoff shape: ball on the center spot, shape packed in the own half. */
+            function kickoffSpots() {
+                return {
+                    carrier: { x: 0, z: -2.5 },
+                    mates: [{ x: -12, z: -12 }, { x: 12, z: -10 }, { x: 0, z: -22 }, { x: -7, z: -30 }],
+                    runnerHint: { x: 9, z: 6 }
+                };
+            }
+            function setupPlay(kickoffPos = false) {
+                const atk = kickoffPos ? kickoffSpots() : attackSpots(), def = defendSpots();
                 const attackTeam = state.possession, defendTeam = state.possession === 'you' ? 'cpu' : 'you';
                 const aOut = outfield(attackTeam), dOut = outfield(defendTeam);
                 state.carrier = aOut[0];
@@ -736,16 +816,17 @@
                 state.mode = 'decision';
                 state.remaining = T.window; state.locked = false; state.drag = null;
                 state.diveChoice = 0;
+                state.guessIdx = null;
                 ui.lock.disabled = false; ui.lock.textContent = 'LOCK IN';
                 ui.role.textContent = state.role === 'attack' ? 'ATTACK' : 'DEFEND';
                 ui.role.style.color = state.role === 'attack' ? cssColor(COL.aim) : cssColor(COL.you);
                 ui.dive.classList.toggle('on', state.role === 'defend');
                 [...ui.dive.children].forEach(b => b.classList.remove('sel'));
                 if (state.role === 'attack') {
-                    setInstruction('Drag FROM the carrier ONTO a teammate to commit the pass. Drag any teammate to send them on a run.');
+                    setInstruction('ATTACK: TAP a teammate — he receives the pass (gold ring + line). SWIPE a teammate — he runs to that spot. Ball flies at kick-off; if a defender touches it, you lose it.');
                     cpuDefendChoices();
                 } else {
-                    setInstruction('Drag YOUR defenders toward the lanes you expect. Command your keeper\'s dive for shots.');
+                    setInstruction('DEFEND: TAP the opponent you think will receive the pass (red ring). SWIPE your defenders toward danger. A correct read wins you the ball. Pick your keeper\'s dive for shots.');
                     cpuAttackChoices();
                 }
             }
@@ -838,48 +919,59 @@
                 return hit ? players.find(p => p.mesh === hit.object.userData.root) : null;
             }
 
+            /* TAP vs SWIPE:
+               ATTACK — tap a teammate: he receives the pass · swipe a teammate: he runs there
+               DEFEND — tap an opponent: guess the receiver · swipe your defender: send him that way */
             renderer.domElement.addEventListener('pointerdown', e => {
                 if (state.mode !== 'decision' || state.locked) return;
-                const humanTeam = 'you';
-                const p = pickPlayer(e, humanTeam);
+                const p = pickPlayer(e);
                 if (!p) return;
                 if (state.role === 'attack') {
-                    if (p === state.carrier) state.drag = { kind: 'pass', player: p };
-                    else if (p.role === 'outfield') state.drag = { kind: 'move', player: p };
-                    else return;
-                } else {
+                    if (p.team !== 'you' || p.role !== 'outfield') return;
+                    state.drag = { kind: 'mate', player: p, sx: e.clientX, sy: e.clientY };
+                } else if (p.team === 'you') {
                     if (p.role !== 'outfield') return;
-                    state.drag = { kind: 'move', player: p };
+                    state.drag = { kind: 'move', player: p, sx: e.clientX, sy: e.clientY };
+                    renderer.domElement.setPointerCapture(e.pointerId);
+                    marker.visible = true;
+                    marker.position.set(p.x, .07, p.z);
+                } else {
+                    state.drag = { kind: 'guessTap', player: p, sx: e.clientX, sy: e.clientY };
                 }
-                renderer.domElement.setPointerCapture(e.pointerId);
-                marker.visible = true;
-                marker.position.set(p.x, .07, p.z);
             });
             renderer.domElement.addEventListener('pointermove', e => {
                 if (!state.drag) return;
+                if (state.drag.kind !== 'move') return;
                 const g = groundPoint(e);
                 if (g) marker.position.set(clamp(g.x, -T.pitchW / 2, T.pitchW / 2), .07, clamp(g.z, -T.pitchL / 2, T.pitchL / 2));
             });
             renderer.domElement.addEventListener('pointerup', e => {
                 if (!state.drag) return;
-                const g = groundPoint(e);
                 const d = state.drag; state.drag = null; marker.visible = false;
-                if (!g) return;
-                const gx = clamp(g.x, -T.pitchW / 2 + 1, T.pitchW / 2 - 1);
-                const gz = clamp(g.z, -T.pitchL / 2 + 1, T.pitchL / 2 - 1);
-                if (d.kind === 'pass') {
-                    // landed on/near a teammate? commit the pass to them
-                    const mates = outfield('you').filter(p => p !== state.carrier);
-                    let best = null, bd = 5;
-                    mates.forEach(m => { const dd = Math.hypot(m.x - gx, m.z - gz); if (dd < bd) { bd = dd; best = m; } });
-                    if (best) {
-                        state.selected = outfield('you').indexOf(best);
-                        sfx.lock();
-                        setInstruction(`Pass committed to #${state.selected}. Drag teammates to adjust runs, then LOCK IN.`);
+                const moved = Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 10;
+                const setRun = () => {
+                    const g = groundPoint(e);
+                    if (g) { d.player.tx = clamp(g.x, -T.pitchW / 2 + 1, T.pitchW / 2 - 1); d.player.tz = clamp(g.z, -T.pitchL / 2 + 1, T.pitchL / 2 - 1); sfx.lock(); }
+                };
+                if (d.kind === 'mate') {
+                    if (!moved) {                                  // TAP → receiver
+                        if (d.player !== state.carrier) {
+                            state.selected = outfield('you').indexOf(d.player);
+                            sfx.lock();
+                            setInstruction('Receiver locked (gold ring + line). SWIPE teammates for runs, or LOCK IN.');
+                        }
+                    } else setRun();                               // SWIPE → run target
+                } else if (d.kind === 'move') {
+                    if (moved) setRun();
+                } else if (d.kind === 'guessTap') {
+                    if (!moved) {                                  // TAP opponent → guess receiver
+                        const idx = outfield(state.possession).indexOf(d.player);
+                        if (idx >= 0) {
+                            state.guessIdx = idx;
+                            sfx.lock();
+                            setInstruction(`Guess locked on their #${idx} (red ring). SWIPE your defenders too, then LOCK IN.`);
+                        }
                     }
-                } else {
-                    d.player.tx = gx; d.player.tz = gz;
-                    sfx.lock();
                 }
             });
 
@@ -909,13 +1001,16 @@
                     if (i === 0) return; // carrier stays to release the ball
                     if (p !== target && p.tz === p.anchor.z) { p.tx = clamp(p.x + rand(-4, 4), -18, 18); p.tz = clamp(p.z + rand(2, 8), -40, 38); }
                 });
-                const dOut = outfield(defendTeam);
-                if (defendTeam === 'cpu') {
-                    // CPU defenders break toward the lane they guessed
-                    const suspect = target;
-                    dOut.forEach((d, i) => {
-                        if (i === 0) { d.tx = clamp(suspect.x, -18, 18); d.tz = clamp(suspect.z + 2, -40, 40); }
-                        else if (i % 2 === 0) { d.tx = clamp(target.x + rand(-6, 6), -18, 18); d.tz = clamp(target.z + rand(0, 6), -40, 40); }
+                // DEFENSIVE READ: whoever defends taps/swipes a guess; a correct read converges
+                // every defender onto the receiver and gives them a reach burst at the ball.
+                let guessIdx = defendTeam === 'you' ? state.guessIdx : cpuGuessReceiver(aOut);
+                let readCorrect = false;
+                if (guessIdx != null && aOut[guessIdx]) {
+                    readCorrect = aOut[guessIdx] === target;
+                    const gp = aOut[guessIdx];
+                    outfield(defendTeam).forEach((d, i) => {
+                        if (i === 0) { d.tx = clamp(gp.tx + rand(-2, 2), -18, 18); d.tz = clamp(gp.tz + rand(-1, 3), -40, 40); }
+                        else if (i % 2 === 1) { d.tx = clamp(gp.tx + rand(-6, 6), -18, 18); d.tz = clamp(gp.tz + rand(0, 5), -40, 40); }
                     });
                 }
 
@@ -925,7 +1020,7 @@
                 const dir = Math.hypot(ball.tx - ball.x, ball.tz - ball.z) || 1;
                 ball.vx = (ball.tx - ball.x) / dir * T.ballSpeed;
                 ball.vz = (ball.tz - ball.z) / dir * T.ballSpeed;
-                state.resolveCtx = { attackTeam, defendTeam, target, shot: null, done: false };
+                state.resolveCtx = { attackTeam, defendTeam, target, shot: null, done: false, readCorrect, readPerfect: false };
             }
 
             function stepResolve(dt) {
@@ -949,10 +1044,12 @@
                     ball.x += ball.vx * dt; ball.z += ball.vz * dt;
                     ball.dist += T.ballSpeed * dt;
 
-                    // PHYSICAL CONTACT: any defender touching the ball wins it (after it leaves the feet)
+                    // PHYSICAL CONTACT: any defender touching the ball wins it (after it leaves the feet).
+                    // A correct read grants a reach burst — a big, but not absolute, advantage.
                     if (ball.dist > 3) {
+                        const reach = ctx.readCorrect ? T.contactRadius * 1.8 : T.contactRadius;
                         for (const d of outfield(ctx.defendTeam)) {
-                            if (dist2d(d, ball) < T.contactRadius) { intercept(d, ctx); return; }
+                            if (dist2d(d, ball) < reach) { ctx.readPerfect = ctx.readCorrect; intercept(d, ctx); return; }
                         }
                     }
                     // receiver collects
@@ -973,10 +1070,25 @@
 
             function intercept(defender, ctx) {
                 ball.state = 'held'; ctx.done = true;
-                sfx.intercept(); CAM.trauma = .5; showBanner('LOST THE BALL!', COL.cpu);
-                addLog(ctx.attackTeam === 'you' ? 'Your pass was cut out — CPU takes over.' : 'You read the lane and won the ball!', ctx.attackTeam === 'you' ? cssColor(COL.cpu) : cssColor(COL.you));
+                const humanLost = ctx.attackTeam === 'you';
+                sfx.intercept(); CAM.trauma = .55;
+                showBanner(humanLost ? 'LOST THE BALL!' : (ctx.readPerfect ? 'PERFECT READ!' : 'BALL WON!'), humanLost ? COL.cpu : COL.you);
+                addLog(
+                    humanLost ? (ctx.readPerfect ? 'CPU read your pass perfectly and cut it out.' : 'Your pass was cut out — CPU takes over.')
+                        : (ctx.readPerfect ? 'PERFECT READ! You guessed the receiver and won the ball!' : 'You won the ball — your attack begins.'),
+                    humanLost ? cssColor(COL.cpu) : cssColor(COL.you));
                 flipPossessionTo(defender);
                 afterResult();
+            }
+            /** CPU's hidden guess of who will receive (weighted, blind to the real choice). */
+            function cpuGuessReceiver(aOut) {
+                let best = 1, bestScore = -1e9;
+                for (let i = 1; i < aOut.length; i++) {
+                    const r = aOut[i];
+                    const score = r.z * .7 - Math.abs(r.x) * .2 + rand(0, 8);
+                    if (score > bestScore) { bestScore = score; best = i; }
+                }
+                return Math.random() < .75 ? best : 1 + Math.floor(Math.random() * (aOut.length - 1));
             }
 
             function onReceive(ctx) {
@@ -1064,7 +1176,7 @@
             }
             function kickoff(newPossession) {
                 state.possession = newPossession;
-                setupPlay();
+                setupPlay(true);
                 updatePossessionChip();
             }
             function advanceFormation(newCarrier) {
@@ -1117,8 +1229,8 @@
                 state.banner = null; CAM.trauma = 0;
                 ui.human.textContent = '0'; ui.cpu.textContent = '0';
                 ui.plays.textContent = 'PLAY 1'; ui.log.innerHTML = '';
-                setupPlay();
-                addLog('New match. You have the first possession.', cssColor(COL.aim));
+                setupPlay(true);
+                addLog('Kickoff at the center spot. You have the first possession.', cssColor(COL.aim));
                 startDecision();
                 updatePossessionChip();
             }
@@ -1128,6 +1240,9 @@
                 try { (audioCtx ||= new (window.AudioContext || window.webkitAudioContext))(); } catch (_) { }
                 restartMatch();
             });
+            /* tutorial overlay */
+            $('btn-tutorial').addEventListener('click', () => { $('tutorial').style.display = 'block'; });
+            $('btn-tutorial-close').addEventListener('click', () => { $('tutorial').style.display = 'none'; });
 
             /* ================= Banner sprite (canvas overlay in 3D) ================= */
             const bannerCanvas = document.createElement('canvas');
@@ -1160,15 +1275,17 @@
                 const rawDt = Math.min((now - last) / 1000, .08);
                 last = now;
 
-                // camera shake (visual only)
+                // dynamic follow camera + shake (visual only)
+                updateCamera(rawDt);
                 CAM.trauma = Math.max(0, CAM.trauma - rawDt * 2.2);
                 const sh = CAM.trauma * CAM.trauma;
                 camera.position.set(
-                    CAM.base.x + Math.sin(now * .027) * 2.4 * sh,
-                    CAM.base.y + Math.sin(now * .021) * 1.6 * sh,
-                    CAM.base.z + Math.cos(now * .019) * 1.8 * sh
+                    camState.pos.x + Math.sin(now * .027) * 2.4 * sh,
+                    camState.pos.y + Math.sin(now * .021) * 1.6 * sh,
+                    camState.pos.z + Math.cos(now * .019) * 1.8 * sh
                 );
-                camera.lookAt(CAM.look);
+                camera.lookAt(camState.look);
+                updatePassLine();
 
                 if (state.mode === 'decision' && !state.locked) {
                     state.remaining -= rawDt;
@@ -1188,9 +1305,11 @@
                 players.forEach(p => {
                     const isSel = state.mode === 'decision' && state.role === 'attack' &&
                         p.team === state.possession && outfield(state.possession)[state.selected] === p;
+                    const isGuess = state.mode === 'decision' && state.role === 'defend' && state.guessIdx != null &&
+                        outfield(state.possession)[state.guessIdx] === p;
                     const isCarrier = p === state.carrier && state.mode === 'decision';
-                    p.ring.material.opacity = isSel ? .85 : isCarrier ? .5 : 0;
-                    p.ring.material.color.setHex(isSel ? COL.aim : COL.you);
+                    p.ring.material.opacity = isSel ? .85 : isGuess ? .9 : isCarrier ? .5 : 0;
+                    p.ring.material.color.setHex(isGuess ? COL.cpu : isSel ? COL.aim : COL.you);
                 });
 
                 // banner lifecycle
@@ -1210,7 +1329,6 @@
                 camera.updateProjectionMatrix();
                 renderer.setSize(innerWidth, innerHeight);
             });
-
             requestAnimationFrame(tick);
         })();
     </script>
