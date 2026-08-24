@@ -17,13 +17,25 @@ export function cpuAttackChoices() {
     for (let i = 1; i < aOut.length; i++) {
         const r = aOut[i];
         const pressure = defenders.reduce((s, d) => s + clamp(1 - dist2d(d, r) / 22, 0, 1), 0);
-        const score = -r.z * .9 - Math.abs(r.x) * .25 - pressure * 14 + rand(0, 6); // CPU attacks -z
+        // forward progress toward -z, open lane, safe distance from touchlines
+        const edgeRisk = Math.max(0, Math.abs(r.x) - 12) * 2;
+        const score = -r.z * .9 - Math.abs(r.x) * .25 - pressure * 14 - edgeRisk + rand(0, 6);
         if (score > bestScore) { bestScore = score; best = i; }
     }
     state.selected = best;
     const target = aOut[best];
-    target.tx = clamp(target.x + rand(-6, 6), -18, 18);
-    target.tz = clamp(target.z - rand(6, 12), -38, 40);
+    target.tx = clamp(target.x + rand(-6, 6), -15, 15);
+    target.tz = clamp(target.z - rand(6, 12), -38, 38);
+    target.runSet = true;
+
+    // send the two closest other mates on supporting runs so the CPU keeps shape
+    const supporters = aOut.filter((p, i) => i !== 0 && i !== best)
+        .sort((a, b) => dist2d(a, carrier) - dist2d(b, carrier)).slice(0, 2);
+    supporters.forEach((p, i) => {
+        p.tx = clamp(carrier.x + (i === 0 ? -10 : 10) + rand(-3, 3), -15, 15);
+        p.tz = clamp(carrier.z - rand(4, 10), -38, 38);
+        p.runSet = true;
+    });
 }
 
 /** CPU defense positioning during the window (its read happens at resolve). */
@@ -37,9 +49,19 @@ export function cpuDefendChoices() {
         if (score > bestScore) { bestScore = score; bestIdx = i; }
     }
     const suspect = aOut[bestIdx];
+    // every CPU defender picks up a marking assignment — none ball-watches
+    const unmarked = aOut.filter((_, i) => i !== 0); // carrier is marked by the sweepers below
     defenders.forEach((d, i) => {
-        if (i === 0) return; // nearest marker tracks its anchor man automatically
-        if (i <= 2) { d.tx = clamp(suspect.x + rand(-5, 5), -18, 18); d.tz = clamp(suspect.z + rand(2, 8), -40, 40); }
+        if (i <= 1) {
+            // first two converge on the most dangerous receiver
+            d.tx = clamp(suspect.x + rand(-5, 5), -16, 16);
+            d.tz = clamp(suspect.z + rand(2, 8), -40, 40);
+        } else {
+            const mark = unmarked[(i - 2) % unmarked.length];
+            d.tx = clamp(mark.x + rand(-3, 3), -16, 16);
+            d.tz = clamp(mark.z + rand(2, 6), -40, 40);
+        }
+        d.runSet = true;
     });
 }
 

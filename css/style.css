@@ -331,26 +331,19 @@ button {
 
 #edge button {
     pointer-events: auto;
-    width: clamp(52px, 9vw, 68px);
-    height: clamp(64px, 12vw, 92px);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: rgba(13, 27, 24, .82);
+    width: clamp(44px, 7vw, 56px);
+    height: clamp(44px, 7vw, 56px);
+    border: 1px solid rgba(214, 243, 106, .35);
+    border-radius: 50%;
+    background: rgba(13, 27, 24, .38);
     color: var(--lime);
-    font-size: clamp(1rem, 2.4vw, 1.3rem);
+    font-size: clamp(.85rem, 1.8vw, 1.05rem);
     font-weight: 900;
+    opacity: .75;
 }
 
 #edge button.sel {
-    background: var(--lime);
+    background: rgba(214, 243, 106, .85);
     color: #102019;
-    border-color: transparent;
-}
-
-#edge button:first-child {
-    border-radius: 0 14px 14px 0;
-}
-
-#edge button:last-child {
-    border-radius: 14px 0 0 14px;
+    opacity: 1;
 }

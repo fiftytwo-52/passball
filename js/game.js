@@ -18,6 +18,7 @@ export function startDecision() {
     state.diveChoice = 0;
     state.guessIdx = null;
     state.shotCall = null;
+    players.forEach(p => { p.runSet = false; });   // explicit runs marked fresh each play
     ui.role.textContent = state.role === 'attack' ? 'ATTACK' : 'DEFEND';
     ui.role.style.color = state.role === 'attack' ? cssColor(COL.aim) : cssColor(COL.you);
     ui.divechip.hidden = state.role !== 'defend';
@@ -43,10 +44,11 @@ export function beginResolve() {
     const aOut = outfield(attackTeam);
     const target = aOut[state.selected];
 
-    // attackers commit: everyone bursts forward onto the pass (toward the attacked goal)
+    // attackers commit: anyone without an explicit run bursts forward onto the pass
     aOut.forEach((p, i) => {
-        if (i === 0) return; // carrier releases the ball
-        if (p !== target && p.tz === p.anchor.z) { p.tx = clamp(p.x + rand(-4, 4), -18, 18); p.tz = clamp(p.z + d * rand(2, 8), -40, 38); }
+        if (i === 0 || p === target || p.runSet) return;
+        p.tx = clamp(p.x + rand(-4, 4), -18, 18);
+        p.tz = clamp(p.z + d * rand(2, 8), -40, 38);
     });
 
     // DEFENSIVE READ: a correct guess converges defenders on the receiver (+ reach burst)

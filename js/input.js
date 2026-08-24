@@ -45,6 +45,7 @@ function setRunTarget(player, e) {
     if (!g) return;
     player.tx = clamp(g.x, -T.pitchW / 2 + 1, T.pitchW / 2 - 1);
     player.tz = clamp(g.z, -T.pitchL / 2 + 1, T.pitchL / 2 - 1);
+    player.runSet = true;
     sfx.lock();
 }
 
