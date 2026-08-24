@@ -63,12 +63,13 @@ export function beginResolve() {
         });
     }
 
-    // launch the ball along the committed lane (equal-speed rule)
+    // launch the ball along the committed lane — straight line, decelerating (friction)
     ball.state = 'flying'; ball.dist = 0;
     ball.tx = target.tx; ball.tz = target.tz;
     const dir = Math.hypot(ball.tx - ball.x, ball.tz - ball.z) || 1;
-    ball.vx = (ball.tx - ball.x) / dir * T.ballSpeed;
-    ball.vz = (ball.tz - ball.z) / dir * T.ballSpeed;
+    const v0 = T.ballSpeed * 1.18;
+    ball.vx = (ball.tx - ball.x) / dir * v0;
+    ball.vz = (ball.tz - ball.z) / dir * v0;
     state.resolveCtx = { attackTeam, defendTeam, target, shot: null, done: false, readCorrect, readPerfect: false };
 }
 
@@ -82,15 +83,11 @@ export function stepResolve(dt) {
     });
 
     if (ball.state === 'flying') {
-        // slight homing so a moving receiver can meet the equal-speed ball
-        const tgt = ctx.target;
-        const dx = tgt.x - ball.x, dz = tgt.z - ball.z, d = Math.hypot(dx, dz) || 1;
-        ball.vx += (dx / d * T.ballSpeed - ball.vx) * Math.min(1, dt * 2.2);
-        ball.vz += (dz / d * T.ballSpeed - ball.vz) * Math.min(1, dt * 2.2);
-        const sp = Math.hypot(ball.vx, ball.vz) || 1;
-        ball.vx = ball.vx / sp * T.ballSpeed; ball.vz = ball.vz / sp * T.ballSpeed;
+        // PHYSICS: straight line, speed decays with ground friction
+        const fr = Math.exp(-.38 * dt);
+        ball.vx *= fr; ball.vz *= fr;
         ball.x += ball.vx * dt; ball.z += ball.vz * dt;
-        ball.dist += T.ballSpeed * dt;
+        ball.dist += Math.hypot(ball.vx, ball.vz) * dt;
 
         // PHYSICAL CONTACT: any defender touching the ball wins it (after it leaves the feet).
         // A correct read grants a reach burst — a big, but not absolute, advantage.
@@ -102,13 +99,30 @@ export function stepResolve(dt) {
         }
         // receiver collects
         if (dist2d(ctx.target, ball) < T.contactRadius) { onReceive(ctx); return; }
-        // safety: ball out of play → turnover
+
+        // OUT OF PLAY → opponents restart with a kick from the edge line
         if (Math.abs(ball.z) > T.pitchL / 2 || Math.abs(ball.x) > T.pitchW / 2) {
             ctx.done = true; ball.state = 'held';
-            sfx.lost(); showBanner('OUT OF PLAY', COL.cpu);
-            addLog(ctx.attackTeam === 'you' ? 'The pass sailed out of play.' : 'CPU sprays the pass out of play.', '');
-            flipPossessionTo(outfield(ctx.defendTeam)[0]);
+            sfx.lost(); showBanner('EDGE KICK', COL.cpu);
+            addLog(ctx.attackTeam === 'you' ? 'Out of play — CPU restarts from the edge.' : 'Out of play — your edge kick.', '');
+            edgeRestart(ctx.defendTeam);
             afterResult();
+            return;
+        }
+
+        // DEAD BALL: friction killed the pass — nearest outfielder picks it up
+        if (Math.hypot(ball.vx, ball.vz) < 2.4) {
+            ctx.done = true; ball.state = 'held';
+            let near = null, nd = 1e9;
+            for (const p of players) {
+                if (p.role !== 'outfield') continue;
+                const dd = dist2d(p, ball);
+                if (dd < nd) { nd = dd; near = p; }
+            }
+            showBanner('LOOSE BALL', near.team === 'you' ? COL.you : COL.cpu);
+            flipPossessionTo(near);
+            afterResult();
+            return;
         }
     }
 
@@ -189,6 +203,23 @@ function stepShot(ctx, dt) {
 }
 
 /* ---------- outcome application ---------- */
+/** Out of play: opponents restart from the point where the ball crossed the line. */
+function edgeRestart(team) {
+    state.possession = team;
+    const x = clamp(ball.x, -T.pitchW / 2 + 1.5, T.pitchW / 2 - 1.5);
+    const z = clamp(ball.z, -T.pitchL / 2 + 1.5, T.pitchL / 2 - 1.5);
+    let near = null, nd = 1e9;
+    for (const p of outfield(team)) {
+        const dd = dist2d(p, { x, z });
+        if (dd < nd) { nd = dd; near = p; }
+    }
+    state.carrier = near;
+    near.x = x; near.z = z;
+    holdBall(near);
+    updateAnchors();
+    updatePossessionChip();
+}
+
 function flipPossessionTo(winnerPlayer) {
     // ONLY possession changes: teams keep their players, colors and halves — no mirroring.
     state.possession = winnerPlayer.team;

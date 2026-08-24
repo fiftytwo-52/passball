@@ -3,7 +3,7 @@
 import { T, COL, clamp, easeOutCubic } from './config.js';
 import { state } from './state.js';
 import {
-    renderer, scene, camera, camState,
+    THREE, renderer, scene, camera, camState,
     updateCamera, marker, drawBannerSprite, hideBannerSprite
 } from './world.js';
 import { players, ballMesh, ball, syncMesh, animatePlayer, outfield, atkDir } from './entities.js';
@@ -102,6 +102,12 @@ function tickBody(now) {
     // sync visuals
     players.forEach(p => { syncMesh(p); animatePlayer(p, rawDt); });
     ballMesh.position.set(ball.x, .35, ball.z);
+    // rolling rotation: spin axis is perpendicular to travel direction
+    const bsp = Math.hypot(ball.vx || 0, ball.vz || 0);
+    if (bsp > .2) {
+        const axis = new THREE.Vector3(ball.vz, 0, -ball.vx).normalize();
+        ballMesh.rotateOnWorldAxis(axis, (bsp * rawDt) / .32);
+    }
 
     // ring highlights: gold = selected receiver · red = your guessed receiver
     players.forEach(p => {
