@@ -58,6 +58,22 @@ import {
     // A jog, not a sprint: "everyone explodes into position" was a large part of
     // why the board read as too fast.
     const ARC_PASS = 1.0, ARC_SHOT = 0.5;
+    /* --- §12.b ball motion: a struck ball rolls, it does not snap to a spot ---
+       Presentation only. The rulebook still decides *who* wins a ball (§7);
+       these numbers decide how the ball looks getting there, and not one of them
+       is read by a property test. A pass is a decelerating ground ball: it
+       leaves the boot fast, is down to PASS_SLOW of its kick speed by the time
+       it resolves, and has covered PASS_REACH of the distance it was aimed at.
+       That 0.86 is load-bearing — it is the reason a pass to a standing man
+       still lands inside CATCH_RADIUS of him and still counts as completed,
+       while the ball, and not the receiver, is the thing that looks like it is
+       running out of steam. */
+    const BALL_CARRY = 1.15;      // how far ahead of the boot the ball is carried
+    const PASS_SLOW = 0.56;       // speed at resolution, as a fraction of the kick
+    const PASS_PACE = 0.78;       // ...so the pass averages this fraction of it
+    const PASS_REACH = 0.86;      // and it has covered this much ground by then
+    const BALL_ROLL_STOP = 9.0;   // fallback friction for a loose ball, u/s²
+    const BALL_ROLL_ARC = 0.06;   // a rolled ball is on the deck, not in the air
     const LANE_OFFSET = [-30, -14, 14, 30];
     const LANE_DEPTH = [0.55, 0.82, 0.62, 0.34];
     const TAP_SLOP = 6;           // game units a pointer must travel to be a drag
@@ -711,9 +727,12 @@ import {
        One moving object, four modes. `held` rides the carrier; `pass` and `shot`
        are the two flights the §7 races run against; `loose` is a dead ball
        waiting for whoever is nearest. */
+    /* §12.b — a self-lit white ball. `emissive` is what carries the blink: the
+       pulse in frame() drives emissive, so the ball brightens on its own with no
+       second light in a scene that is deliberately lit flat. */
     const ballMesh = new THREE.Mesh(
         new THREE.SphereGeometry(.42, 14, 12),
-        new THREE.MeshLambertMaterial({ color: 0xffffff })
+        new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0xffffff })
     );
     const ballShadow = makeBlobShadow(0.6);
     scene.add(ballMesh, ballShadow);
@@ -723,20 +742,48 @@ import {
         holder: null,
         from: null, dir: null, target: null,
         speed: BALL_SPEED, t: 0, total: 0, travel: 0,
+        s0: BALL_SPEED, s: 0, dec: 0, roll: false,  /* §12.b rolling-ball state */
         arc: ARC_PASS, alive: false,
         passTarget: null, lastTouch: null
     };
 
     function launchBall(from, to, speed, opts) {
         const o = opts || {};
+        const d = Math.max(1e-6, dist(from, to));
+        /* Direction without leaning on unit()'s zero-length behaviour: a
+           degenerate ball (to === from) goes straight up the board instead of
+           becoming NaN and taking the whole pitch with it. */
+        const dx = to.x - from.x, dy = to.y - from.y;
+        const dl = Math.hypot(dx, dy);
         ball.from = { x: from.x, y: from.y };
-        ball.dir = unit(to.x - from.x, to.y - from.y);
+        ball.dir = dl > 1e-6 ? { x: dx / dl, y: dy / dl } : { x: 0, y: 1 };
         ball.speed = speed;
+        ball.roll = o.roll === true;
+        ball.s0 = speed;
+        ball.s = speed;
         ball.t = 0;
         ball.travel = 0;
-        ball.total = dist(from, to) / Math.max(1e-6, speed);
         ball.target = { x: to.x, y: to.y };
-        ball.arc = o.arc === undefined ? ARC_PASS : o.arc;
+        /* A shot is a strike and keeps its constant speed — the keeper's dive is
+           modelled off that speed in shoot()/cpuKeeperDive(), so slowing shots
+           here would break the save, not just the look.
+
+           A pass is rolled. It is resolved at PASS_REACH (0.86) of the distance
+           it was aimed at, still travelling, and `dec` is chosen so that the
+           speed at that instant is exactly PASS_SLOW·v0. Total time is therefore
+           PASS_REACH·d / (PASS_PACE·v0) — the average of v0 and PASS_SLOW·v0 —
+           which is the one number the whole feel hangs on: kick slower than this
+           and a pass dies in the grass, faster and it is the old bullet again. */
+        if (ball.roll) {
+            const v0 = Math.max(1e-6, speed);
+            ball.total = PASS_REACH * d / (PASS_PACE * v0);
+            ball.dec = v0 * (1 - PASS_SLOW) / Math.max(1e-6, ball.total);
+            ball.arc = BALL_ROLL_ARC;
+        } else {
+            ball.total = d / Math.max(1e-6, speed);
+            ball.dec = 0;
+            ball.arc = o.arc === undefined ? ARC_PASS : o.arc;
+        }
         ball.mode = o.mode || 'pass';
         ball.holder = null;
         ball.alive = true;
@@ -751,7 +798,10 @@ import {
        ========================================================================== */
     function groundLine(color, width) {
         const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-        const m = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: .9 }));
+        /* .62, down from .9 — the guide lines are meant to be read, not looked
+           at. On the ink board they were competing with the players for the eye
+           at exactly the moment the eye needs to be on the ball. */
+        const m = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: .62 }));
         m.visible = false;
         scene.add(m);
         m.setEnds = (a, b) => {
@@ -1491,16 +1541,47 @@ import {
 
     function stepBall(dt) {
         if (ball.mode === 'held' && ball.holder) {
+            /* §12.b — the ball rides at the carrier's boot, in front of the
+               direction they are ACTUALLY travelling, and it never drives
+               itself. The old version pinned it at a fixed offset towards the
+               goal, so a player standing still had a ball sliding goalwards out
+               of their feet and a player jogging sideways had one sliding
+               through their back: the game dribbling on the player's behalf.
+               Reading the carrier's own last step means the ball only moves when
+               the player moves, which is what carrying is. A stationary carrier
+               has no step to read, so the ball just rests ahead of their facing
+               and waits to be kicked. */
             const h = ball.holder;
-            const g = PLAY ? PLAY.goal : GOAL.you;
-            const d = unit(g.x - h.x, g.y - h.y);
-            ball.x = h.x + d.x * 0.95;
-            ball.y = h.y + d.y * 0.95;
+            const px = Number.isFinite(h.px) ? h.px : h.x;
+            const py = Number.isFinite(h.py) ? h.py : h.y;
+            let bx = h.x - px, by = h.y - py;
+            const step = Math.hypot(bx, by);
+            if (step > 1e-4) { bx /= step; by /= step; }
+            else {
+                /* never moved: face the goal being attacked (the carrier spawns
+                   facing it) rather than produce a zero-length offset */
+                const g = PLAY ? PLAY.goal : GOAL.you;
+                const gl = Math.max(1e-6, Math.hypot(g.x - h.x, g.y - h.y));
+                bx = (g.x - h.x) / gl; by = (g.y - h.y) / gl;
+            }
+            ball.x = clamp(h.x + bx * BALL_CARRY, 2, 98);
+            ball.y = clamp(h.y + by * BALL_CARRY, 2, 98);
             ball.h = 0.42;
+            ball.s = 0;
         } else if (ball.mode === 'pass' || ball.mode === 'shot') {
             if (!ball.alive) return;
             ball.t = Math.min(ball.total, ball.t + dt);
-            ball.travel = ball.speed * ball.t;
+            if (ball.roll) {
+                /* Linear friction, v(t) = v0 − dec·t, and the distance is the
+                   exact integral of it, (v0 + v)·t/2. No Euler drift, so the ball
+                   arrives where the passer aimed instead of a metre short, and
+                   it is still moving when it gets there. */
+                ball.s = Math.max(0, ball.s0 - ball.dec * ball.t);
+                ball.travel = (ball.s0 + ball.s) * 0.5 * ball.t;
+            } else {
+                ball.s = ball.speed;
+                ball.travel = ball.speed * ball.t;
+            }
             ball.x = ball.from.x + ball.dir.x * ball.travel;
             ball.y = ball.from.y + ball.dir.y * ball.travel;
             const frac = ball.total > 0 ? clamp(ball.t / ball.total, 0, 1) : 1;
@@ -1509,14 +1590,36 @@ import {
             contestFlight();
             if (ball.t >= ball.total && ball.mode !== 'held') resolveArrival();
         } else if (ball.mode === 'loose') {
-            /* The loose ball sits still; the CLOSEST player inside the control
-               radius takes it. This used to be "the first player in allPlayers
-               order", which is not the same thing: with two bodies on the spot —
-               exactly the case where a player and a defender arrive together —
-               the ball changed hands between them on alternating frames, and
-               every handover wipes every player's destination (setCarrier), so
-               neither of them could ever complete a step away from the pile. The
-               ball looked welded to the spot.
+            /* §12.b — and the loose ball keeps rolling. It used to sit on the
+               spot, which made a won tackle or an unclaimed pass look like the
+               ball had been switched off mid-air. Now it carries the speed it
+               arrived with and keeps going along the same line until friction
+               kills it, which is the whole reason a loose ball is worth chasing:
+               the player has to get to where the ball IS, and it is still going
+               somewhere. The chase in simPlayers already reads ball.x/ball.y
+               live, so nobody had to be taught about this — they simply start
+               running at a moving target.
+
+               It is set loose with the speed it was travelling at (ball.s), and
+               comes to rest rather than stopping dead, so `alive` is only turned
+               off once it genuinely has none left. */
+            if (ball.alive) {
+                const dec = ball.dec > 0 ? ball.dec : BALL_ROLL_STOP;
+                const s = Math.max(0, ball.s - dec * dt);
+                ball.travel += (ball.s + s) * 0.5 * dt;
+                ball.s = s;
+                ball.x = clamp(ball.from.x + ball.dir.x * ball.travel, 2, 98);
+                ball.y = clamp(ball.from.y + ball.dir.y * ball.travel, 2, 98);
+                if (s <= 0.01 && ball.travel > 0) ball.alive = false;
+            }
+            /* The CLOSEST player inside the control radius takes it. This used
+               to be "the first player in allPlayers order", which is not the same
+               thing: with two bodies on the spot — exactly the case where a
+               player and a defender arrive together — the ball changed hands
+               between them on alternating frames, and every handover wipes every
+               player's destination (setCarrier), so neither of them could ever
+               complete a step away from the pile. The ball looked welded to the
+               spot.
 
                Nearest-wins is deterministic and frame-order independent; an exact
                tie resolves on the same fixed ordering every frame, so the ball
@@ -1739,8 +1842,13 @@ import {
        ========================================================================== */
     function passTo(from, to, speed) {
         ball.lastTouch = from;
+        /* §12.b — every pass is a rolled ball. It leaves the boot fast, flat on
+           the deck, and loses pace the whole way, so it arrives as something the
+           receiver steps onto rather than something fired at his back. The CPU's
+           pass, the human's pass and autoPass() all come through here, so there
+           is exactly one kind of pass in the game. */
         launchBall({ x: from.x, y: from.y }, { x: to.x, y: to.y },
-            speed || BALL_SPEED, { mode: 'pass', passTarget: to, arc: ARC_PASS });
+            speed || BALL_SPEED, { mode: 'pass', passTarget: to, arc: ARC_PASS, roll: true });
         if (PLAY) PLAY.receiver = to;
         tutorOnPass(from);
         Sfx.kick();
@@ -2196,7 +2304,7 @@ import {
             const mate = mateInDirection(drag.x0, drag.y0, drag.x, drag.y);
             aimLine.visible = true;
             aimLine.material.color.setHex(mate ? COL.aim : COL.ghost);
-            aimLine.material.opacity = mate ? 1 : .45;
+            aimLine.material.opacity = mate ? .85 : .3;
             aimLine.setEnds({ x: drag.x0, y: drag.y0 }, mate ? { x: mate.x, y: mate.y } : tgt);
             runnerMarker.visible = !!mate;
             if (mate) runnerMarker.position.set(worldX(mate.x), 0.09, worldZ(mate.y));
@@ -2214,7 +2322,7 @@ import {
             const t = { x: clamp(pt.x, 0, 100), y: soGoal().y };
             aimLine.visible = true;
             aimLine.material.color.setHex(isOnTarget(t.x, soGoal().x, GOAL_HALF_WIDTH) ? COL.aim : COL.bad);
-            aimLine.material.opacity = 1;
+            aimLine.material.opacity = .85;
             aimLine.setEnds(soSpot(), t);
             shotLine.visible = true;
             shotLine.setEnds(soSpot(), t);
@@ -2858,11 +2966,27 @@ import {
     }
 
     let last = performance.now();
+    /* §12.b — the ball blinks. It is the smallest object on a large dark board
+       and the one thing every eye is actually tracking, so it is the one thing
+       allowed to move on its own between two frames. The pulse is driven off
+       wall time rather than update(), so it keeps beating while a decision
+       window is open and the world underneath it is frozen — a dead-still ball
+       in a paused window is the last thing anyone needs. */
+    let blinkT = 0;
     function frame(now) {
         requestAnimationFrame(frame);
         const dt = Math.min(0.05, (now - last) / 1000);
         last = now;
         if (!state.paused && !topScreen() && state.phase !== 'idle') update(dt);
+        /* A slow two-beat pulse. The ball is never invisible and never flashes:
+           it breathes. `emissive` is what carries the blink, so the ball lights
+           itself without a second light in a scene that is deliberately flat;
+           the size lift stays tiny, because a big sphere swallows its own
+           shadow and reads as a slide rather than a pulse. */
+        blinkT += dt;
+        const beat = 0.5 + 0.5 * Math.sin(blinkT * 4.2);
+        ballMesh.scale.setScalar(1 + beat * 0.14);
+        ballMesh.material.emissive.setScalar(0.18 + beat * 0.5);
         updateHud();
         placeCamera();
         renderer.render(scene, camera);
