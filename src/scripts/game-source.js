@@ -1,21 +1,35 @@
 /**
- * Guess & Pass — the engine.
+ * Guess & Pass — the engine.  Real-time 6-a-side football.
  *
- * This module is the *verbatim* game core, extracted mechanically from the
- * single-file build so the algorithm could not drift during the move to Astro.
- * Only two things were changed on extraction, both mechanical:
+ * There are no turns and no dice. The pitch is one continuous simulation: a
+ * `requestAnimationFrame` loop moves every player and the ball, and every
+ * single frame asks the §7 questions — "is a defender inside CATCH_RADIUS of
+ * the ball yet?", "has the keeper got a hand to it before the line?". What
+ * happens is whatever the geometry says happens.
  *
- *   1. Three.js comes from a real ES import (bundled from node_modules by Vite)
- *      instead of a CDN script-tag global.
- *   2. The whole body is wrapped in an IIFE so the original top-level
- *      `return` guard still works.
+ * The *rulebook* — speeds, radii, the interception race, the save reach, the
+ * penalty reach test, the shootout tiebreak — lives in ./rules.js and is
+ * imported here rather than re-implemented, so `npm run verify` exercises the
+ * exact code this file runs. This file is the presentation: the 3D humanoids on
+ * the 2D top-view pitch, the movement, the input, the HUD.
  *
- * Everything below — the CANONICAL §3 four-state loop, the CANONICAL §4
- * resolution algorithm, the seeded RNG, the CPU model, the feel layer, the HUD
- * wiring and the self-test — is untouched. `window.__GAP` and
- * `window.__GAP_VERIFY_RESULTS` are still published for headless harnesses.
+ * Layout of this file:
+ *   §0  palette + aliases into the rulebook      §8  possession + movement
+ *   §1  presentation maths                       §9  CPU
+ *   §4  match state + event bus                  §10 feel (audio / shake / banner)
+ *   §5  pitch geometry                           §11 HUD (event-driven DOM)
+ *   §6  three.js scene                           §12 lifecycle (halves, restarts)
+ *   §7  players                                  §13 input · §14 update · §15 wiring
  */
 import * as THREE from 'three';
+import {
+    RULES, MATCH_LENGTH,
+    clamp, flightTime,
+    resolvePassRace, interceptionTime,
+    isOnTarget, shotOutcome, defaultDiveTarget,
+    penaltyKickOutcome, shootoutDecided, formatClock,
+    mulberry32, runVerification
+} from './rules.js';
 
 (function () {
     'use strict';
@@ -28,33 +42,24 @@ import * as THREE from 'three';
         }
         console.error(msg);
     }
-
     /* ----------------------------------------------------------------------
-       ↓↓↓ MECHANICAL EXTRACTION BEGINS — do not hand-edit below this line ↓↓↓
+       § 0.a RULEBOOK ALIASES — the tunables live in ./rules.js. Nothing here
+       may be tuned independently of the property tests.
        ---------------------------------------------------------------------- */
-    const T = {
-        /* --- §3 loop --- */
-        window: 3.0,          // decision window, seconds
-        winScore: 3,          // first to 3 goals — the only way a match ends
+    const {
+        PLAYER_SPEED, BALL_SPEED, SHOT_SPEED, DIVE_SPEED, DRILL_SPEED,
+        CATCH_RADIUS, KEEPER_REACH,
+        GOAL_HALF_WIDTH, SHOT_RANGE, HALF_LENGTH, PENALTY_SPOT, KEEPER_LINE
+    } = RULES;
 
-        /* --- §4 resolution (CANONICAL) --- */
-        R_cover: 14,
-        lengthGain: 0.9,
-        baseGuess: 0.35,
-        guessGain: 0.65,
-        alignThreshold: 0.0,
-        shootRange: 30,
-        keeperReach: 20,
-        baseGoal: 0.8,
-        keeperStop: 0.7,
-
-        /* --- presentation / feel (safe to tune, changes no mechanic) --- */
-        setupTime: 0.55,
-        resultTime: 1.05,
-        slowScale: 0.34,
-        playerSpeed: 26,
-        driftSpeed: 9
-    };
+    /* --- presentation / feel: safe to tune, changes no mechanic --- */
+    const SETUP_TIME = 0.85;      // kick-off / restart rearrange, seconds
+    const ARC_PASS = 1.0, ARC_SHOT = 0.5;
+    const LANE_OFFSET = [-30, -14, 14, 30];
+    const LANE_DEPTH = [0.55, 0.82, 0.62, 0.34];
+    const TAP_SLOP = 6;           // game units a pointer must travel to be a drag
+    const DOUBLE_TAP_MS = 340;    // §5 — double-tap to shoot
+    const SO_ZOOM = 2.6, SO_PAN_Y = 92;   // §10 penalty view: one end, magnified
 
     /* ==========================================================================
        § 0.b PALETTE — re-skinned to the DESIGN.md (Vercel / Geist) accent family.
@@ -75,34 +80,21 @@ import * as THREE from 'three';
     };
 
     /* ==========================================================================
-       § 1. MATH + SEEDED RNG
+       § 1. PRESENTATION MATH + SEEDED RNG
+       `clamp` comes from the rulebook. `mulberry32` too. Everything else here is
+       about moving meshes around, and reads no mechanic.
        ========================================================================== */
-    const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-    const lerp = (a, b, t) => a + (b - a) * t;
     const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-    const len2 = (x, y) => Math.hypot(x, y);
-    function norm(x, y) {
+    const lerp = (a, b, t) => a + (b - a) * t;
+    /** Unit vector that keeps its own length, for callers that want both. */
+    function unit(x, y) {
         const l = Math.hypot(x, y);
         return l < 1e-9 ? { x: 0, y: 0, l: 0 } : { x: x / l, y: y / l, l };
     }
-    /** Project P onto segment A→B (clamped). Returns closest point, param and distance. */
-    function projectOnSegment(P, A, B) {
-        const abx = B.x - A.x, aby = B.y - A.y;
-        const L2 = abx * abx + aby * aby;
-        let t = L2 > 1e-9 ? ((P.x - A.x) * abx + (P.y - A.y) * aby) / L2 : 0;
-        t = clamp(t, 0, 1);
-        const Q = { x: A.x + abx * t, y: A.y + aby * t };
-        return { Q, t, dist: Math.hypot(P.x - Q.x, P.y - Q.y) };
-    }
-    /** Deterministic PRNG — every random draw in the game routes through one of these. */
-    function mulberry32(seed) {
-        let a = seed >>> 0;
-        return function () {
-            a = (a + 0x6D2B79F5) | 0;
-            let t = Math.imul(a ^ (a >>> 15), 1 | a);
-            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-        };
+    /** Where a ball sent `from → to` is after `t` seconds at `speed`. */
+    function pointAlong(from, to, speed, t) {
+        const d = unit(to.x - from.x, to.y - from.y);
+        return { x: from.x + d.x * speed * t, y: from.y + d.y * speed * t };
     }
     function hashSeed(a, b, c) {
         let h = 2166136261 ^ (a >>> 0);
@@ -123,205 +115,21 @@ import * as THREE from 'three';
     const randRange = (rng, a, b) => a + (b - a) * rng();
 
     /* ==========================================================================
-       § 2. RESOLUTION ALGORITHM — CANONICAL §4. PURE.
-          No DOM, no THREE, no globals: safe to run headless in the tests below.
-       ========================================================================== */
-
-    /**
-     * §4.2 — per-defender interception chance.
-     * NOTE: the pass target is named `G` here, NOT `T`, because `T` is the
-     * module-level tunables object holding the CANONICAL §4 constants.
-     * @param C pass origin {x,y}      @param G pass target {x,y}
-     * @param D defender {id, pos:{x,y}, guess:{x,y}|null}
-     */
-    function defenderChance(C, G, D) {
-        const Pd = D.pos;
-        const seg = projectOnSegment(Pd, C, G);
-        const laneLen = dist(C, G);
-
-        // Effective reach grows with pass length (longer passes hang longer).
-        const R_eff = T.R_cover * (1 + T.lengthGain * laneLen / 100);
-
-        // Geometric coverage.
-        const geo = clamp(1 - seg.dist / R_eff, 0, 1);
-
-        // Guess alignment: ideal break direction u = normalize(Q − Pd).
-        let a = 0;
-        const g = D.guess;
-        if (g && (g.x !== 0 || g.y !== 0)) {
-            const gl = len2(g.x, g.y);
-            const ux = seg.Q.x - Pd.x, uy = seg.Q.y - Pd.y, ul = len2(ux, uy);
-            if (gl > 1e-9 && ul > 1e-9) a = (g.x / gl) * (ux / ul) + (g.y / gl) * (uy / ul);
-        }
-        const guessFactor = clamp((a - T.alignThreshold + 1) / 2, 0, 1);
-
-        // Combine. geo = 0 ⇒ pd = 0 regardless of guess.
-        const pd = clamp(geo * (T.baseGuess + T.guessGain * guessFactor), 0, 1);
-        return { pd, geo, guessFactor, a, Q: seg.Q, dist: seg.dist, laneLen, R_eff };
-    }
-
-    /** §4.3 — combined interception probability for one pass. `G` = pass target. */
-    function pInterceptOf(C, G, defenders) {
-        let p = 1;
-        for (let i = 0; i < defenders.length; i++) p *= (1 - defenderChance(C, G, defenders[i]).pd);
-        return clamp(1 - p, 0, 0.95);
-    }
-
-    /**
-     * CANONICAL §4 — one call, one outcome: COMPLETE | INTERCEPTION | GOAL | SAVE.
-     * @param input {C, T, defenders, keeper:{pos}, goal:{x,y}}
-     * @param rng   () => [0,1)
-     */
-    function resolvePass(input, rng) {
-        const C = input.C, Tgt = input.T;
-        const defenders = input.defenders || [];
-        const goal = input.goal || { x: 50, y: 100 };
-        const keeper = input.keeper || { pos: { x: goal.x, y: goal.y } };
-
-        /* --- §4.3 combined interception probability --- */
-        let pIntercept = 1;
-        let best = null;
-        for (let i = 0; i < defenders.length; i++) {
-            const d = defenders[i];
-            const r = defenderChance(C, Tgt, d);
-            if (!best || r.pd > best.pd) best = { pd: r.pd, q: r.Q, d: d.id, geo: r.geo };
-            pIntercept *= (1 - r.pd);
-        }
-        pIntercept = clamp(1 - pIntercept, 0, 0.95);
-
-        if (rng() < pIntercept) {
-            return {
-                type: 'INTERCEPTION', at: { x: best.q.x, y: best.q.y },
-                defender: best.d, pIntercept, pGoal: null
-            };
-        }
-
-        /* --- §4.4 completed pass → shot resolution (goal vs save) --- */
-        if (dist(Tgt, goal) <= T.shootRange) {
-            const distFactor = clamp(1 - dist(Tgt, goal) / T.shootRange, 0, 1);
-            const angleFactor = clamp(1 - Math.abs(Tgt.x - 50) / 50, 0.3, 1);
-            const keeperDist = projectOnSegment(keeper.pos, C, Tgt).dist;
-            const keeperCover = clamp(1 - keeperDist / T.keeperReach, 0, 1);
-            const pGoal = clamp(
-                T.baseGoal * (0.5 + 0.5 * distFactor) * angleFactor - keeperCover * T.keeperStop,
-                0.03, 0.97
-            );
-            if (rng() < pGoal) return { type: 'GOAL', at: { x: Tgt.x, y: Tgt.y }, pIntercept, pGoal };
-            return { type: 'SAVE', at: { x: Tgt.x, y: Tgt.y }, pIntercept, pGoal };
-        }
-
-        return { type: 'COMPLETE', at: { x: Tgt.x, y: Tgt.y }, pIntercept, pGoal: null };
-    }
-
-    /* ==========================================================================
-       § 3. VERIFICATION TESTS — the four §4 properties, headless.
-       ========================================================================== */
-    function runVerification(log) {
-        const out = [];
-        const check = (name, pass, detail) => out.push({ name, pass: !!pass, detail });
-
-        /* (1) Better guess ⇒ higher pIntercept. */
-        {
-            const C = { x: 50, y: 20 }, Tp = { x: 50, y: 70 };
-            const mk = g => ({ id: 'd', pos: { x: 57, y: 45 }, guess: g });
-            const on = pInterceptOf(C, Tp, [mk({ x: -1, y: 0 })]);   // breaks into the lane
-            const off = pInterceptOf(C, Tp, [mk({ x: 1, y: 0 })]);   // breaks away from the lane
-            const none = pInterceptOf(C, Tp, [mk(null)]);            // unset
-            check('better guess ⇒ higher pIntercept', on > none && none > off,
-                { correct: +on.toFixed(4), unset: +none.toFixed(4), wrong: +off.toFixed(4) });
-        }
-
-        /* (2) Longer pass ⇒ higher pIntercept (same defender, same perpendicular offset). */
-        {
-            const C = { x: 50, y: 20 };
-            const d = { id: 'd', pos: { x: 56, y: 30 }, guess: { x: -1, y: 0 } };
-            const shortP = pInterceptOf(C, { x: 50, y: 40 }, [d]);
-            const longP = pInterceptOf(C, { x: 50, y: 90 }, [d]);
-            check('longer pass ⇒ higher pIntercept', longP > shortP,
-                { laneLen20: +shortP.toFixed(4), laneLen70: +longP.toFixed(4) });
-        }
-
-        /* (3) More / closer defenders ⇒ higher pIntercept. */
-        {
-            const C = { x: 50, y: 20 }, Tp = { x: 50, y: 80 };
-            const g = { x: -1, y: 0 };
-            const one = pInterceptOf(C, Tp, [{ id: 'a', pos: { x: 58, y: 40 }, guess: g }]);
-            const two = pInterceptOf(C, Tp, [
-                { id: 'a', pos: { x: 58, y: 40 }, guess: g },
-                { id: 'b', pos: { x: 44, y: 60 }, guess: { x: 1, y: 0 } }]);
-            const far = pInterceptOf(C, Tp, [{ id: 'a', pos: { x: 70, y: 40 }, guess: g }]);
-            const near = pInterceptOf(C, Tp, [{ id: 'a', pos: { x: 54, y: 40 }, guess: g }]);
-            check('more defenders ⇒ higher pIntercept', two > one, { one: +one.toFixed(4), two: +two.toFixed(4) });
-            check('closer defender ⇒ higher pIntercept', near > far, { near: +near.toFixed(4), far: +far.toFixed(4) });
-        }
-
-        /* (4) No geometry ⇒ pd = 0, even with a perfect guess. */
-        {
-            const C = { x: 50, y: 20 }, Tp = { x: 50, y: 80 };
-            const hopeless = { id: 'x', pos: { x: 96, y: 50 }, guess: { x: -1, y: 0 } };
-            const r = defenderChance(C, Tp, hopeless);
-            const p = pInterceptOf(C, Tp, [hopeless]);
-            check('geo = 0 ⇒ pd = 0 (guess cannot help)', r.geo === 0 && r.pd === 0 && p === 0,
-                { geo: r.geo, pd: r.pd, pIntercept: +p.toFixed(4) });
-        }
-
-        /* (5) Sanity: whole-pipeline outcomes are always one of the four, and probabilities are bounded. */
-        {
-            const rng = mulberry32(7);
-            const kinds = {};
-            let ok = true;
-            for (let i = 0; i < 4000; i++) {
-                const C = { x: 50, y: randRange(rng, 10, 40) };
-                const Tp = { x: randRange(rng, 25, 75), y: randRange(rng, 45, 92) };
-                const defenders = [0, 1, 2].map(k => ({
-                    id: k, pos: { x: randRange(rng, 20, 80), y: randRange(rng, 40, 96) },
-                    guess: rng() < .7 ? norm(rng() - .5, rng() - .5) : null
-                }));
-                const res = resolvePass({
-                    C, T: Tp, defenders, keeper: { pos: { x: 50, y: 95 } }, goal: { x: 50, y: 100 }
-                }, rng);
-                kinds[res.type] = (kinds[res.type] || 0) + 1;
-                if (['COMPLETE', 'INTERCEPTION', 'GOAL', 'SAVE'].indexOf(res.type) < 0) ok = false;
-                if (res.pIntercept < 0 || res.pIntercept > 0.95) ok = false;
-            }
-            check('4000 random plays: valid outcomes, bounded pIntercept', ok && Object.keys(kinds).length >= 3, kinds);
-        }
-
-        const allPass = out.every(r => r.pass);
-        if (log !== false) {
-            console.groupCollapsed('%c§4 verification — ' + (allPass ? 'ALL PASS' : 'FAILURES'),
-                'color:' + (allPass ? '#50e3c2' : '#eb367f') + ';font-weight:bold');
-            console.table(out.map(r => ({ test: r.name, pass: r.pass, detail: JSON.stringify(r.detail) })));
-            console.groupEnd();
-            if (typeof window !== 'undefined') window.__GAP_VERIFY_RESULTS = out;
-        }
-        return { allPass, results: out };
-    }
-
-    /* ==========================================================================
-       § 4. MATCH STATE  (canonical §3 loop)
+       § 4. MATCH STATE + EVENT BUS  (canonical §3 lifecycle)
        ========================================================================== */
     const state = {
-        phase: 'idle',      // idle | setup | decision | resolve | result | over
-        possession: 'you',  // 'you' | 'cpu'  (who attacks this play)
-        progress: 0.05,     // how far the current possession has advanced, 0(own goal)…1
-        kickoff: false,     // true on the first play and after every goal: start at the centre spot
+        phase: 'idle',        // idle | restart | play | halftime | over | shootout
+        possession: 'you',    // who has the ball right now
         humanScore: 0, cpuScore: 0,
-        plays: 0,
-        decisionEndsAt: 0,  // real-clock timestamp — drives the countdown
-        remaining: T.window,
-        difficulty: 0.6,    // 0 = coin-flip baseline, 1 = fully weighted (§5)
+        half: 1,              // 1 | 2
+        halfT: 0,             // seconds elapsed in this half
+        pendingHalf: false,   // clock expired; wait for the ball to die
+        difficulty: 0.6,      // CPU reading of the game, 0 silly … 1 ruthless
         seed: 0,
-        timeScale: 1,       // slow-motion, applied to presentation only
         trauma: 0,
         paused: false,
-        humanLocked: false,
-        cpuLocked: false,
-        humanChoice: null,  // {type:'pass'|'guess', ...}
-        cpuChoice: null,
-        outcome: null,
-        phaseT: 0,
-        reduceMotion: window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        phaseT: 0,            // seconds in the current dead-ball beat
+        reduceMotion: !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
     };
 
     /* Tiny event bus so the HUD is event-driven, not polled. */
@@ -335,7 +143,7 @@ import * as THREE from 'three';
        § 5. PITCH GEOMETRY  (game space is 100 × 100; goals at y = 0 and y = 100)
 
        The *logic* grid stays the canonical normalized 100 × 100 square — every
-       clamp, formation offset and §4 constant is dimensioned on it and must not
+       clamp, formation offset and §7 constant is dimensioned on it and must not
        move. The *artwork* is a real football pitch: 105 m along the playing
        direction (game-y) and 68 m across it (game-x). Presenting one on the other
        is purely a matter of scale:
@@ -345,7 +153,7 @@ import * as THREE from 'three';
               circular in game space therefore draws as a genuine football
               ellipse — which is what the viewer expects to see.
 
-       nothing in § 4 may reference any of these.
+       nothing in the rulebook may reference any of these.
        ========================================================================== */
     const PITCH_M = { x: 68, y: 105 };              // metres across / along
     const GROUND_M = { x: 76, y: 113 };             // playing area + 4 m run-off
@@ -356,8 +164,10 @@ import * as THREE from 'three';
     const PITCH = {
         w: 100,
         h: 100,
-        /* Markings in real metres, expressed back on the canonical grid. */
-        goalW: 7.32 * MX,
+        /* The mouth the 3D frames must span. §2 puts it at 2 × GOAL_HALF_WIDTH
+           on the canonical grid, so the rulebook — not a metre conversion —
+           decides how wide a goal is. */
+        goalW: GOAL_HALF_WIDTH * 2,
         boxW: 40.32 * MX,
         boxD: 16.5 * MY,
         sixW: 18.32 * MX,
@@ -369,14 +179,10 @@ import * as THREE from 'three';
     };
     const goalFor = team => (team === 'you' ? GOAL.you : GOAL.cpu);
     const other = team => (team === 'you' ? 'cpu' : 'you');
-    /** Carrier y for a given possession progress, in that team's attacking direction. */
-    function carrierY(team, progress) {
-        return team === 'you' ? 20 + 62 * progress : 80 - 62 * progress;
-    }
-    /** Inverse: possession progress implied by a world y for a team. */
-    function progressFromY(team, y) {
-        return clamp((team === 'you' ? (y - 20) / 62 : (80 - y) / 62), 0.03, 0.97);
-    }
+    /** A team's own goal — the one goalFor() does *not* return. */
+    const ownGoal = team => goalFor(other(team));
+    /** The half a team attacks (+) or defends (−), as a y coordinate. */
+    const attackSide = team => (team === 'you' ? 1 : -1);
 
     /* ==========================================================================
        § 6. THREE.JS SCENE — 3D characters, 2D top-view ground
@@ -391,7 +197,9 @@ import * as THREE from 'three';
        plane's own edge from ever landing exactly on the canvas edge. */
     const reqHW = GROUND_M.x * KX / 2 + 0.5;        // ≈ 36.5
     const reqHH = GROUND_M.y / 2 + 0.5;             // ≈ 57.0
-    const view = { hw: reqHW, hh: reqHH };
+    /* §10 — the shootout magnifies one end, so the view carries a zoom and a
+       pan (in game-y units) on top of the contain fit. */
+    const view = { hw: reqHW, hh: reqHH, zoom: 1, panY: 50 };
 
     let renderer;
     try {
@@ -428,8 +236,6 @@ import * as THREE from 'three';
        100 × 100 logic grid paints as a 105 × 68 m pitch. */
     const worldX = gx => (gx - 50) * KX;
     const worldZ = gy => (50 - gy) * ZSTRETCH;     // gameY 100 → screen-up
-    const gameFromWorldX = x => x / KX + 50;
-    const gameFromWorldZ = z => 50 - z / ZSTRETCH;
 
     /* --- the 2D top-view pitch, drawn with Canvas2D and used as a plane texture ---
        Authored in real metres. The canvas is rectangular — 113 m along the playing
@@ -548,9 +354,10 @@ import * as THREE from 'three';
         [-W, -GL, Math.PI * 1.5, Math.PI * 2], [-W, GL, 0, Math.PI / 2]]
             .forEach(([cx, cy, a0, a1]) => circle(cx, cy, 1, a0, a1));
 
-        /* goal nets (behind the goal lines, outside the pitch) */
+        /* goal nets (behind the goal lines, outside the pitch). Painted at the
+           rulebook's mouth width so the 2D net and the 3D frame agree. */
         function net(side) {
-            const gw = 7.32, depth = 2;                 // metres
+            const gw = PITCH.goalW * MX, depth = 2;     // metres
             const x0 = -gw / 2, x1 = gw / 2;
             const yIn = side < 0 ? -GL : GL, yOut = side < 0 ? -GL - depth : GL + depth;
             g.save();
@@ -569,7 +376,7 @@ import * as THREE from 'three';
         /* No ownership tint and no painted end labels. The half the player
            defends is already unambiguous — they attack up the screen, the kits
            and the goal frames carry the colour, and the goal banners are drawn
-           over the goal itself rather than printed on the turf. Anything else
+           in the HUD docks rather than printed on the turf. Anything else
            painted here only made the grass look less like grass. */
 
         const tex = new THREE.CanvasTexture(c);
@@ -602,9 +409,10 @@ import * as THREE from 'three';
     function makeGoal(gy) {
         const grp = new THREE.Group();
         const white = new THREE.MeshLambertMaterial({ color: 0xf2f7f4 });
-        /* PITCH.goalW is on the canonical grid; KX converts it to world-x, where
-           it comes out at exactly 7.32 m. */
-        const gw = PITCH.goalW * KX;
+        /* PITCH.goalW is the rulebook's mouth on the canonical grid; MX converts
+           it to metres and KX back to world-x, so the frame spans exactly the
+           width the geometry tests use. */
+        const gw = PITCH.goalW * MX * KX;
         const half = gw / 2, H = 3.0, depth = 2.2;
         const post = (x, z) => {
             const m = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, H, 10), white);
@@ -687,8 +495,6 @@ import * as THREE from 'three';
 
         const legL = new THREE.Mesh(limbGeo(.2, 1.22), skin); legL.position.set(-.24, 1.22, 0);
         const legR = new THREE.Mesh(limbGeo(.2, 1.22), skin); legR.position.set(.24, 1.22, 0);
-        /* goalkeepers get long sleeves/trousers so they read at a glance */
-        const legMatL = keeperKit ? kitMat : null;
 
         const armL = new THREE.Mesh(limbGeo(.15, 1.3), skin); armL.position.set(-.72, 3.0, 0);
         const armR = new THREE.Mesh(limbGeo(.15, 1.3), skin); armR.position.set(.72, 3.0, 0);
@@ -699,7 +505,6 @@ import * as THREE from 'three';
 
         g.add(torso, hips, head, cap, legL, legR, armL, armR, sleeveL, sleeveR);
         g.userData.limbs = { legL, legR, armL, armR, sleeveL, sleeveR, torso, head };
-        if (legMatL === null) { /* keep default skin legs */ }
         return g;
     }
 
@@ -731,10 +536,13 @@ import * as THREE from 'three';
         const p = {
             id: team + num, team, role, num,
             label: role === 'keeper' ? (team === 'you' ? 'YOU-GK' : 'CPU-GK') : (team === 'you' ? 'YOU' : 'CPU') + '-' + num,
-            x: 50, y: 50, tx: 50, ty: 50, dest: null,
+            x: 50, y: 50, tx: 50, ty: 50, dest: null, ax: 50, ay: 50,
             mesh, ring, shadow,
             yaw: team === 'you' ? Math.PI : 0, walk: 0, px: 50, py: 50,
-            hasBall: false, selected: false, guess: null, speed: T.playerSpeed
+            hasBall: false, selected: false, controlled: false, held: false,
+            duty: null,          // 'interceptor' | 'marker' for the human's two
+            dive: null,          // keeper only: where this dive is going
+            speed: PLAYER_SPEED
         };
         mesh.position.set(worldX(p.x), 0, worldZ(p.y));
         allPlayers.push(p);
@@ -742,14 +550,16 @@ import * as THREE from 'three';
         return p;
     }
 
-    /* 4 outfield + 1 keeper per team */
-    for (let i = 1; i <= 4; i++) spawnPlayer('you', 'outfield', i);
-    spawnPlayer('you', 'keeper', 5);
-    for (let i = 1; i <= 4; i++) spawnPlayer('cpu', 'outfield', i);
-    spawnPlayer('cpu', 'keeper', 5);
+    /* §2 — 5 outfield + 1 keeper per team. The keeper is always num 6, so the
+       engine can reach both of them by id (`you6`, `cpu6`). */
+    for (let i = 1; i <= 5; i++) spawnPlayer('you', 'outfield', i);
+    spawnPlayer('you', 'keeper', 6);
+    for (let i = 1; i <= 5; i++) spawnPlayer('cpu', 'outfield', i);
+    spawnPlayer('cpu', 'keeper', 6);
 
     const teamPlayers = team => allPlayers.filter(p => p.team === team);
     const teamOutfield = team => allPlayers.filter(p => p.team === team && p.role === 'outfield');
+    const keeperOf = team => playersById[team + '6'];
 
     function syncToMesh(p) {
         p.mesh.position.set(worldX(p.x), p.mesh.position.y, worldZ(p.y));
@@ -762,7 +572,7 @@ import * as THREE from 'three';
         const dx = p.x - p.px, dy = p.y - p.py;
         p.px = p.x; p.py = p.y;
         const sp = Math.hypot(dx, dy) / Math.max(dt, 1e-3);
-        const f = clamp(sp / T.playerSpeed, 0, 1);
+        const f = clamp(sp / PLAYER_SPEED, 0, 1);
         p.walk += sp * dt * 0.22;
         const s = Math.sin(p.walk * 6) * .85 * f;
         const L = p.mesh.userData.limbs;
@@ -790,7 +600,10 @@ import * as THREE from 'three';
         return false;
     }
 
-    /* --- ball --- */
+    /* --- ball ---
+       One moving object, four modes. `held` rides the carrier; `pass` and `shot`
+       are the two flights the §7 races run against; `loose` is a dead ball
+       waiting for whoever is nearest. */
     const ballMesh = new THREE.Mesh(
         new THREE.SphereGeometry(.42, 14, 12),
         new THREE.MeshLambertMaterial({ color: 0xffffff })
@@ -798,12 +611,37 @@ import * as THREE from 'three';
     const ballShadow = makeBlobShadow(0.6);
     scene.add(ballMesh, ballShadow);
     const ball = {
-        x: 50, y: 50, h: 0.42, mode: 'held', holder: null,
-        from: null, to: null, t: 0, dur: .5, arc: 1.2, onArrive: null
+        x: 50, y: 50, h: 0.42,
+        mode: 'held',            // held | pass | shot | loose
+        holder: null,
+        from: null, dir: null, target: null,
+        speed: BALL_SPEED, t: 0, total: 0, travel: 0,
+        arc: ARC_PASS, alive: false,
+        passTarget: null, lastTouch: null
     };
-    function ballAt(px, py, h) { ball.x = px; ball.y = py; ball.h = h; }
 
-    /* --- ground overlays: aim line, target ring, guess arrows, destination marker --- */
+    function launchBall(from, to, speed, opts) {
+        const o = opts || {};
+        ball.from = { x: from.x, y: from.y };
+        ball.dir = unit(to.x - from.x, to.y - from.y);
+        ball.speed = speed;
+        ball.t = 0;
+        ball.travel = 0;
+        ball.total = dist(from, to) / Math.max(1e-6, speed);
+        ball.target = { x: to.x, y: to.y };
+        ball.arc = o.arc === undefined ? ARC_PASS : o.arc;
+        ball.mode = o.mode || 'pass';
+        ball.holder = null;
+        ball.alive = true;
+        ball.passTarget = o.passTarget || null;
+        ball.x = from.x; ball.y = from.y; ball.h = 0.42;
+    }
+
+    /* ==========================================================================
+       § 8. OVERLAYS — every piece of guidance is drawn on the turf *for* the
+       player, never as text. Rings mark who you control; lines preview a pass,
+       a shot and a dive.
+       ========================================================================== */
     function groundLine(color, width) {
         const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
         const m = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: .9 }));
@@ -818,131 +656,142 @@ import * as THREE from 'three';
         };
         return m;
     }
-    const aimLine = groundLine(COL.aim);
-    const guessArrows = [];
-    for (let i = 0; i < 8; i++) guessArrows.push(groundLine(COL.cpu));
-    const runnerMarker = new THREE.Mesh(
-        new THREE.RingGeometry(0.9, 1.25, 24),
-        new THREE.MeshBasicMaterial({ color: COL.aim, transparent: true, opacity: .8, side: THREE.DoubleSide, depthWrite: false })
-    );
-    runnerMarker.rotation.x = -Math.PI / 2;
-    runnerMarker.visible = false;
-    scene.add(runnerMarker);
+    const aimLine = groundLine(COL.aim, 2);       // pass preview
+    const diveLine = groundLine(COL.gkYou, 2);    // keeper dive preview
+    const shotLine = groundLine(COL.ghost, 2);    // shot preview
+
+    /** Free-standing ring marker, used for a destination or a dive point. */
+    function mkRing(color, inner, outer) {
+        const m = new THREE.Mesh(
+            new THREE.RingGeometry(inner, outer, 26),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .85, side: THREE.DoubleSide, depthWrite: false })
+        );
+        m.rotation.x = -Math.PI / 2;
+        m.position.y = 0.08;
+        m.visible = false;
+        scene.add(m);
+        return m;
+    }
+    const runnerMarker = mkRing(COL.aim, 0.9, 1.25);
+    const diveMarker = mkRing(COL.gkYou, 1.0, 1.5);
 
     /* --- selection rings on the human's players --- */
     function refreshRings() {
         allPlayers.forEach(p => {
-            const show = p.selected || (PLAY && PLAY.carrier === p && p.team === 'you');
-            p.ring.material.opacity = show ? 0.9 : 0;
-            p.ring.material.color.setHex(p.selected ? COL.aim : COL.aim);
-            p.ring.scale.setScalar(p.selected ? 1.08 : 1);
+            const show = p.controlled;
+            p.ring.material.opacity = show ? (p.hasBall ? 0.95 : 0.55) : 0;
+            p.ring.material.color.setHex(p.team === 'you' ? COL.aim : COL.cpu);
+            p.ring.scale.setScalar(p.hasBall ? 1.1 : 1);
         });
     }
 
     /* ==========================================================================
-       § 8. FORMATIONS — derived from carrier + attacked goal, so both directions work
+       § 9. POSSESSION + FORMATION — everything is derived from the carrier and
+       the goal being attacked, so both directions read identically.
        ========================================================================== */
     let PLAY = null;
 
-    function layoutAttack(team, carrier, goal, rng) {
-        const j = () => randRange(rng, -3, 3);
-        const mix = (t, offx, offy) => ({
-            x: clamp(lerp(carrier.x, goal.x, t) + offx + j(), 5, 95),
-            y: clamp(lerp(carrier.y, goal.y, t) + offy + j(), 5, 95)
-        });
-        const spots = [
-            mix(0.30, -19, 0),
-            mix(0.30, 19, 0),
-            mix(0.72, 0, 0)     // the runner — the deep threat
-        ];
-        const mates = teamOutfield(team).filter(p => p !== carrier);
-        mates.forEach((p, i) => {
-            const s = spots[i % spots.length];
-            p.ax = s.x; p.ay = s.y;
-            p.x = s.x; p.y = s.y; p.px = s.x; p.py = s.y;
-            p.tx = s.x; p.ty = s.y; p.dest = null;
-        });
-        return { runner: mates[2] || mates[mates.length - 1], mates };
+    /** The spot an attacking teammate holds, from the ball toward the goal. */
+    function attackingSpot(from, goal, i) {
+        const off = LANE_OFFSET[i % LANE_OFFSET.length];
+        const t = LANE_DEPTH[i % LANE_DEPTH.length];
+        return {
+            x: clamp(lerp(from.x, goal.x, t) + off * 0.55, 8, 92),
+            y: clamp(lerp(from.y, goal.y, t), 6, 94)
+        };
     }
 
-    function layoutDefence(team, carrier, goal, rng) {
-        const j = () => randRange(rng, -3.2, 3.2);
-        const mix = (t, offx) => ({
-            x: clamp(lerp(carrier.x, goal.x, t) + offx + j(), 5, 95),
-            y: clamp(lerp(carrier.y, goal.y, t) + j(), 5, 95)
-        });
-        const spots = [mix(0.42, -15), mix(0.42, 15), mix(0.63, 0), mix(0.84, -9)];
-        const dfs = teamOutfield(team);
-        dfs.forEach((p, i) => {
-            const s = spots[i % spots.length];
-            p.ax = s.x; p.ay = s.y;
-            p.x = s.x; p.y = s.y; p.px = s.x; p.py = s.y;
-            p.tx = s.x; p.ty = s.y; p.dest = null; p.guess = null;
-        });
-        return dfs;
+    /** The spot an auto-drifting defender holds, between ball and own goal. */
+    function defendingSpot(from, own, i) {
+        const t = [0.42, 0.60, 0.78][i % 3];
+        const ox = [-17, 0, 17][i % 3];
+        return {
+            x: clamp(lerp(50, from.x, 0.62) + ox, 8, 92),
+            y: clamp(lerp(from.y, own.y, t), 6, 94)
+        };
     }
 
-    /* keepers always guard their own goal */
-    function parkKeepers() {
-        const ky = playersById['you5'], kc = playersById['cpu5'];
-        const set = (p, x, y) => { p.ax = x; p.ay = y; p.tx = x; p.ty = y; p.x = x; p.y = y; p.px = x; p.py = y; p.dest = null; };
-        set(ky, clamp(50, 8, 92), 5.5);
-        set(kc, clamp(50, 8, 92), 94.5);
+    /** Where a keeper stands with the ball somewhere else. §2: on their line. */
+    function keeperHome(team) {
+        const own = ownGoal(team);
+        return { x: 50, y: own.y + attackSide(team) * KEEPER_LINE };
     }
+    const keeperSlideX = () => clamp(50 + (ball.x - 50) * 0.35, 40, 60);
 
-    /* ==========================================================================
-       § 9. CPU — §5 baseline (random) blended toward the weighted target
-       ========================================================================== */
-    function cpuGuessSet(defenders, carrier, goal, difficulty, rng) {
-        /* weight likely receivers by threat: cheap (near their goal), open, central */
-        const attackers = PLAY.mates;
-        const w = attackers.map(m => {
-            const dg = dist(m, goal);
-            const openness = 1 - pInterceptOf(carrier, m, defenders.map(d => ({ id: d.id, pos: d, guess: null })));
-            return 0.2 + openness * 0.9 + (dg <= T.shootRange ? 0.8 : 0.1) + clamp(1 - dg / 90, 0, 1) * 0.4;
-        });
-        const picked = weightedPick(attackers, w, rng).item || attackers[0];
-
-        /* how many defenders bother to commit: more with higher difficulty */
-        const count = clamp(Math.round(1 + 3 * difficulty), 1, defenders.length);
-        const order = defenders.slice().sort(() => rng() - .5);
-
-        defenders.forEach((d, i) => {
-            const commit = order.indexOf(d) < count;
-            if (!commit) { d.guess = null; return; }
-            if (rng() > 0.25 + 0.75 * difficulty) {
-                /* baseline: near-random direction */
-                d.guess = norm(randRange(rng, -1, 1), randRange(rng, -1, 1));
-                if (!d.guess.l) d.guess = { x: 0, y: 0 };
-                return;
-            }
-            const toLane = norm(picked.x - d.x, picked.y - d.y);
-            const toCarrier = norm(carrier.x - d.x, carrier.y - d.y);
-            d.guess = norm(toLane.x * 0.78 + toCarrier.x * 0.22, toLane.y * 0.78 + toCarrier.y * 0.22);
-        });
-    }
-
-    function cpuPassChoice(carrier, goal, defenders, difficulty, rng) {
-        const cands = PLAY.mates;
-        const scored = cands.map(m => {
-            const laneP = pInterceptOf(carrier, m, defenders.map(d => ({ id: d.id, pos: d, guess: null })));
-            const openness = 1 - laneP;
-            const d = dist(carrier, m);
-            const reach = clamp(1 - Math.abs(d - 30) / 42, 0, 1);
-            const progress = clamp((dist(carrier, goal) - dist(m, goal)) / 60, 0, 1);
-            const shot = dist(m, goal) <= T.shootRange ? 0.5 : 0;
-            const v = 0.42 * openness + 0.18 * reach + 0.3 * progress + shot + 0.05;
-            /* blend toward the deliberately naive baseline (uniform) as difficulty → 0 */
-            return lerp(0.28, v, difficulty);
-        });
-        if (rng() > 0.15 + 0.85 * difficulty) {
-            return cands[Math.floor(rng() * cands.length)];   // baseline coin-flip pass
+    /** Where a defender must be to meet a pass at the earliest possible moment. */
+    function interceptTarget(P, from, to) {
+        const t = interceptionTime(P, from, to);
+        if (!Number.isFinite(t)) {
+            /* Unwinnable on the ground: fall back to the midpoint of the lane,
+               which is still a useful "get in the way" position. */
+            return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
         }
-        return weightedPick(cands, scored, rng).item || cands[0];
+        return pointAlong(from, to, BALL_SPEED, t);
+    }
+
+    /** Rebuild the play context around whoever now has the ball. */
+    function setCarrier(p) {
+        state.possession = p.team;
+        allPlayers.forEach(x => { x.hasBall = false; x.dest = null; });
+        p.hasBall = true;
+        ball.mode = 'held';
+        ball.holder = p;
+        ball.alive = false;
+        ball.passTarget = null;
+        ball.lastTouch = p;
+
+        const atk = p.team, def = other(atk);
+        PLAY = {
+            atk, def,
+            goal: goalFor(atk),
+            own: ownGoal(atk),
+            carrier: p,
+            receiver: null,
+            keeper: keeperOf(def),
+            cpuThink: 0.9 + Math.random() * 0.7,
+            threat: null
+        };
+        assignControls();
+        bus.emit('role');
+    }
+
+    /**
+     * §4/§6 — who the human is actually holding. Attacking: the carrier is the
+     * gesture, the other four are draggable runners. Defending: the two
+     * outfielders nearest the ball are the interceptor and the marker; everyone
+     * else holds shape for them.
+     */
+    function assignControls() {
+        allPlayers.forEach(p => { p.controlled = false; p.duty = null; });
+        if (!PLAY) return;
+        const atk = PLAY.atk;
+        if (atk === 'you') {
+            PLAY.carrier.controlled = true;
+            const mates = teamOutfield('you').filter(p => p !== PLAY.carrier);
+            mates.forEach(m => { m.controlled = true; });
+            const sorted = mates.slice().sort((a, b) => dist(a, PLAY.goal) - dist(b, PLAY.goal));
+            PLAY.receiver = sorted[0];
+            if (PLAY.receiver) PLAY.receiver.duty = 'receiver';
+        } else {
+            const near = teamOutfield('you').slice().sort((a, b) => dist(a, ball) - dist(b, ball));
+            if (near[0]) { near[0].controlled = true; near[0].duty = 'interceptor'; }
+            if (near[1]) { near[1].controlled = true; near[1].duty = 'marker'; }
+            const k = keeperOf('you');
+            if (k) k.controlled = true;
+        }
+        refreshRings();
+    }
+
+    function hideOverlays() {
+        aimLine.visible = false;
+        diveLine.visible = false;
+        shotLine.visible = false;
+        runnerMarker.visible = false;
+        diveMarker.visible = false;
     }
 
     /* ==========================================================================
-       § 10. FEEL — audio, shake, flash, banner (rides on top, never inside §4)
+       § 9.b FEEL — audio, shake, banner (rides on top; never inside the rulebook)
        ========================================================================== */
     const Sfx = (() => {
         let ctx = null, master = null, muted = false;
@@ -988,9 +837,9 @@ import * as THREE from 'three';
     })();
 
     function shake(amount) { state.trauma = clamp(state.trauma + amount, 0, 1); }
-    /* Every piece of transient feedback lives in the HUD docks or on the renderer
-       itself. Nothing is drawn over the ground: the turf carries the ball and the
-       players and nothing else. */
+    /* Every piece of transient feedback lives in the HUD docks or on the
+       renderer itself. Nothing is drawn over the ground: the turf carries the
+       ball and the players and nothing else. */
     const bannerEl = document.getElementById('banner');
     function banner(text, color) {
         bannerEl.textContent = text;
@@ -1001,21 +850,25 @@ import * as THREE from 'three';
     }
 
     /* ==========================================================================
-       § 11. HUD — event-driven DOM overlay + screen stack
+       § 10. HUD — event-driven DOM overlay + screen stack
+       The HUD is a set of flow siblings of the stage, so it can only ever shrink
+       the pitch, never cover it (game-ui-ux: anchors + containers).
        ========================================================================== */
     const el = id => document.getElementById(id);
     const ui = {
-        hudTop: el('hud-top'), hudBottom: el('hud-bottom'),
+        hudTop: el('hud-top'), hudBottom: el('hud-bottom'), pens: el('hud-pens'),
         role: el('role-badge'), poss: el('possession-chip'),
         scoreYou: el('score-you').querySelector('strong'),
         scoreCpu: el('score-cpu').querySelector('strong'),
-        plays: el('plays'), timerNum: el('timer-num'), timerWrap: el('timer-wrap'), timerBar: el('timer-bar'),
+        halfLabel: el('half-label'), clock: el('clock'), clockBar: el('clock-bar'),
         log: el('log'), instruction: el('instruction'),
-        lock: el('btn-lock'), mute: el('btn-mute'), pause: el('btn-pause'), help: el('btn-help'),
-        difficulty: el('difficulty')
+        mute: el('btn-mute'), pause: el('btn-pause'), help: el('btn-help'),
+        difficulty: el('difficulty'),
+        soTitle: el('so-title'), soYou: el('so-you'), soCpu: el('so-cpu'),
+        soScore: el('so-score'), soTurn: el('so-turn')
     };
 
-    let lastBarWritten = -1, lastNumWritten = -1;
+    let lastClock = -1, lastBar = -1;
 
     function pushLog(text, cls) {
         const li = document.createElement('li');
@@ -1024,29 +877,28 @@ import * as THREE from 'three';
         ui.log.prepend(li);
         while (ui.log.children.length > 5) ui.log.lastChild.remove();
     }
+    const log = (text, cls) => bus.emit('log', { text, cls });
 
     bus.on('score', () => {
         ui.scoreYou.textContent = state.humanScore;
         ui.scoreCpu.textContent = state.cpuScore;
     });
-    bus.on('plays', () => {
-        ui.plays.textContent = 'PLAY ' + (state.plays + 1);
-    });
     bus.on('role', () => {
+        if (SO.active) return;
         const attacking = state.possession === 'you';
         ui.role.textContent = attacking ? 'ATTACK' : 'DEFEND';
         ui.role.className = attacking ? 'attack' : 'defend';
         ui.poss.className = 'chip ' + state.possession;
         ui.poss.innerHTML = '<i class="dot"></i>' + (state.possession === 'you' ? 'YOU · BALL' : 'CPU · BALL');
         ui.instruction.textContent = attacking
-            ? 'Swipe from the carrier to a teammate to pass · drag a teammate to move your runner · tap a teammate then LOCK IN.'
-            : 'Drag a defender outward to commit its guess direction · LOCK IN to commit early.';
-        ui.lock.textContent = attacking ? 'PASS ⏎' : 'COMMIT ⏎';
-    });
-    bus.on('lockstate', () => {
-        ui.lock.disabled = state.humanLocked || state.phase !== 'decision';
+            ? 'Drag from the ball-carrier toward a teammate and release to pass · double-tap the goal mouth to shoot.'
+            : 'Drag your interceptor and marker to close the lane · drag your keeper to set the dive.';
     });
     bus.on('log', d => pushLog(d.text, d.cls));
+    bus.on('half', () => {
+        ui.halfLabel.textContent = SO.active ? 'PENALTIES'
+            : (state.phase === 'over' ? 'FULL TIME' : 'HALF ' + state.half);
+    });
 
     /* --- screen stack (game-ui-ux: push/pop, focus handed to the top screen) --- */
     const SCREENS = {
@@ -1080,313 +932,725 @@ import * as THREE from 'three';
         const show = name === null || name === 'pause';
         ui.hudTop.hidden = !show;
         ui.hudBottom.hidden = !show;
+        ui.pens.hidden = !(show && SO.active);
         if (name === null) ui.pause.textContent = '❙❙';
     });
 
     /* ==========================================================================
-       § 12. PLAY FLOW (canonical §3)
+       § 11. LIFECYCLE (canonical §3)
+       Only two hard resets exist: a GOAL (centre kick-off to the conceding side)
+       and a SAVE (the saving side restarts from their own penalty spot). An
+       interception never resets — possession flips where the ball was cut out.
        ========================================================================== */
-    function beginMatch() {
-        state.humanScore = 0; state.cpuScore = 0; state.plays = 0;
-        state.possession = 'you'; state.progress = 0.05; state.kickoff = true;
-        state.seed = (Math.random() * 1e9) | 0;
-        state.outcome = null; state.phase = 'over';
-        state.trauma = 0; state.timeScale = 1;
-        ui.log.innerHTML = '';
-        pushLog('Kick-off — you attack the CPU goal (top).', 'good');
-        bus.emit('score'); bus.emit('plays');
-        Sfx.unlock(); Sfx.whistle();
-        beginSetup();
-    }
 
-    function beginSetup() {
-        state.phase = 'setup'; state.phaseT = 0;
-        state.humanLocked = false; state.cpuLocked = false;
-        state.humanChoice = null; state.cpuChoice = null;
-        state.outcome = null; state.remaining = T.window;
-        state.timeScale = 1;
-        ui.timerWrap.classList.remove('low');
-        hideOverlays();
-
-        const atk = state.possession, def = other(atk);
-        const goal = goalFor(atk);
-        const rng = mulberry32(hashSeed(state.seed, state.plays, 11));
-
-        /* carrier — a kick-off places it on the centre spot; every other play
-           resumes wherever the previous one left possession */
+    /** Put both teams back in shape around a restart for `team` with the ball. */
+    function arrangeRestart(team, pos) {
+        const atk = team, def = other(atk), goal = goalFor(atk), own = ownGoal(def);
         const carrier = teamOutfield(atk)[0];
-        let cx, cy;
-        if (state.kickoff) {
-            state.kickoff = false;
-            state.progress = 0.5;
-            cx = 50; cy = 50;
-        } else {
-            cx = clamp(50 + randRange(rng, -6, 6), 12, 88);
-            cy = carrierY(atk, state.progress);
-        }
-        setPos(carrier, cx, cy);
-        teamOutfield(atk).forEach(p => { p.hasBall = false; p.guess = null; });
-        carrier.hasBall = true;
+        const rng = mulberry32(hashSeed(state.seed, state.half, Math.floor(state.halfT)));
 
-        const atkLayout = layoutAttack(atk, { x: cx, y: cy }, goal, rng);
-        const defenders = layoutDefence(def, { x: cx, y: cy }, goal, rng);
-        teamOutfield(atk).forEach(p => { if (p !== carrier) p.role === 'keeper'; });
-        parkKeepers();
-
-        PLAY = {
-            attacker: atk, defender: def, goal,
-            carrier, mates: atkLayout.mates, runner: atkLayout.runner,
-            defenders, keeper: playersById[def + '5'],
-            target: null, runnerDest: null, rng,
-            runnerFrom: null
+        const place = (p, spot, dropBack) => {
+            p.ax = spot.x; p.ay = spot.y;
+            p.dest = null; p.selected = false; p.held = false;
+            const back = unit(own.y - spot.y, 0);
+            p.x = clamp(spot.x + (dropBack ? randRange(rng, -6, 6) : 0), 6, 94);
+            p.y = clamp(spot.y + back.y * (dropBack ? 11 : 0) + (dropBack ? randRange(rng, -4, 4) : 0), 5, 95);
+            p.px = p.x; p.py = p.y;
         };
-        PLAY.runnerDest = { x: PLAY.runner.x, y: PLAY.runner.y };
-        PLAY.runnerFrom = { x: PLAY.runner.x, y: PLAY.runner.y };
 
-        allPlayers.forEach(p => { p.selected = false; p.speed = T.playerSpeed; });
-        ball.mode = 'held'; ball.holder = carrier; ball.onArrive = null;
-        refreshRings();
-
-        bus.emit('role'); bus.emit('lockstate'); bus.emit('plays');
-        pushLog('Play ' + (state.plays + 1) + ' — ' + (atk === 'you' ? 'you have the ball' : 'CPU has the ball') + '.');
-    }
-
-    function setPos(p, x, y) {
-        p.x = x; p.y = y; p.px = x; p.py = y; p.tx = x; p.ty = y; p.dest = null;
-        p.ax = x; p.ay = y;
-        syncToMesh(p);
-    }
-
-    function beginDecision() {
-        state.phase = 'decision';
-        state.remaining = T.window;
-        state.decisionEndsAt = (window.performance ? performance.now() : Date.now()) + T.window * 1000;
-        state.humanLocked = false; state.cpuLocked = false;
-        state.humanChoice = null; state.cpuChoice = null;
-        bus.emit('lockstate');
-        bus.emit('role');
-    }
-
-    /** The human's choice, auto-filled if unset (canonical §3). */
-    function humanChoiceNow() {
-        if (state.humanChoice) return state.humanChoice;
-        if (PLAY.attacker === 'you') {
-            /* nearest safe receiver */
-            const safe = PLAY.mates.slice().sort((a, b) =>
-                pInterceptOf(PLAY.carrier, a, asDefInputs(PLAY.defenders)) -
-                pInterceptOf(PLAY.carrier, b, asDefInputs(PLAY.defenders)))[0];
-            return { type: 'pass', target: safe, autofilled: true };
-        }
-        /* defenders keep their current facing */
-        PLAY.defenders.forEach(d => {
-            if (!d.guess) d.guess = norm(PLAY.carrier.x - d.x, PLAY.carrier.y - d.y);
+        place(carrier, pos, true);
+        teamOutfield(atk).filter(p => p !== carrier).forEach((p, i) => {
+            place(p, attackingSpot(pos, goal, i), true);
         });
-        return { type: 'guess', autofilled: true };
-    }
-
-    function cpuChoiceNow() {
-        if (state.cpuChoice) return state.cpuChoice;
-        const rng = mulberry32(hashSeed(state.seed, state.plays, PLAY.attacker === 'cpu' ? 31 : 32));
-        if (PLAY.attacker === 'cpu') {
-            const target = cpuPassChoice(PLAY.carrier, PLAY.goal, PLAY.defenders, state.difficulty, rng);
-            /* the CPU also repositions its runner up-field */
-            const g = PLAY.goal;
-            const rd = {
-                x: clamp(lerp(PLAY.runner.x, g.x, 0.4) + randRange(rng, -14, 14), 8, 92),
-                y: clamp(lerp(PLAY.runner.y, g.y, 0.45), 8, 92)
-            };
-            return { type: 'pass', target, runnerDest: rd };
-        }
-        cpuGuessSet(PLAY.defenders, PLAY.carrier, PLAY.goal, state.difficulty, rng);
-        return { type: 'guess' };
-    }
-
-    const asDefInputs = dfs => dfs.map(d => ({ id: d.id, pos: d, guess: d.guess }));
-
-    function lockIn(who) {
-        if (state.phase !== 'decision') return;
-        if (who === 'you') {
-            if (state.humanLocked) return;
-            state.humanChoice = humanChoiceNow();
-            state.humanLocked = true;
-        } else {
-            if (state.cpuLocked) return;
-            state.cpuChoice = cpuChoiceNow();
-            state.cpuLocked = true;
-            if (state.cpuChoice.type === 'pass' && state.cpuChoice.runnerDest) {
-                PLAY.runnerDest = state.cpuChoice.runnerDest;
-                PLAY.runner.dest = state.cpuChoice.runnerDest;
-            }
-        }
-        bus.emit('lockstate');
-        if (state.humanLocked && state.cpuLocked) beginResolve();
-    }
-
-    function beginResolve() {
-        /* make sure both sides have committed — hidden from each other until now */
-        if (!state.humanLocked) { state.humanChoice = humanChoiceNow(); state.humanLocked = true; }
-        if (!state.cpuLocked) { state.cpuChoice = cpuChoiceNow(); state.cpuLocked = true; }
-        if (state.humanChoice && state.humanChoice.type === 'pass' && state.humanChoice.target) {
-            PLAY.target = state.humanChoice.target;
-        }
-        if (state.cpuChoice && state.cpuChoice.type === 'pass' && state.cpuChoice.target) {
-            PLAY.target = state.cpuChoice.target;
-        }
-        if (state.humanChoice && state.humanChoice.type === 'guess') humanApplyGuesses();
-        if (state.cpuChoice && state.cpuChoice.type === 'guess') { /* already written onto defenders */ }
-
-        /* if this side never picked a target, auto-fill one */
-        if (!PLAY.target) {
-            PLAY.target = PLAY.mates.slice().sort((a, b) =>
-                pInterceptOf(PLAY.carrier, a, asDefInputs(PLAY.defenders)) -
-                pInterceptOf(PLAY.carrier, b, asDefInputs(PLAY.defenders)))[0];
-        }
-
-        state.phase = 'resolve'; state.phaseT = 0;
-        state.pending = true;              // wait for the runner to finish, then §4 runs once
-        state.timeScale = state.reduceMotion ? 1 : T.slowScale;
-        ui.lock.disabled = true;
-        playerGuessArrowRefresh(true);      // reveal the committed lanes
-        pushLog((PLAY.attacker === 'you' ? 'You' : 'CPU') + ' plays it to ' + PLAY.target.label + '…');
-        Sfx.kick();
-    }
-
-    function humanApplyGuesses() {
-        /* taps/drags already wrote d.guess; unset ones fall back to facing */
-        PLAY.defenders.forEach(d => {
-            if (!d.guess) d.guess = norm(PLAY.carrier.x - d.x, PLAY.carrier.y - d.y);
+        teamOutfield(def).forEach((p, i) => {
+            place(p, defendingSpot(pos, own, i), true);
         });
+        [keeperOf('you'), keeperOf('cpu')].forEach(k => {
+            const home = keeperHome(k.team);
+            k.ax = home.x; k.ay = home.y;
+            k.x = home.x; k.y = home.y; k.px = k.x; k.py = k.y;
+            k.dest = null; k.held = false; k.dive = null;
+        });
+
+        setCarrier(carrier);
+        state.phase = 'restart';
+        state.phaseT = 0;
+        hideOverlays();
     }
 
-    function executeResolve() {
-        state.pending = false;
-        const rng = mulberry32(hashSeed(state.seed, state.plays, 77));
-        const C = { x: PLAY.carrier.x, y: PLAY.carrier.y };
-        const Tp = { x: PLAY.target.x, y: PLAY.target.y };
-        const res = resolvePass({
-            C, T: Tp,
-            defenders: asDefInputs(PLAY.defenders),
-            keeper: { pos: { x: PLAY.keeper.x, y: PLAY.keeper.y } },
-            goal: PLAY.goal
-        }, rng);
-        state.outcome = res;
-        PLAY.outcome = res;
-        PLAY.C = C; PLAY.Tp = Tp;
-
-        /* ball travel (§7 feedback rides on top of the outcome) */
-        const laneLen = dist(C, Tp);
-        ball.mode = 'fly'; ball.holder = null;
-        ball.from = { x: C.x, y: C.y };
-        ball.dur = clamp(0.42 + laneLen / 100 * 0.55, 0.42, 1.0) / Math.max(0.15, state.timeScale);
-        ball.arc = res.type === 'INTERCEPTION' ? 0.7 : 1.5;
-        ball.t = 0;
-
-        if (res.type === 'INTERCEPTION') {
-            ball.to = { x: res.at.x, y: res.at.y };
-            const d = playersById[res.defender] || PLAY.defenders[0];
-            d.dest = { x: res.at.x, y: res.at.y };
-            d.speed = T.playerSpeed;
-            Sfx.bad(); shake(.32);
-            banner('INTERCEPTED', CSS.bad);
-            bus.emit('log', { text: 'Intercepted by ' + d.label + '!', cls: 'bad' });
-        } else if (res.type === 'GOAL') {
-            ball.to = { x: Tp.x, y: Tp.y };
-            Sfx.goal(); shake(.75);
-            banner('GOAL!', CSS.goal);
-            bus.emit('log', { text: 'GOAL for ' + (PLAY.attacker === 'you' ? 'you' : 'CPU') + '!', cls: PLAY.attacker === 'you' ? 'good' : 'bad' });
-        } else if (res.type === 'SAVE') {
-            ball.to = { x: PLAY.keeper.x, y: PLAY.keeper.y };
-            PLAY.keeper.dest = { x: Tp.x, y: Tp.y };
-            Sfx.save(); shake(.22);
-            banner('SAVED', CSS.warn);
-            bus.emit('log', { text: 'Keeper saves it!', cls: PLAY.attacker === 'you' ? 'bad' : 'good' });
-        } else {
-            ball.to = { x: Tp.x, y: Tp.y };
-            Sfx.pass(); Sfx.good(); shake(.08);
-            banner('COMPLETE', CSS.you);
-            bus.emit('log', { text: 'Completed to ' + PLAY.target.label + '.', cls: PLAY.attacker === 'you' ? 'good' : '' });
-        }
-        console.debug('[§4]', res.type, 'pIntercept=' + res.pIntercept.toFixed(3),
-            res.pGoal !== null && res.pGoal !== undefined ? 'pGoal=' + res.pGoal.toFixed(3) : '');
+    /** §3 — centre kick-off, to the conceding side. */
+    function kickoff(team) {
+        arrangeRestart(team, { x: 50, y: 50 });
+        log((team === 'you' ? 'Your' : 'CPU') + ' kick-off from the centre spot.', '');
     }
 
-    function applyOutcome() {
-        const res = state.outcome;
-        if (!res) return;
-        const atk = PLAY.attacker;
+    /** §3 — a save is a goal kick from the saving side's own penalty spot. */
+    function goalKick(team) {
+        const own = ownGoal(team);
+        const spot = { x: 50 + (Math.random() - .5) * 8, y: own.y + attackSide(team) * PENALTY_SPOT };
+        arrangeRestart(team, spot);
+        log((team === 'you' ? 'Your' : 'CPU') + ' keeper restarts from the penalty spot.', '');
+    }
 
-        if (res.type === 'COMPLETE') {
-            state.possession = atk;
-            state.progress = progressFromY(atk, res.at.y);
-        } else if (res.type === 'INTERCEPTION') {
-            state.possession = other(atk);
-            state.progress = progressFromY(state.possession, res.at.y);
-        } else if (res.type === 'GOAL') {
-            if (atk === 'you') state.humanScore++; else state.cpuScore++;
-            bus.emit('score');
-            state.possession = other(atk);      // kickoff to the conceding side
-            state.progress = 0.05;
-            state.kickoff = true;               // …from the centre spot
+    function beginMatch() {
+        state.humanScore = 0; state.cpuScore = 0;
+        state.half = 1; state.halfT = 0; state.pendingHalf = false;
+        state.seed = (Math.random() * 1e9) | 0;
+        state.trauma = 0;
+        state.phase = 'play';
+        endShootout(true);
+        ui.log.innerHTML = '';
+        bus.emit('score'); bus.emit('half');
+        Sfx.unlock(); Sfx.whistle();
+        hideOverlays();
+        kickoff(Math.random() < 0.5 ? 'you' : 'cpu');
+        log('Two 2:00 halves — ' + formatClock(HALF_LENGTH) + ' each. You attack the top goal.', '');
+    }
+
+    /** §3 — half and full time. The ball is always dead before the whistle. */
+    function endHalf() {
+        state.pendingHalf = false;
+        if (state.half === 1) {
+            state.half = 2;
+            state.halfT = 0;
+            bus.emit('half');
             Sfx.whistle();
-        } else if (res.type === 'SAVE') {
-            state.possession = other(atk);
-            state.progress = progressFromY(state.possession, PLAY.keeper.y);
+            banner('HALF TIME', CSS.warn);
+            log('Half time. ' + state.humanScore + '–' + state.cpuScore + '.', '');
+            kickoff(other(state.possession));
+        } else {
+            finishMatch();
         }
     }
 
-    function endOfPlay() {
-        state.plays++;
-        bus.emit('plays');
-        const done = state.humanScore >= T.winScore || state.cpuScore >= T.winScore;
-        if (done) return endMatch();
-        beginSetup();
-    }
-
-    function endMatch() {
+    function finishMatch() {
         state.phase = 'over';
+        bus.emit('half');
+        Sfx.whistle();
+        const level = state.humanScore === state.cpuScore;
         const won = state.humanScore > state.cpuScore;
-        const draw = state.humanScore === state.cpuScore;
-        el('over-title').textContent = draw ? 'DRAW ' + state.humanScore + '–' + state.cpuScore
+        el('over-title').textContent = level
+            ? 'LEVEL ' + state.humanScore + '–' + state.cpuScore
             : (won ? 'YOU WIN ' : 'CPU WINS ') + state.humanScore + '–' + state.cpuScore;
-        el('over-detail').textContent = state.plays + ' plays · first to ' + T.winScore + ' goals.';
-        bus.emit('log', { text: draw ? 'Full time: draw.' : (won ? 'Full time: you win!' : 'Full time: CPU wins.'), cls: won ? 'good' : 'bad' });
-        pushScreen('over', { focus: '#btn-again' });
-    }
-
-    function hideOverlays() {
-        guessArrows.forEach(a => a.visible = false);
-        aimLine.visible = false;
-        runnerMarker.visible = false;
+        el('over-detail').textContent = level
+            ? 'Full time. Settle it from the spot.'
+            : 'Full time after two ' + formatClock(HALF_LENGTH) + ' halves.';
+        /* §0/§10 — the shootout is a manual choice, and only when level. */
+        const pens = el('btn-pens');
+        if (pens) pens.hidden = !level;
+        el('screen-over').querySelector('.eyebrow').textContent = level ? 'Level at full time' : 'Full time';
+        log(level ? 'Full time: level. Go to penalties?' : (won ? 'Full time: you win!' : 'Full time: CPU wins.'), won ? 'good' : 'bad');
+        pushScreen('over', { focus: level ? '#btn-pens' : '#btn-again' });
     }
 
     /* ==========================================================================
-       § 13. INPUT — Pointer Events: one code path for mouse, touch and pen
+       § 12. THE BALL — one continuous §7 race, checked every single frame
+       ========================================================================== */
+    const defenderInputs = team => teamOutfield(team).map(p => ({ x: p.x, y: p.y, speed: p.speed }));
+
+    /** A defender's cut is checked against the ball's live position. */
+    function contestFlight() {
+        const atk = state.possession, def = other(atk);
+
+        /* outfielders of the defending side may cut any ball in flight */
+        for (const p of teamOutfield(def)) {
+            if (dist(p, ball) <= CATCH_RADIUS) return cutOut(p, atk);
+        }
+        /* the defending keeper: a full reach against a shot, a normal catch
+           radius against a pass */
+        const k = keeperOf(def);
+        if (k) {
+            const r = ball.mode === 'shot' ? KEEPER_REACH : CATCH_RADIUS;
+            if (dist(k, ball) <= r) return caughtByKeeper(k, atk);
+        }
+    }
+
+    /** §3 — an interception never resets: possession flips exactly here. */
+    function cutOut(p, atk) {
+        ball.mode = 'held'; ball.alive = false;
+        ball.x = p.x; ball.y = p.y;
+        if (p.team !== atk) {
+            Sfx.bad(); shake(.28);
+            banner('INTERCEPTED', CSS.bad);
+            log(logName(p) + ' cuts it out.', p.team === 'you' ? 'good' : 'bad');
+        }
+        setCarrier(p);
+    }
+
+    /** §3 — the save is a goal kick, and the clock never stops for it. */
+    function caughtByKeeper(k, atk) {
+        const wasShot = ball.mode === 'shot';
+        ball.mode = 'held'; ball.alive = false;
+        ball.x = k.x; ball.y = k.y;
+        if (wasShot || k.team !== atk) {
+            Sfx.save(); shake(.22);
+            banner('SAVED', CSS.warn);
+            log(k.team === 'you' ? 'Your keeper saves it!' : 'CPU keeper saves it!', k.team === 'you' ? 'good' : 'bad');
+        }
+        goalKick(k.team);
+    }
+
+    function scoreGoal(team) {
+        if (team === 'you') state.humanScore++; else state.cpuScore++;
+        bus.emit('score');
+        Sfx.goal(); shake(.7);
+        banner('GOAL', team === 'you' ? CSS.you : CSS.cpu);
+        log(team === 'you' ? 'GOAL! ' + state.humanScore + '–' + state.cpuScore : 'CPU score. ' + state.humanScore + '–' + state.cpuScore,
+            team === 'you' ? 'good' : 'bad');
+        kickoff(other(team));
+    }
+
+    /** What happens when the ball finishes its travel without being cut out. */
+    function resolveArrival() {
+        ball.alive = false;
+        const goal = goalFor(state.possession);
+
+        if (ball.mode === 'shot') {
+            if (isOnTarget(ball.target.x, goal.x, GOAL_HALF_WIDTH)) return scoreGoal(state.possession);
+            Sfx.bad(); banner('WIDE', CSS.bad);
+            log('Shot wide — goal kick.', state.possession === 'you' ? 'bad' : 'good');
+            return goalKick(other(state.possession));
+        }
+
+        const recv = ball.passTarget;
+        if (recv && recv.team === state.possession) {
+            setCarrier(recv);
+            Sfx.good();
+            return;
+        }
+        /* Nobody claimed it: the ball is simply loose, and the nearest player
+           in either kit wins the race for it. */
+        ball.mode = 'loose';
+        ball.alive = true;
+    }
+
+    function stepBall(dt) {
+        if (ball.mode === 'held' && ball.holder) {
+            const h = ball.holder;
+            const g = PLAY ? PLAY.goal : GOAL.you;
+            const d = unit(g.x - h.x, g.y - h.y);
+            ball.x = h.x + d.x * 0.95;
+            ball.y = h.y + d.y * 0.95;
+            ball.h = 0.42;
+        } else if (ball.mode === 'pass' || ball.mode === 'shot') {
+            if (!ball.alive) return;
+            ball.t = Math.min(ball.total, ball.t + dt);
+            ball.travel = ball.speed * ball.t;
+            ball.x = ball.from.x + ball.dir.x * ball.travel;
+            ball.y = ball.from.y + ball.dir.y * ball.travel;
+            const frac = ball.total > 0 ? clamp(ball.t / ball.total, 0, 1) : 1;
+            ball.h = 0.42 + Math.sin(Math.PI * frac) * ball.arc;
+
+            contestFlight();
+            if (ball.t >= ball.total && ball.mode !== 'held') resolveArrival();
+        } else if (ball.mode === 'loose') {
+            /* the loose ball sits still; whoever reaches it takes it */
+            for (const p of allPlayers) {
+                if (dist(p, ball) <= CATCH_RADIUS) { setCarrier(p); return; }
+            }
+        }
+        ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
+        ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
+        const s = 1 - clamp(ball.h / 4, 0, .6);
+        ballShadow.scale.setScalar(s);
+        ballShadow.material.opacity = 0.75 * s;
+    }
+
+    const logName = p => p.label;
+
+    /* ==========================================================================
+       § 13. PLAYER MOVEMENT — human-controlled players hold, everyone else holds
+       shape. There is no turn, so all of this runs every frame.
+       ========================================================================== */
+    function moveCarrier(dt) {
+        const c = PLAY.carrier;
+        if (c.dest) return;                       // never while it is being passed
+        if (dist(c, PLAY.goal) > SHOT_RANGE * 0.94) {
+            const d = unit(PLAY.goal.x - c.x, PLAY.goal.y - c.y);
+            moveToward(c, c.x + d.x * 3, c.y + d.y * 3, DRILL_SPEED, dt);
+        }
+    }
+
+    function updateKeeper(k, dt) {
+        if (!k) return;
+        const home = keeperHome(k.team);
+        if (k.dive) {
+            moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED, dt);
+            return;
+        }
+        moveToward(k, keeperSlideX(), home.y, DRILL_SPEED * 1.5, dt);
+    }
+
+    function simPlayers(dt) {
+        const atk = PLAY.atk, def = PLAY.def;
+
+        /* 1. anyone the human has sent somewhere runs there at full pace */
+        allPlayers.forEach(p => {
+            if (p.dest && moveToward(p, p.dest.x, p.dest.y, p.speed, dt)) p.dest = null;
+        });
+
+        /* 2. attacking shape — the receiver and runners push into the final third */
+        teamOutfield(atk).forEach((p, i) => {
+            if (p === PLAY.carrier || p.dest) return;
+            if (p.team === 'you' && p.controlled) return;   // the human's runners hold
+            const s = attackingSpot(PLAY.carrier, PLAY.goal, i);
+            moveToward(p, s.x, s.y, DRILL_SPEED, dt);
+        });
+        moveCarrier(dt);
+
+        /* 3. defending shape — the human's two hold, the rest drop between the
+              ball and their own goal */
+        teamOutfield(def).forEach((p, i) => {
+            if (p.dest) return;
+            if (p.team === 'you' && p.controlled) return;
+            if (p.team === 'cpu') {
+                const role = p.duty;
+                if (role === 'interceptor') {
+                    const to = PLAY.threat || PLAY.carrier;
+                    const s = interceptTarget(p, PLAY.carrier, to);
+                    moveToward(p, s.x, s.y, PLAYER_SPEED * 0.94, dt);
+                    return;
+                }
+                if (role === 'marker') {
+                    const c = PLAY.carrier;
+                    const s = { x: clamp(c.x - (PLAY.goal.x - c.x) * 0.12, 6, 94), y: clamp(lerp(c.y, PLAY.goal.y, 0.12), 6, 94) };
+                    moveToward(p, s.x, s.y, PLAYER_SPEED * 0.92, dt);
+                    return;
+                }
+            }
+            const s = defendingSpot(PLAY.carrier, PLAY.own, i);
+            moveToward(p, s.x, s.y, DRILL_SPEED, dt);
+        });
+
+        /* 4. a loose ball is a race for the nearest player in each kit */
+        if (ball.mode === 'loose') {
+            ['you', 'cpu'].forEach(team => {
+                const near = allPlayers
+                    .filter(p => p.team === team)
+                    .sort((a, b) => dist(a, ball) - dist(b, ball))[0];
+                if (near && !near.dest) moveToward(near, ball.x, ball.y, PLAYER_SPEED, dt);
+            });
+        }
+
+        updateKeeper(keeperOf(atk), dt);
+        updateKeeper(keeperOf(def), dt);
+    }
+
+    /* ==========================================================================
+       § 14. CPU — it reads the same geometry the tests do. `resolvePassRace`
+       scores its pass options, `interceptionTime` places its interceptor and
+       `shotOutcome` tells its keeper which way to go.
+       ========================================================================== */
+    function cpuAssignDuties() {
+        const dfs = teamOutfield('cpu').slice().sort((a, b) => dist(a, ball) - dist(b, ball));
+        dfs.forEach((p, i) => { p.duty = i === 0 ? 'interceptor' : (i === 1 ? 'marker' : null); });
+    }
+
+    /** The most dangerous receiver: the one closest to the goal it is attacking. */
+    function cpuThreat() {
+        const mates = teamOutfield(state.possession).filter(p => p !== PLAY.carrier);
+        if (!mates.length) return PLAY.carrier;
+        return mates.slice().sort((a, b) => dist(a, PLAY.goal) - dist(b, PLAY.goal))[0];
+    }
+
+    /** Score each pass with the very race the player will face. */
+    function cpuChoosePass(rng) {
+        const from = { x: PLAY.carrier.x, y: PLAY.carrier.y };
+        const cands = teamOutfield('cpu').filter(p => p !== PLAY.carrier);
+        const defenders = defenderInputs('you').concat([{ x: keeperOf('you').x, y: keeperOf('you').y, speed: PLAYER_SPEED }]);
+        const scored = cands.map(m => {
+            const to = { x: m.x, y: m.y };
+            const race = resolvePassRace({ from, to, defenders });
+            const safe = race.outcome === 'COMPLETE' ? 1 : 0.15;
+            const progress = clamp((dist(from, PLAY.goal) - dist(to, PLAY.goal)) / 60, 0, 1);
+            const shot = dist(to, PLAY.goal) <= SHOT_RANGE ? 0.45 : 0;
+            const v = 0.5 * safe + 0.32 * progress + shot + 0.06;
+            /* blend toward the deliberately naive baseline as difficulty → 0 */
+            return lerp(0.3, v, state.difficulty);
+        });
+        if (rng() > 0.15 + 0.85 * state.difficulty) return cands[Math.floor(rng() * cands.length)] || cands[0];
+        return weightedPick(cands, scored, rng).item || cands[0];
+    }
+
+    function cpuThink(dt) {
+        if (state.possession !== 'cpu') return;
+        cpuAssignDuties();
+        PLAY.threat = cpuThreat();
+        PLAY.cpuThink -= dt;
+        if (PLAY.cpuThink > 0) return;
+
+        const c = PLAY.carrier;
+        const rng = mulberry32(hashSeed(state.seed, state.half, Math.floor(state.halfT * 60)));
+
+        /* §5 — inside range it may go for goal instead */
+        const toGoal = dist(c, PLAY.goal);
+        if (toGoal <= SHOT_RANGE && rng() < 0.25 + 0.5 * state.difficulty) {
+            const aim = clamp(PLAY.goal.x + randRange(rng, -GOAL_HALF_WIDTH * 0.85, GOAL_HALF_WIDTH * 0.85), 0, 100);
+            shoot(c, { x: aim, y: PLAY.goal.y });
+            return;
+        }
+
+        const target = cpuChoosePass(rng);
+        if (!target) return;
+        passTo(c, target);
+    }
+
+    /* ==========================================================================
+       § 15. ACTIONS — the three things a human can do, and the two the CPU does.
+       ========================================================================== */
+    function passTo(from, to, speed) {
+        ball.lastTouch = from;
+        launchBall({ x: from.x, y: from.y }, { x: to.x, y: to.y },
+            speed || BALL_SPEED, { mode: 'pass', passTarget: to, arc: ARC_PASS });
+        if (PLAY) PLAY.receiver = to;
+        Sfx.kick();
+    }
+
+    /** §5 — a shot is only legal inside SHOT_RANGE, and it flies at SHOT_SPEED. */
+    function shoot(from, target) {
+        if (!PLAY) return false;
+        if (dist(from, PLAY.goal) > SHOT_RANGE) {
+            log('Too far out to shoot — get inside ' + SHOT_RANGE + '.', '');
+            Sfx.bad();
+            return false;
+        }
+        ball.lastTouch = from;
+        launchBall({ x: from.x, y: from.y }, target, SHOT_SPEED, { mode: 'shot', arc: ARC_SHOT });
+        /* §7 — the keeper's dive is set the instant the shot leaves the boot,
+           and stays re-writable for the whole flight. */
+        const k = keeperOf(other(state.possession));
+        if (k && !k.held) {
+            k.dive = k.team === 'cpu'
+                ? cpuKeeperDive(k, target)
+                : defaultDiveTarget(k, target, KEEPER_REACH);
+        }
+        Sfx.kick(); shake(.12);
+        log((from.team === 'you' ? 'You shoot' : 'CPU shoots') + '!', '');
+        return true;
+    }
+
+    /**
+     * §7 — a keeper with no instruction dives toward the shot's side. The CPU's
+     * keeper is allowed to *read* it, and it reads with `shotOutcome`, so its
+     * eyesight is the same geometry the property tests cover.
+     */
+    function cpuKeeperDive(k, target) {
+        const home = keeperHome(k.team);
+        const guessed = defaultDiveTarget(k, target, KEEPER_REACH);
+        if (Math.random() > 0.2 + 0.75 * state.difficulty) return guessed;
+        const committed = { x: clamp(target.x, 8, 92), y: home.y };
+        const read = shotOutcome({
+            from: { x: ball.from.x, y: ball.from.y },
+            target,
+            keeper: { x: k.x, y: k.y },
+            keeperTarget: committed,
+            goalX: PLAY.goal.x,
+            goalHalfWidth: GOAL_HALF_WIDTH
+        });
+        const blind = shotOutcome({
+            from: { x: ball.from.x, y: ball.from.y },
+            target,
+            keeper: { x: k.x, y: k.y },
+            keeperTarget: guessed,
+            goalX: PLAY.goal.x,
+            goalHalfWidth: GOAL_HALF_WIDTH
+        });
+        return read.outcome === 'SAVED' || blind.outcome !== 'SAVED' ? committed : guessed;
+    }
+
+    /* ==========================================================================
+       § 16. PENALTY SHOOTOUT (§10)
+       A different mode with its own state machine:
+         AIM → CHECK_ON_TARGET → DIVE → RESOLVE → NEXT_KICKER
+       ========================================================================== */
+    const SO = {
+        active: false,
+        phase: 'aim',            // aim | dive | flight | result
+        turn: 'you',             // whose kick it is
+        you: 0, cpu: 0,
+        takenYou: 0, takenCpu: 0,
+        aim: null, dive: null,
+        result: null,
+        t: 0,
+        from: null, to: null
+    };
+
+    const soGoal = () => GOAL.you;                       // one end, always
+    const soSpot = () => ({ x: 50, y: soGoal().y - PENALTY_SPOT });
+    const soKeeper = () => {
+        const k = keeperOf(other(SO.turn));
+        const home = keeperHomeSnapshot(k);
+        return home;
+    };
+    /** The keeper stands on the line for a kick, not at their open-play post. */
+    function keeperHomeSnapshot(k) {
+        const g = soGoal();
+        return { x: k.x, y: g.y + (g.y === 0 ? KEEPER_LINE : -KEEPER_LINE) * -1 };
+    }
+
+    function setPenaltyView(on) {
+        view.zoom = on ? SO_ZOOM : 1;
+        view.panY = on ? SO_PAN_Y : 50;
+        fitView();
+    }
+
+    function beginShootout() {
+        while (topScreen()) popScreen();
+        SO.active = true;
+        SO.you = 0; SO.cpu = 0;
+        SO.takenYou = 0; SO.takenCpu = 0;
+        SO.result = null;
+        state.phase = 'shootout';
+        setPenaltyView(true);
+        /* §8 — the HUD has swapped modes: the readouts are the shootout's now, so
+           the regulation log and instruction line would only be stale copy. */
+        ui.pens.hidden = false;
+        ui.log.innerHTML = '';
+        ui.instruction.textContent = 'Draw the aim line, then draw the dive line. Within reach it is saved.';
+        bus.emit('half');
+        soHudState();
+        soSetupKick(Math.random() < 0.5 ? 'you' : 'cpu');
+        log('Penalties. Five kicks each, then sudden death.', '');
+    }
+
+    function endShootout(silent) {
+        SO.active = false;
+        if (!silent) return;
+        setPenaltyView(false);
+        if (ui.pens) ui.pens.hidden = true;
+    }
+
+    function soSetupKick(turn) {
+        SO.turn = turn;
+        SO.phase = 'aim';
+        SO.aim = null;
+        SO.dive = null;
+        SO.result = null;
+        SO.t = 0;
+        hideOverlays();
+
+        /* place the kicker and the keeper on the line */
+        const spot = soSpot();
+        const goal = soGoal();
+        const kicker = soKickerOf(turn);
+        const defTeam = other(turn);
+        const k = keeperOf(defTeam);
+        const keeperY = goal.y - PENALTY_LINE();
+        allPlayers.forEach(p => { p.controlled = false; p.dest = null; p.dive = null; p.held = false; });
+        if (kicker) { kicker.controlled = true; setPlayerPos(kicker, spot.x, spot.y); }
+        if (k) { k.controlled = true; setPlayerPos(k, 50, keeperY); }
+        ball.mode = 'held'; ball.holder = kicker; ball.alive = false;
+        if (kicker) { ball.x = spot.x; ball.y = spot.y; ball.h = 0.42; }
+
+        bus.emit('role');
+        soHudState();
+        if (turn === 'cpu') {
+            SO.t = 1.0;   // the CPU's routine
+            log('CPU steps up…', '');
+        } else {
+            log('Your kick — drag from the spot and release.', '');
+        }
+    }
+    /* §10 — the keeper works from the goal line, KEEPER_LINE out from it. */
+    function PENALTY_LINE() { return SO_KEEPER_LINE; }
+    const SO_KEEPER_LINE = 4;
+
+    /** The shootout's kickers: the five outfield players, in shirt order. */
+    function soKickerOf(team) {
+        const roster = teamOutfield(team);
+        if (!roster.length) return null;
+        const taken = team === 'you' ? SO.takenYou : SO.takenCpu;
+        const kicks = RULES.SHOOTOUT_KICKS;
+        return roster[taken % roster.length] || roster[roster.length - 1];
+    }
+
+    function setPlayerPos(p, x, y) {
+        p.x = x; p.y = y; p.px = x; p.py = y;
+        p.ax = x; p.ay = y; p.tx = x; p.ty = y;
+        syncToMesh(p);
+    }
+
+    function soSetAim(target) {
+        if (SO.phase !== 'aim') return;
+        SO.aim = target;
+    }
+
+    /** CHECK_ON_TARGET then DIVE. */
+    function soCommitAim() {
+        if (!SO.aim) return;
+        const goal = soGoal();
+        if (!isOnTarget(SO.aim.x, goal.x, GOAL_HALF_WIDTH)) {
+            /* §10 — off target is an automatic miss */
+            SO.result = { outcome: 'MISS', dist: Infinity, onTarget: false };
+            soFly({ x: SO.aim.x, y: goal.y }, () => soResolve());
+            return;
+        }
+        SO.phase = 'dive';
+        SO.t = 0;
+        const defTeam = other(SO.turn);
+        const k = keeperOf(defTeam);
+        if (defTeam === 'cpu') {
+            /* the CPU's keeper reads the kick with probability = difficulty */
+            const read = Math.random() < 0.22 + 0.78 * state.difficulty;
+            const side = Math.random() < 0.5 ? -1 : 1;
+            const target = read
+                ? { x: SO.aim.x, y: k.y }
+                : { x: clamp(SO.aim.x + side * (GOAL_HALF_WIDTH * 1.35), 4, 96), y: k.y };
+            k.dive = target;
+            SO.dive = target;
+            SO.t = 0.75;
+            setPenaltyView(true);
+        } else {
+            log('Draw your dive — anywhere along the line.', '');
+            SO.t = 4.5;   // no dive? default to the shot's side
+        }
+    }
+
+    function soCommitDive(point) {
+        if (SO.phase !== 'dive') return;
+        SO.dive = point;
+        const k = keeperOf(other(SO.turn));
+        if (k) k.dive = point;
+        soResolve();
+    }
+
+    function soFly(to, after) {
+        SO.phase = 'flight';
+        SO.t = 0;
+        SO.from = { x: ball.x, y: ball.y };
+        SO.to = to;
+        SO.after = after;
+    }
+
+    function soResolve() {
+        if (!SO.result) {
+            SO.result = penaltyKickOutcome({
+                shotTarget: SO.aim,
+                divePoint: SO.dive || { x: SO.aim.x, y: 0 },
+                goalX: soGoal().x,
+                goalHalfWidth: GOAL_HALF_WIDTH
+            });
+        }
+        SO.phase = 'result';
+        SO.t = 0;
+
+        const kicker = SO.turn;
+        if (SO.result.outcome === 'GOAL') {
+            if (kicker === 'you') SO.you++; else SO.cpu++;
+            Sfx.goal(); shake(.5);
+            banner('GOAL', kicker === 'you' ? CSS.you : CSS.cpu);
+        } else if (SO.result.outcome === 'SAVED') {
+            Sfx.save(); shake(.25);
+            banner('SAVED', CSS.warn);
+        } else {
+            Sfx.bad();
+            banner('MISS', CSS.bad);
+        }
+        if (kicker === 'you') SO.takenYou++; else SO.takenCpu++;
+        log((kicker === 'you' ? 'You' : 'CPU') + ': ' + SO.result.outcome + ' — ' + SO.you + '–' + SO.cpu,
+            (SO.result.outcome === 'GOAL') === (kicker === 'you') ? 'good' : 'bad');
+        soHudState();
+    }
+
+    function soHudState() {
+        if (!ui.soScore) return;
+        ui.soScore.textContent = SO.you + ' – ' + SO.cpu;
+        ui.soTurn.textContent = SO.turn === 'you' ? 'YOUR KICK' : 'CPU KICK';
+        const dots = (n, taken) => {
+            let s = '';
+            for (let i = 0; i < Math.max(RULES.SHOOTOUT_KICKS, taken); i++) {
+                s += '<i class="dot' + (i < taken ? ' taken' : '') + (i < n ? ' scored' : '') + '"></i>';
+            }
+            return s;
+        };
+        ui.soYou.innerHTML = dots(SO.you, SO.takenYou);
+        ui.soCpu.innerHTML = dots(SO.cpu, SO.takenCpu);
+        ui.soTitle.textContent = (SO.takenYou + SO.takenCpu) >= RULES.SHOOTOUT_KICKS * 2 ? 'SUDDEN DEATH' : 'PENALTIES';
+    }
+
+    function soNext() {
+        if (shootoutDecided(SO.you, SO.cpu, SO.takenYou, SO.takenCpu)) return soFinished();
+        soSetupKick(other(SO.turn));
+    }
+
+    function soFinished() {
+        SO.active = false;
+        state.phase = 'over';
+        setPenaltyView(false);
+        const won = SO.you > SO.cpu;
+        el('over-title').textContent = (won ? 'YOU WIN ' : 'CPU WINS ') + SO.you + '–' + SO.cpu + ' ON PENALTIES';
+        el('over-detail').textContent = 'Settled from the spot after ' + SO.takenYou + ' kicks each.';
+        const pens = el('btn-pens');
+        if (pens) pens.hidden = true;
+        bus.emit('half');
+        Sfx.whistle();
+        pushScreen('over', { focus: '#btn-again' });
+    }
+
+    function soUpdate(dt) {
+        SO.t -= dt;
+        if (SO.phase === 'aim') {
+            if (SO.turn === 'cpu' && SO.t <= 0) {
+                const rng = mulberry32(hashSeed(state.seed, 7, SO.takenYou + SO.takenCpu));
+                const spread = GOAL_HALF_WIDTH * (0.55 + 0.5 * state.difficulty);
+                /* miss the target occasionally, more often on the lower settings */
+                const wild = rng() < 0.18 * (1 - state.difficulty);
+                const aim = wild
+                    ? clamp(soGoal().x + (rng() < .5 ? -1 : 1) * (GOAL_HALF_WIDTH + randRange(rng, 1, 9)), 2, 98)
+                    : clamp(soGoal().x + randRange(rng, -spread, spread), 2, 98);
+                soSetAim({ x: aim, y: soGoal().y });
+                soCommitAim();
+            }
+        } else if (SO.phase === 'dive') {
+            if (SO.t <= 0) {
+                /* the human never dived — §7 says no input means the default dive */
+                const k = keeperOf(other(SO.turn));
+                soCommitDive(k ? defaultDiveTarget(k, SO.aim, KEEPER_REACH) : { x: SO.aim.x, y: 0 });
+            }
+        } else if (SO.phase === 'flight') {
+            const f = clamp(SO.t / 0.55, 0, 1);
+            if (SO.from) {
+                ball.x = lerp(SO.from.x, SO.to.x, f);
+                ball.y = lerp(SO.from.y, SO.to.y, f);
+                ball.h = 0.42 + Math.sin(Math.PI * f) * ARC_SHOT;
+            }
+            if (f >= 1) {
+                const cb = SO.after; SO.after = null;
+                if (cb) cb();
+            }
+        } else if (SO.phase === 'result') {
+            if (SO.t >= 1.2) soNext();
+        }
+        /* the keeper's dive always plays out */
+        const k = keeperOf(other(SO.turn));
+        if (k && k.dive) moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED, dt);
+    }
+
+    /* ==========================================================================
+       § 17. INPUT — Pointer Events: one code path for mouse, touch and pen
        ========================================================================== */
     const drag = { kind: null, player: null, x0: 0, y0: 0, x: 0, y: 0, moved: 0, id: null };
+    let lastTap = { t: 0, x: 0, y: 0 };
 
     function canvasPoint(e) {
         const r = canvas.getBoundingClientRect();
         const px = e.clientX - r.left, py = e.clientY - r.top;
         /* view.hw is in screen units, where x is already compressed by KX —
-           divide it back out to land on the canonical 0…100 grid */
+           divide it back out to land on the canonical 0…100 grid. `panY` is
+           where the screen centre sits in game-y (the §10 zoom moves it). */
         const gx = 50 + ((px / r.width) * 2 - 1) * view.hw / KX;
-        const gy = 50 + (1 - (py / r.height) * 2) * view.hh;
+        const gy = view.panY + (1 - (py / r.height) * 2) * view.hh;
         return { x: gx, y: gy, px, py, rect: r };
     }
-    const screenRadius = rect => Math.max(24, rect.height * 0.055);
+    const screenRadius = rect => Math.max(18, rect.height * 0.055 * view.zoom);
 
-    function hitTest(p, pt, rect) {
-        const r = screenRadius(rect);
-        const a = { x: ((p.x - 50) * KX + view.hw) / (2 * view.hw) * rect.width, y: (1 - (p.y - 50 + view.hh) / (2 * view.hh)) * rect.height };
-        return Math.hypot(a.x - pt.px, a.y - pt.py) <= r;
-    }
     function pickPlayer(pt) {
         let best = null, bd = Infinity;
         const r = screenRadius(pt.rect);
         allPlayers.forEach(p => {
             const a = {
                 x: ((p.x - 50) * KX + view.hw) / (2 * view.hw) * pt.rect.width,
-                y: (1 - (p.y - 50 + view.hh) / (2 * view.hh)) * pt.rect.height
+                y: (1 - (p.y - view.panY + view.hh) / (2 * view.hh)) * pt.rect.height
             };
             const d = Math.hypot(a.x - pt.px, a.y - pt.py);
             if (d <= r && d < bd) { bd = d; best = p; }
@@ -1394,28 +1658,37 @@ import * as THREE from 'three';
         return best;
     }
 
-    const humanAttacking = () => PLAY && PLAY.attacker === 'you';
-    const humanDefending = () => PLAY && PLAY.attacker === 'cpu';
+    const humanAttacking = () => PLAY && PLAY.atk === 'you';
+    const humanDefending = () => PLAY && PLAY.atk === 'cpu';
 
     function onDown(e) {
-        if (state.phase !== 'decision' || state.humanLocked || topScreen()) return;
+        if (topScreen() || state.paused) return;
         if (e.button !== undefined && e.button !== 0) return;
         const pt = canvasPoint(e);
-        const p = pickPlayer(pt);
         drag.x0 = pt.x; drag.y0 = pt.y; drag.x = pt.x; drag.y = pt.y; drag.moved = 0; drag.id = e.pointerId;
         canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
         canvas.classList.add('grabbing');
 
-        if (humanDefending() && p && p.team === 'you' && p.role === 'outfield') {
-            drag.kind = 'guess'; drag.player = p; p.selected = true;
-        } else if (humanAttacking() && p === PLAY.carrier) {
+        /* --- §10 shootout gestures --- */
+        if (SO.active) {
+            if (SO.phase === 'aim' && SO.turn === 'you') drag.kind = 'so-aim';
+            else if (SO.phase === 'dive' && SO.turn === 'cpu') drag.kind = 'so-dive';
+            else drag.kind = null;
+            return;
+        }
+        if (state.phase !== 'play' && state.phase !== 'restart') { drag.kind = null; return; }
+
+        const p = pickPlayer(pt);
+        if (humanAttacking() && p === PLAY.carrier) {
             drag.kind = 'aim'; drag.player = p;
-        } else if (humanAttacking() && p && p.team === 'you') {
+        } else if (p && p.team === 'you' && p.role === 'keeper') {
+            /* the human's keeper: a pre-dive, or a dive during a shot */
+            drag.kind = 'keeper'; drag.player = p;
+        } else if (p && p.team === 'you') {
             drag.kind = 'move'; drag.player = p; p.selected = true;
-        } else if (humanAttacking() && !p) {
-            drag.kind = 'runner'; drag.player = PLAY.runner; PLAY.runner.selected = true;
-        } else if (humanDefending() && p && p.team === 'cpu') {
-            drag.kind = 'scout'; drag.player = p;
+        } else if (humanAttacking() && !p && PLAY.receiver) {
+            /* tap a teammate or an empty spot to nominate a receiver */
+            drag.kind = 'pick'; drag.player = PLAY.receiver;
         } else {
             drag.kind = null;
         }
@@ -1428,49 +1701,73 @@ import * as THREE from 'three';
         drag.x = pt.x; drag.y = pt.y;
         drag.moved = Math.hypot(pt.x - drag.x0, pt.y - drag.y0);
 
-        if (drag.kind === 'aim' && drag.moved > 12) {
-            const cand = aimCandidate(drag.x0, drag.y0, drag.x, drag.y);
-            PLAY.mates.forEach(m => m.selected = (m === cand));
-            PLAY.previewTarget = cand;
-            drag.player.selected = true;
-            updateAimVisual(drag.x0, drag.y0, drag.x, drag.y, cand);
-        } else if (drag.kind === 'runner' || (drag.kind === 'move' && drag.moved > 12)) {
-            PLAY.previewRunner = { x: clamp(pt.x, 5, 95), y: clamp(pt.y, 5, 95) };
+        if (drag.kind === 'aim' && drag.moved > TAP_SLOP) {
+            const tgt = aimPoint(drag.x0, drag.y0, drag.x, drag.y);
+            const mate = mateInDirection(drag.x0, drag.y0, drag.x, drag.y);
+            aimLine.visible = true;
+            aimLine.material.color.setHex(mate ? COL.aim : COL.ghost);
+            aimLine.material.opacity = mate ? 1 : .45;
+            aimLine.setEnds({ x: drag.x0, y: drag.y0 }, mate ? { x: mate.x, y: mate.y } : tgt);
+            runnerMarker.visible = !!mate;
+            if (mate) runnerMarker.position.set(worldX(mate.x), 0.09, worldZ(mate.y));
+        } else if (drag.kind === 'move' && drag.moved > TAP_SLOP) {
             runnerMarker.visible = true;
-            runnerMarker.position.set(worldX(PLAY.previewRunner.x), 0.08, worldZ(PLAY.previewRunner.y));
-        } else if (drag.kind === 'guess' && drag.moved > 12) {
-            const g = norm(drag.x - drag.x0, drag.y - drag.y0);
-            drag.guessPreview = g;
-            const len = 14;
-            guessArrows[0].visible = true;
-            guessArrows[0].setEnds({ x: drag.player.x, y: drag.player.y },
-                { x: drag.player.x + g.x * len, y: drag.player.y + g.y * len });
-            guessArrows[0].material.color.setHex(drag.player.team === 'you' ? COL.you : COL.cpu);
+            runnerMarker.position.set(worldX(clamp(pt.x, 5, 95)), 0.09, worldZ(clamp(pt.y, 5, 95)));
+        } else if (drag.kind === 'keeper' && drag.moved > TAP_SLOP) {
+            drag.player.held = true;
+            drag.player.dive = { x: clamp(pt.x, 8, 92), y: drag.player.y };
+            diveMarker.visible = true;
+            diveMarker.position.set(worldX(clamp(pt.x, 8, 92)), 0.09, worldZ(drag.player.y));
+            diveLine.visible = true;
+            diveLine.setEnds(drag.player, { x: clamp(pt.x, 8, 92), y: drag.player.y });
+        } else if (drag.kind === 'so-aim' && drag.moved > TAP_SLOP * 0.5) {
+            const t = { x: clamp(pt.x, 0, 100), y: soGoal().y };
+            aimLine.visible = true;
+            aimLine.material.color.setHex(isOnTarget(t.x, soGoal().x, GOAL_HALF_WIDTH) ? COL.aim : COL.bad);
+            aimLine.material.opacity = 1;
+            aimLine.setEnds(soSpot(), t);
+            shotLine.visible = true;
+            shotLine.setEnds(soSpot(), t);
+        } else if (drag.kind === 'so-dive' && drag.moved > TAP_SLOP * 0.5) {
+            const t = { x: clamp(pt.x, 4, 96), y: keeperOf('you').y };
+            diveLine.visible = true;
+            diveLine.setEnds(keeperOf('you'), t);
+            diveMarker.visible = true;
+            diveMarker.position.set(worldX(t.x), 0.09, worldZ(t.y));
         }
-        updateCursor();
     }
 
-    /** Nearest teammate in the swipe direction. */
-    function aimCandidate(x0, y0, x, y) {
-        const d = norm(x - x0, y - y0);
+    /** Where a pass aimed in this direction would land. */
+    function aimPoint(x0, y0, x, y) {
+        const d = unit(x - x0, y - y0);
+        const reach = Math.max(18, Math.hypot(x - x0, y - y0));
+        return { x: clamp(x0 + d.x * reach, 4, 96), y: clamp(y0 + d.y * reach, 4, 96) };
+    }
+
+    /** §4 — the teammate the drag is pointing at, if any. */
+    function mateInDirection(x0, y0, x, y) {
+        if (!PLAY) return null;
+        const d = unit(x - x0, y - y0);
         if (!d.l) return null;
-        let best = null, bs = 0.15;
-        PLAY.mates.forEach(m => {
-            const to = norm(m.x - x0, m.y - y0);
-            if (!to.l) return;
-            const dot = (to.x * d.x + to.y * d.y);
+        let best = null, bs = 0.2;
+        teamOutfield(PLAY.atk).forEach(m => {
+            if (m === PLAY.carrier) return;
+            const to = unit(m.x - x0, m.y - y0);
+            if (!to.l || to.l > 70) return;
+            const dot = to.x * d.x + to.y * d.y;
             const score = dot - to.l / 400;
             if (dot > 0 && score > bs) { bs = score; best = m; }
         });
         return best;
     }
 
-    function updateAimVisual(x0, y0, x, y, cand) {
-        aimLine.visible = true;
-        const end = cand ? { x: cand.x, y: cand.y } : { x, y };
-        aimLine.setEnds({ x: x0, y: y0 }, end);
-        aimLine.material.color.setHex(cand ? COL.aim : COL.ghost);
-        aimLine.material.opacity = cand ? 1 : .45;
+    /** §5 — a double-tap on the goal mouth, inside range, is a shot. */
+    function tryShootAt(x, y) {
+        if (!humanAttacking()) return false;
+        const c = PLAY.carrier;
+        if (!c) return false;
+        if (dist(c, PLAY.goal) > SHOT_RANGE) return false;
+        return shoot(c, { x: clamp(x, 0, 100), y: PLAY.goal.y });
     }
 
     function onUp(e) {
@@ -1483,55 +1780,76 @@ import * as THREE from 'three';
 
         if (kind === 'aim') {
             aimLine.visible = false;
-            PLAY.mates.forEach(m => m.selected = false);
-            if (moved < 14) {
-                /* tap on the carrier clears the pick */
-                if (PLAY.previewTarget) PLAY.target = PLAY.previewTarget;
-                PLAY.previewTarget = null;
-            } else if (PLAY.previewTarget) {
-                /* release commits the pass early — both sides lock together */
-                PLAY.target = PLAY.previewTarget;
-                PLAY.previewTarget = null;
-                state.humanChoice = { type: 'pass', target: PLAY.target };
-                lockIn('you');
-            } else {
-                PLAY.previewTarget = null;
-                pushLog('No teammate in that direction — swipe toward one.', '');
-            }
-        } else if (kind === 'move' || kind === 'runner') {
-            if (moved > 12 && PLAY.previewRunner) {
-                PLAY.runnerDest = PLAY.previewRunner;
-                player.dest = PLAY.previewRunner;
-                player.speed = T.playerSpeed;
-                pushLog('Runner sent to ' + Math.round(PLAY.runnerDest.x) + ', ' + Math.round(PLAY.runnerDest.y) + '.', '');
-            }
-            PLAY.previewRunner = null;
             runnerMarker.visible = false;
-            player.selected = false;
-        } else if (kind === 'guess') {
-            if (moved > 12) {
-                const g = norm(pt.x - drag.x0, pt.y - drag.y0);
-                player.guess = g.l ? { x: g.x, y: g.y } : null;
-                pushLog(player.label + ' commits ' + arrowWord(g) + '.', '');
+            if (moved > TAP_SLOP) {
+                const mate = mateInDirection(drag.x0, drag.y0, pt.x, pt.y);
+                const target = mate ? { x: mate.x, y: mate.y } : aimPoint(drag.x0, drag.y0, pt.x, pt.y);
+                passTo(player, target, BALL_SPEED);
+                if (!mate) {
+                    log('Played into space.', '');
+                }
+            } else {
+                /* a tap on the carrier: is this the second half of a double-tap? */
+                const now = performance.now();
+                const near = Math.hypot(pt.x - lastTap.x, pt.y - lastTap.y) < 9;
+                if (now - lastTap.t < DOUBLE_TAP_MS && near) {
+                    const shot = tryShootAt(pt.x, pt.y);
+                    if (!shot) log('Shooting only works inside ' + SHOT_RANGE + ' units of the goal.', '');
+                    lastTap = { t: 0, x: 0, y: 0 };
+                } else {
+                    lastTap = { t: now, x: pt.x, y: pt.y };
+                    /* a first tap nominates the nearest teammate as the receiver */
+                    if (PLAY && humanAttacking()) {
+                        const near = teamOutfield('you')
+                            .filter(m => m !== PLAY.carrier)
+                            .sort((a, b) => dist(a, { x: pt.x, y: pt.y }) - dist(b, { x: pt.x, y: pt.y }))[0];
+                        if (near) { PLAY.receiver = near; PLAY.receiver.duty = 'receiver'; }
+                    }
+                }
+            }
+        } else if (kind === 'move') {
+            if (moved > TAP_SLOP) {
+                const dest = { x: clamp(pt.x, 5, 95), y: clamp(pt.y, 5, 95) };
+                player.dest = dest;
+                player.speed = PLAYER_SPEED;
+                log(player.label + ' sent wide.', '');
             }
             player.selected = false;
-        } else if (kind === 'scout') {
-            if (moved < 14) pushLog(player.label + ' — CPU will commit this lane at random.', '');
+            runnerMarker.visible = false;
+        } else if (kind === 'keeper') {
+            if (moved > TAP_SLOP) {
+                player.held = true;
+                player.dive = { x: clamp(pt.x, 8, 92), y: player.y };
+                log('Keeper set to ' + (player.dive.x < 50 ? 'their left' : 'their right') + '.', '');
+            } else {
+                player.held = false;
+                player.dive = null;
+            }
+            diveLine.visible = false;
+            diveMarker.visible = false;
+        } else if (kind === 'pick') {
+            log('Receiver: ' + (PLAY.receiver ? PLAY.receiver.label : '—') + '.', '');
+        } else if (kind === 'so-aim') {
+            aimLine.visible = false;
+            shotLine.visible = false;
+            if (moved > TAP_SLOP * 0.5) {
+                soSetAim({ x: clamp(pt.x, 0, 100), y: soGoal().y });
+                soCommitAim();
+            }
+        } else if (kind === 'so-dive') {
+            diveLine.visible = false;
+            diveMarker.visible = false;
+            if (moved > TAP_SLOP * 0.5) {
+                soCommitDive({ x: clamp(pt.x, 4, 96), y: keeperOf('you').y });
+            }
         }
-        guessArrows[0].visible = false;
         refreshRings();
-        if (state.phase === 'decision' && !state.humanLocked && PLAY && PLAY.target && !humanAttacking()) { /* nothing */ }
-    }
-
-    function arrowWord(g) {
-        if (!g || !g.l) return 'nothing';
-        const ang = Math.atan2(g.y, g.x) * 180 / Math.PI;
-        const dirs = ['right', 'up-right', 'up', 'up-left', 'left', 'down-left', 'down', 'down-right'];
-        return dirs[Math.round(((ang + 360) % 360) / 45) % 8];
     }
 
     function updateCursor() {
-        canvas.style.cursor = drag.kind ? 'grabbing' : (state.phase === 'decision' ? 'crosshair' : 'default');
+        const active = SO.active ? (SO.phase === 'aim' || SO.phase === 'dive')
+            : (state.phase === 'play' || state.phase === 'restart');
+        canvas.style.cursor = drag.kind ? 'grabbing' : (active ? 'crosshair' : 'default');
     }
 
     canvas.addEventListener('pointerdown', onDown);
@@ -1549,186 +1867,128 @@ import * as THREE from 'three';
             return;
         }
         if (topScreen()) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            if (state.phase === 'decision' && !state.humanLocked) lockIn('you');
-        }
         if (e.key === 'm' || e.key === 'M') toggleMute();
         if (e.key === 'r' || e.key === 'R') { if (state.phase !== 'idle') beginMatch(); }
         if (e.key === 'h' || e.key === 'H') pushScreen('tutorial', { focus: '#btn-tut-close' });
     });
 
     /* ==========================================================================
-       § 14. UPDATE + RENDER
+       § 18. UPDATE + RENDER
        ========================================================================== */
-    function updateBall(dt) {
-        if (ball.mode === 'held' && ball.holder) {
-            const p = ball.holder;
-            const toGoal = norm(PLAY ? PLAY.goal.x - p.x : 0, PLAY ? PLAY.goal.y - p.y : 1);
-            ballAt(p.x + toGoal.x * 0.95, p.y + toGoal.y * 0.95, 0.42);
-        } else if (ball.mode === 'fly' && ball.from && ball.to) {
-            ball.t = Math.min(1, ball.t + dt / ball.dur);
-            const t = ball.t;
-            ballAt(lerp(ball.from.x, ball.to.x, t), lerp(ball.from.y, ball.to.y, t), 0.42 + Math.sin(Math.PI * t) * ball.arc);
-            if (ball.t >= 1) {
-                ball.mode = 'rest';
-                const cb = ball.onArrive; ball.onArrive = null;
-                if (cb) cb();
-            }
-        }
-        ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
-        ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
-        const s = 1 - clamp(ball.h / 4, 0, .6);
-        ballShadow.scale.setScalar(s);
-        ballShadow.material.opacity = 0.75 * s;
-    }
-
-    function playerGuessArrowRefresh(showHumanToo) {
-        let i = 0;
-        PLAY.defenders.forEach(d => {
-            if (!d.guess || (!showHumanToo && d.team === 'you')) { return; }
-            const arrow = guessArrows[++i];
-            if (!arrow) return;
-            const len = 13;
-            arrow.visible = true;
-            arrow.material.color.setHex(d.team === 'you' ? COL.you : COL.cpu);
-            arrow.material.opacity = showHumanToo ? .95 : .5;
-            arrow.setEnds({ x: d.x, y: d.y }, { x: d.x + d.guess.x * len, y: d.y + d.guess.y * len });
-        });
-        /* hide unused arrows */
-        for (let k = i + 1; k < guessArrows.length; k++) guessArrows[k].visible = false;
-    }
-
-    function update(dt, now) {
-        const rawDt = dt;
-
-        /* --- match phases --- */
-        if (state.phase === 'setup') {
-            state.phaseT += rawDt;
-            allPlayers.forEach(p => moveToward(p, p.ax, p.ay, 46, rawDt));
-            if (state.phaseT >= T.setupTime) beginDecision();
-        } else if (state.phase === 'decision') {
-            /* countdown is driven off the real clock timestamp, never off dt */
-            state.remaining = Math.max(0, (state.decisionEndsAt - now) / 1000);
-            if (state.remaining <= 0) beginResolve();
-        } else if (state.phase === 'resolve') {
-            state.phaseT += rawDt;
-            if (state.pending) {
-                const r = PLAY.runner;
-                const arrived = r.dest ? moveToward(r, r.dest.x, r.dest.y, T.playerSpeed, rawDt) : true;
-                if (arrived) r.dest = null;
-                if (arrived || state.phaseT > 0.75) executeResolve();
-            } else if (state.phaseT > ball.dur + 0.12) {
-                applyOutcome();
-                state.phase = 'result'; state.phaseT = 0;
-            }
-        } else if (state.phase === 'result') {
-            state.phaseT += rawDt;
-            if (state.phaseT >= T.resultTime) endOfPlay();
-        }
-
-        /* --- presentation clock (slow-motion is applied here only) --- */
-        state.timeScale += (1 - state.timeScale) * Math.min(1, rawDt * 2.6);
-        const pdt = rawDt * state.timeScale;
-
-        /* --- players --- */
-        allPlayers.forEach(p => {
-            if (p.dest) {
-                if (moveToward(p, p.dest.x, p.dest.y, p.speed, pdt)) p.dest = null;
-            } else if (state.phase === 'setup') {
-                /* handled above */
+    function update(dt) {
+        if (state.phase === 'restart') {
+            state.phaseT += dt;
+            allPlayers.forEach(p => moveToward(p, p.ax, p.ay, 46, dt));
+            stepBall(dt);
+            if (state.phaseT >= SETUP_TIME) { state.phase = 'play'; state.phaseT = 0; }
+        } else if (state.phase === 'play') {
+            if (state.pendingHalf) {
+                /* §3/§3 — the whistle waits for the ball to become dead */
+                if (ball.mode === 'held' || ball.mode === 'loose') endHalf();
             } else {
-                moveToward(p, p.ax, p.ay, T.driftSpeed, pdt);
-            }
-            animatePlayer(p, pdt);
-            syncToMesh(p);
-        });
-        /* keepers shuffle to the ball's y a little — sells the top-down read */
-        [playersById['you5'], playersById['cpu5']].forEach(k => {
-            if (!k.dest) {
-                const base = k.team === 'you' ? 5.5 : 94.5;
-                k.tx = clamp(50 + (ball.x - 50) * 0.35, 42, 58);
-                k.ty = base;
-            }
-        });
-
-        if (PLAY) {
-            if (state.phase === 'decision') {
-                playerGuessArrowRefresh(true);
-                if (!PLAY.target) { aimLine.visible = false; }
-            }
-            /* carrier faces the chosen target while deciding */
-            if (PLAY.carrier && PLAY.target && state.phase === 'decision') {
-                PLAY.carrier.yaw = Math.atan2(PLAY.target.x - PLAY.carrier.x, -(PLAY.target.y - PLAY.carrier.y));
-                if (drag.kind !== 'aim') {
-                    aimLine.visible = true;
-                    aimLine.material.color.setHex(COL.aim);
-                    aimLine.material.opacity = .8;
-                    aimLine.setEnds(PLAY.carrier, PLAY.target);
+                state.halfT += dt;
+                if (state.halfT >= HALF_LENGTH) {
+                    state.halfT = HALF_LENGTH;
+                    state.pendingHalf = true;
                 }
             }
+            if (PLAY) {
+                cpuThink(dt);
+                simPlayers(dt);
+            }
+            stepBall(dt);
+        } else if (state.phase === 'shootout') {
+            soUpdate(dt);
+            ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
+            ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
         }
 
-        updateBall(pdt);
-
-        /* --- feel: screen shake --- */
-        state.trauma = Math.max(0, state.trauma - rawDt * 1.5);
-        const t2 = state.trauma * state.trauma;
-        const amp = state.reduceMotion ? 0 : 2.4 * t2;
-        const sx = (Math.random() * 2 - 1) * amp;
-        const sy = (Math.random() * 2 - 1) * amp;
-        /* camera right = world +X, camera up = (0, sinθ, −cosθ) */
-        camera.position.x = sx;
-        camera.position.y = 130 * Math.cos(TILT) + sy * Math.sin(TILT);
-        camera.position.z = 130 * Math.sin(TILT) - sy * Math.cos(TILT);
-        camera.rotation.z = 0;
-        camera.lookAt(sx, sy * Math.sin(TILT), -sy * Math.cos(TILT));
+        allPlayers.forEach(p => { animatePlayer(p, dt); syncToMesh(p); });
+        updateCursor();
+        updateOverlayVisibility();
     }
 
-    function updateHud(now) {
-        if (state.phase !== 'decision') return;
-        const k = clamp(state.remaining / T.window, 0, 1);
-        if (Math.abs(k - lastBarWritten) > 0.004) {
-            ui.timerBar.style.transform = 'scaleX(' + k.toFixed(3) + ')';
-            lastBarWritten = k;
+    /** Keep the guides honest without redrawing them every frame. */
+    function updateOverlayVisibility() {
+        if (SO.active) {
+            [...allPlayers].forEach(p => refreshRings());
+            return;
         }
-        const n = Math.ceil(state.remaining * 10) / 10;
-        if (n !== lastNumWritten) { ui.timerNum.textContent = n.toFixed(1); lastNumWritten = n; }
-        ui.timerWrap.classList.toggle('low', state.remaining <= 1.0);
+        if (!PLAY) return;
+        /* the human's keeper shows a dive line whenever a shot is live */
+        if (ball.mode === 'shot' && PLAY.def === 'cpu') {
+            const k = keeperOf('you');
+            if (k && k.dive && !drag.kind) {
+                diveLine.visible = true;
+                diveLine.setEnds(k, k.dive);
+                diveMarker.visible = true;
+                diveMarker.position.set(worldX(k.dive.x), 0.09, worldZ(k.dive.y));
+            }
+        } else if (!drag.kind) {
+            diveLine.visible = false;
+            diveMarker.visible = false;
+        }
     }
 
-    function resize() {
-        /* The canvas fills the stage, so its box decides the fit. reqHW/reqHH are
-           the ground's own half-extents in screen units; the branch below is a
-           contain policy, so the whole 105 × 68 m pitch — goals included — is
-           visible at every aspect ratio, with slack on whichever axis is spare. */
+    function updateHud() {
+        if (SO.active) return;
+        const left = Math.max(0, HALF_LENGTH - state.halfT);
+        const secs = Math.ceil(left - 1e-6);
+        if (secs !== lastClock) {
+            lastClock = secs;
+            ui.clock.textContent = formatClock(secs);
+            /* the last 15 seconds are the only time the clock is allowed to go
+               warm; the class lives on the panel so both the fill and the
+               numerals can respond to it */
+            ui.clock.parentElement.parentElement.classList.toggle('low', secs <= 15);
+        }
+        const k = clamp(left / HALF_LENGTH, 0, 1);
+        if (Math.abs(k - lastBar) > 0.004) {
+            ui.clockBar.style.transform = 'scaleX(' + k.toFixed(3) + ')';
+            lastBar = k;
+        }
+    }
+
+    /* --- the contain-fit camera, with the §10 zoom/pan on top --- */
+    function fitView() {
         const w = canvas.clientWidth || window.innerWidth;
         const h = canvas.clientHeight || window.innerHeight;
         const aspect = w / h;
         let hw, hh;
         if (aspect >= reqHW / reqHH) { hh = reqHH; hw = reqHH * aspect; }
         else { hw = reqHW; hh = reqHW / aspect; }
-        view.hw = hw; view.hh = hh;
-        camera.left = -hw; camera.right = hw; camera.top = hh; camera.bottom = -hh;
+        view.hw = hw / view.zoom;
+        view.hh = hh / view.zoom;
+        camera.left = -view.hw; camera.right = view.hw;
+        camera.top = view.hh; camera.bottom = -view.hh;
         camera.updateProjectionMatrix();
         renderer.setSize(w, h, false);
     }
-    window.addEventListener('resize', resize);
-    window.addEventListener('orientationchange', () => setTimeout(resize, 120));
-    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+    window.addEventListener('resize', fitView);
+    window.addEventListener('orientationchange', () => setTimeout(fitView, 120));
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', fitView);
 
-    /* --- pause handling keeps the decision clock honest --- */
-    let pausedAt = 0;
+    /** Where the camera sits this frame: the pan, plus the shake. */
+    function placeCamera() {
+        const t2 = state.trauma * state.trauma;
+        const amp = state.reduceMotion ? 0 : 2.4 * t2;
+        const sx = (Math.random() * 2 - 1) * amp;
+        const sy = (Math.random() * 2 - 1) * amp;
+        const pz = worldZ(view.panY);
+        camera.position.set(sx, 130 * Math.cos(TILT) + sy * Math.sin(TILT), pz + 130 * Math.sin(TILT) - sy * Math.cos(TILT));
+        camera.rotation.z = 0;
+        camera.lookAt(sx, sy * Math.sin(TILT), pz - sy * Math.cos(TILT));
+    }
+
+    /* --- pause handling --- */
     function pauseGame() {
         if (state.phase === 'idle' || state.phase === 'over') return;
         state.paused = true;
-        pausedAt = performance.now();
         pushScreen('pause', { focus: '#btn-resume' });
     }
     function resumeGame() {
         if (!state.paused) { popScreen(); return; }
         state.paused = false;
-        state.decisionEndsAt += performance.now() - pausedAt;
         popScreen();
     }
 
@@ -1737,14 +1997,15 @@ import * as THREE from 'three';
         requestAnimationFrame(frame);
         const dt = Math.min(0.05, (now - last) / 1000);
         last = now;
-        if (!state.paused && !topScreen()) update(dt, now);
-        else if (state.paused) { /* frozen, but keep rendering */ }
-        updateHud(now);
+        if (!state.paused && !topScreen() && state.phase !== 'idle') update(dt);
+        state.trauma = Math.max(0, state.trauma - dt * 1.5);
+        updateHud();
+        placeCamera();
         renderer.render(scene, camera);
     }
 
     /* ==========================================================================
-       § 15. WIRING
+       § 19. WIRING
        ========================================================================== */
     function toggleMute() {
         const m = Sfx.toggle();
@@ -1757,7 +2018,6 @@ import * as THREE from 'three';
     el('btn-tutorial').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
     el('btn-tut-close').addEventListener('click', () => popScreen());
     el('btn-help').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
-    el('btn-lock').addEventListener('click', () => lockIn('you'));
     el('btn-pause').addEventListener('click', () => pauseGame());
     el('btn-mute').addEventListener('click', toggleMute);
     el('btn-resume').addEventListener('click', resumeGame);
@@ -1765,42 +2025,54 @@ import * as THREE from 'three';
     el('btn-quit').addEventListener('click', () => { state.paused = false; while (topScreen()) popScreen(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' }); });
     el('btn-again').addEventListener('click', () => { popScreen(); beginMatch(); });
     el('btn-menu').addEventListener('click', () => { while (topScreen()) popScreen(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' }); });
-    el('btn-verify').addEventListener('click', () => { const r = runVerification(true); banner(r.allPass ? '§4 ALL PASS' : '§4 TESTS FAILED', r.allPass ? CSS.goal : CSS.bad); });
-    ui.difficulty.addEventListener('click', e => {
-        const b = e.target.closest('button[data-diff]');
-        if (!b) return;
-        state.difficulty = parseFloat(b.dataset.diff);
-        Array.from(ui.difficulty.querySelectorAll('button')).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    const pensBtn = el('btn-pens');
+    if (pensBtn) pensBtn.addEventListener('click', () => beginShootout());
+    const verifyBtn = el('btn-verify');
+    if (verifyBtn) verifyBtn.addEventListener('click', () => {
+        const r = runVerification(true);
+        banner(r.allPass ? 'RULEBOOK OK' : 'RULEBOOK FAILED', r.allPass ? CSS.goal : CSS.bad);
     });
+    if (ui.difficulty) {
+        ui.difficulty.addEventListener('click', e => {
+            const b = e.target.closest('button[data-diff]');
+            if (!b) return;
+            state.difficulty = parseFloat(b.dataset.diff);
+            if (PLAY) { PLAY.cpuThink = 0.6; cpuAssignDuties(); }
+            Array.from(ui.difficulty.querySelectorAll('button')).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+        });
+    }
 
     /* first user gesture unlocks Web Audio */
     ['pointerdown', 'keydown', 'touchstart'].forEach(evt =>
         window.addEventListener(evt, () => Sfx.unlock(), { once: true, passive: true }));
 
     /* --- boot --- */
-    resize();
-    parkKeepers();
-    allPlayers.forEach(p => syncToMesh(p));
+    fitView();
+    allPlayers.forEach(p => { syncToMesh(p); refreshRings(); });
+    setCarrier(teamOutfield('you')[0]);
+    state.phase = 'idle';
+    bus.emit('score'); bus.emit('half'); bus.emit('role');
     pushScreen('menu', { focus: '#btn-start' });
     requestAnimationFrame(frame);
 
-    /* --- §3/§4 verification: always available, and reported on load --- */
+    /* --- the rulebook's own suite: always available, reported on load --- */
     const verify = runVerification(false);
-    console.log('[Guess & Pass] §4 verification: ' + (verify.allPass ? 'ALL PASS' : 'FAILURES — see __GAP_VERIFY_RESULTS'));
-    if (!verify.allPass) banner('§4 TESTS FAILED', CSS.bad);
+    console.log('[Guess & Pass] rulebook verification: ' + (verify.allPass ? 'ALL PASS' : 'FAILURES — see __GAP_VERIFY_RESULTS'));
+    if (!verify.allPass) banner('RULEBOOK FAILED', CSS.bad);
 
     /* debug surface for the console / unit-test harnesses */
     window.__GAP = {
-        T, state, resolvePass, defenderChance, pInterceptOf, runVerification,
+        RULES, state, runVerification,
         get play() { return PLAY; },
+        get shootout() { return SO; },
+        get ball() { return ball; },
         api: {
-            beginMatch, beginSetup, beginDecision, beginResolve, executeResolve,
-            lockIn, pauseGame, resumeGame, toggleMute,
+            beginMatch, kickoff, goalKick, beginShootout, soSetupKick,
+            passTo, shoot, pauseGame, resumeGame, toggleMute,
             setDifficulty: d => { state.difficulty = clamp(d, 0, 1); },
-            forceOutcome: t => { state.outcome = { type: t, at: { x: 50, y: 90 }, pIntercept: 0, pGoal: null }; }
+            /** Pin the clock, for testing full time without playing 2:00. */
+            setHalfTime: t => { state.halfT = clamp(t, 0, HALF_LENGTH); },
+            drainHalf: () => { state.halfT = HALF_LENGTH; state.pendingHalf = true; }
         }
     };
-    /* ----------------------------------------------------------------------
-       ↑↑↑ MECHANICAL EXTRACTION ENDS — do not hand-edit above this line ↑↑↑
-       ---------------------------------------------------------------------- */
 })();

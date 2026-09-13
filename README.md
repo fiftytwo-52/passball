@@ -1,25 +1,32 @@
 # ⚽ Guess & Pass
 
-A football passing duel: **3D low-poly players standing on a 2D top-view pitch**.
-Every few seconds a pass lane opens, both sides secretly commit a direction, and the ball tells the truth.
+A real-time football duel: **3D low-poly players on a 2D top-view pitch**, six a side, no dice.
+You drag a pass and it travels; the defender you aimed past either gets there in time or does not.
+The ball tells the truth because the ball is the truth.
 
-Built with **Astro**. The game engine is a self-contained, pure-JS module bundled by Vite; Three.js r0.149.0
-is compiled in from `node_modules`, so there is **no CDN in the script path** and no network dependency at runtime.
+Built with **Astro**. The rulebook is a pure ES module and the engine is a self-contained script bundled by
+Vite; Three.js r0.149.0 is compiled in from `node_modules`, so there is **no CDN in the script path** and no
+network dependency at runtime.
 
 ---
 
 ## 🎮 The Core Loop
 
-Each play runs the same four-state machine (canonical **§3**):
+Regulation is **one continuous simulation**, not a sequence of turns ([`REALTIME-SPEC.md`](REALTIME-SPEC.md) **§3**):
 
-1. **SETUP** (0.55 s) — formations take shape, the carrier is marked, the lane is drawn.
-2. **DECISION** (3.0 s) — you pick your pass; the CPU secretly picks its break direction.
-   The window is keyed off a real-clock timestamp, so slow-motion never steals your time.
-3. **RESOLVE** — the ball travels and the canonical **§4** resolution decides
-   `COMPLETE` / `INTERCEPTION` / `GOAL` / `SAVE`.
-4. **RESULT** (1.05 s) — outcome banner, log entry, then the next play.
+1. **Continuous play.** A single `requestAnimationFrame` loop advances every entity every frame. Nothing
+   pauses to ask permission; possession is whatever the last resolution left it as.
+2. **You attack by dragging.** Drag from the ball-carrier toward a teammate and release to fire the ball at
+   `BALL_SPEED`. The ball is a live object in flight — not a probability roll.
+3. **The race resolves it.** §7 compares the ball's position against every defender's reach *every frame*.
+   Inside [`CATCH_RADIUS`](src/scripts/rules.js:26) the ball is cut out **mid-flight at that exact point** —
+   possession flips in place, with no whistle and no reset. If nobody gets there, the pass completes.
+4. **Two halves of 2:00.** The match clock counts each half down. The current play always finishes; half-time
+   swaps ends, and full time ends regulation.
+5. **Sent off level? Go to penalties.** A manual **Go to Penalties** button appears at full time when the
+   scores are level, and the game swaps to the §10 shootout.
 
-First to **3 goals** wins — there is no play cap, so a match runs as long as it takes. You always attack the bottom goal; the CPU always attacks the top goal.
+There is no play cap and no "first to N" — a match runs its two halves, and a draw is settled from the spot.
 
 ---
 
@@ -28,24 +35,36 @@ First to **3 goals** wins — there is no play cap, so a match runs as long as i
 - **True 3D characters, undistorted 2D pitch.** Humanoids are WebGL meshes; the pitch is a Canvas2D-drawn
   texture. A tilted orthographic camera plus a `1/cos(TILT)` depth stretch means the 2D artwork projects
   **1:1 on screen** while the players remain genuinely three-dimensional.
-- **Canonical resolution algorithm.** [`resolvePass()`](src/scripts/game-source.js:176) is pure — no DOM, no
-  Three.js, no globals — and carries the frozen §4 constants unchanged.
-- **Property verification, in the page and in Node.** [`runVerification()`](src/scripts/game-source.js:220)
-  asserts the monotonic properties of §4 (better guess ⇒ higher interception, longer pass ⇒ higher interception,
-  more/closer defenders ⇒ higher interception, zero geometry ⇒ zero chance) plus a 4000-play validity sweep.
-  It runs on load and reports into the menu card; `npm run verify` runs the same checks headlessly in CI.
+- **A pure rulebook with no second copy.** [`src/scripts/rules.js`](src/scripts/rules.js:17) is positions in,
+  outcomes out — no Three.js, no DOM, no `window`. The page imports it and [`tools/verify-4.mjs`](tools/verify-4.mjs)
+  imports *the same file*, so the tests cannot drift from the shipped algorithm.
+- **`BALL_SPEED > PLAYER_SPEED`, always.** That single inequality ([`RULES`](src/scripts/rules.js:21)),
+  asserted by the suite, is what makes interception and shot-saving genuine **races** rather than coin flips:
+  a defender cuts a pass out only by arriving on the ball's path in time.
+- **Closed-form interception, live proximity resolution.** The suite reasons about the race analytically — a
+  quadratic in `t` solved by [`interceptionTime()`](src/scripts/rules.js:122) — while the running match resolves
+  it by per-frame distance checks. Both read the same constants, so they agree.
+- **Property verification, in the page and in Node.** [`runVerification()`](src/scripts/rules.js:342) asserts the
+  28 properties of the rulebook — the speed inequalities, the squad shape, goal-mouth geometry, the race
+  monotonicities, keeper reach, the shootout clinch maths — plus a 4000-play validity corpus. It runs headlessly
+  via `npm run verify` and reports into the menu card in the page.
+- **A real shootout.** Triggered only by the manual button, on a dedicated zoomed penalty view, with its own
+  `AIM → CHECK_ON_TARGET → DIVE → RESOLVE → NEXT_KICKER` state machine. Five outfield players each, alternating,
+  then sudden death. Off target is an automatic miss; on target it is a **reach test** — inside
+  `PENALTY_KEEPER_REACH` of the aim point is a save, outside is a goal.
 - **Pointer Events only.** One code path for mouse, touch and pen, with gesture disambiguation
-  (defender guess / carrier aim / teammate reposition / empty-pitch reposition) and a tap fallback.
+  (drag-to-pass, tap a receiver, tap a runner, double-tap to shoot, dive the keeper) and a double-tap detector.
 - **Deterministic.** Every random draw routes through a seeded `mulberry32` PRNG.
-- **Weighted CPU.** Difficulty is a 0–1 blend against the naive coin-flip baseline: COIN-FLIP / SHARP / RUTHLESS.
-- **Feel.** Camera-trauma shake, an outcome banner, slow-motion applied to presentation only,
-  and a Web Audio synth for kick / pass / good / bad / goal / save / whistle.
-- **Accessible HUD.** Anchors-and-containers layout, `clamp()` type, ≥44 px tap targets,
-  `env(safe-area-inset-*)`, a screen stack with initial focus per screen and `Escape` to go back,
-  and event-driven DOM updates instead of per-frame polling.
-- **Nothing is ever drawn on the ground.** The top and bottom docks are flow siblings of the stage,
-  not overlays on it, so at every viewport size the chrome can only ever push the pitch smaller.
-  The turf carries the players and the ball and nothing else.
+- **Weighted CPU.** Difficulty is a 0–1 blend against the naive baseline: COIN-FLIP / SHARP / RUTHLESS.
+- **Feel.** Camera-trauma shake, an outcome banner, tuned restarts, and a Web Audio synth for
+  kick / pass / good / bad / goal / save / whistle.
+- **Accessible HUD.** Anchors-and-containers layout, `clamp()` type, ≥44 px tap targets on coarse pointers,
+  `env(safe-area-inset-*)`, a screen stack with initial focus per screen and `Escape` to go back, and
+  **event-driven DOM updates instead of per-frame polling** — the clock is written only when the displayed
+  second changes, the drain bar only when it moves, and the strip only when it changes.
+- **Nothing is ever drawn on the ground.** The top dock, the penalty strip and the bottom dock are flow
+  siblings of the stage, not overlays on it, so at every viewport size the chrome can only ever push the pitch
+  smaller. The turf carries the players and the ball and nothing else.
 - **One design system.** Every surface — HUD, screens, buttons, the pitch palette — reads from the tokens in
   [`DESIGN.md`](DESIGN.md) (Vercel / Geist): a black-and-white duet on a near-white canvas, 1px hairlines,
   6 px app squares versus 100 px marketing pills, and colour permitted only as small accent marks and the
@@ -55,13 +74,19 @@ First to **3 goals** wins — there is no play cap, so a match runs as long as i
 
 ## 🎹 Controls
 
+Attack and defence swap automatically with possession — you always control **the ball-carrier, the intended
+receiver, two runners** (4), and when defending the **interceptor and the marker** (2), plus your goalkeeper.
+
 | Action | Pointer | Keyboard |
 | --- | --- | --- |
-| Aim a pass | Drag from the carrier, release to commit | — |
-| Pick a precise target | Tap a teammate, tap again to confirm | — |
-| Move a teammate / runner | Drag that player | — |
-| Guess as a defender | Drag the defender in the direction you expect | — |
-| **Lock in** | Button | <kbd>Enter</kbd> / <kbd>Space</kbd> |
+| **Pass** | Drag from the ball-carrier toward a teammate, **release to fire** | — |
+| **Nominate the receiver** | Tap the teammate | — |
+| **Send a runner** | Tap a teammate (up to two) | — |
+| **Shoot** | **Double-tap** a point along the goal mouth (only inside the shot range) | — |
+| **Intercept** (defending) | Drag the interceptor along the line you expect the pass to take | — |
+| **Mark** (defending) | Drag the marker anywhere | — |
+| **Dive** (keeper) | Drag or tap the dive point as the shot leaves | — |
+| **Penalty aim** | Draw the aim line, then draw the dive line | — |
 | Pause | Button | <kbd>Esc</kbd> |
 | Mute | Button | <kbd>M</kbd> |
 | Restart | Button | <kbd>R</kbd> |
@@ -73,20 +98,22 @@ First to **3 goals** wins — there is no play cap, so a match runs as long as i
 
 ```
 src/
-  pages/index.astro           ← the page: HUD, screens, and the engine's DOM contract
-  scripts/game-source.js      ← the entire game engine (pure §4 module + WebGL scene)
+  pages/index.astro           ← the page: HUD, match clock, shootout strip, screens
+  scripts/rules.js            ← the pure rulebook (no DOM, no Three.js) — imported by page AND tests
+  scripts/game-source.js      ← the engine: WebGL scene, continuous sim, shootout machine
   styles/tokens.css           ← DESIGN.md transcribed into CSS custom properties
   styles/game.css             ← game chrome built on those tokens
   styles/global.css           ← page layer: responsive type, HUD stacking, focus, motion
 tools/
   publish.mjs                 ← validates the out/ artifact and reports what will ship
-  verify-4.mjs                ← runs the §4 property tests headlessly in Node
+  verify-4.mjs                ← imports rules.js and runs its property suite in Node
 public/
   _headers                    ← Cloudflare response headers (CSP + caching)
 out/                          ← the build artifact (git-ignored); this is what deploys
 
-football-guess-game-design.md  ← mechanics + algorithm spec (§3 loop, §4 resolution)
-DESIGN.md                      ← the design system every UI surface is built from
+REALTIME-SPEC.md                ← the authoritative design doc (canonical §1–§10)
+DESIGN.md                       ← the design system every UI surface is built from
+football-guess-game-design.md   ← the superseded turn-based spec, kept for history
 ```
 
 Only `src/` and `public/` are authored. `out/` is **generated** and is the single deployable artifact — nothing
@@ -120,63 +147,96 @@ python3 -m http.server 8080 --directory out
 
 ## ⚙️ Tuning
 
-All tunables live in the single `T` object at the top of the engine
-([`T`](src/scripts/game-source.js:35)). The §4 block is canonical and must not be redesigned:
+All tunables live in the single `RULES` object at the top of the rulebook
+([`RULES`](src/scripts/rules.js:17)). They are canonical: the property suite asserts the relationships between
+them, and the running engine reads the same object, so changing one without re-running `npm run verify` is how
+the sim and its guarantees fall out of step.
 
 | Constant | Value | Meaning |
 | --- | --- | --- |
-| `R_cover` | `14` | Base defensive reach |
-| `lengthGain` | `0.9` | Reach growth per unit of pass length |
-| `baseGuess` | `0.35` | Chance with an unset/wrong guess |
-| `guessGain` | `0.65` | Extra chance from perfect guess alignment |
-| `alignThreshold` | `0.0` | Alignment offset before guessing helps |
-| `shootRange` | `30` | Distance to goal that counts as a shot |
-| `keeperReach` | `20` | Keeper's coverage radius |
-| `baseGoal` | `0.8` | Base scoring chance |
-| `keeperStop` | `0.7` | Keeper's ability to deny a covered shot |
+| `PLAYER_SPEED` | `26` | Outfield run speed, units / s |
+| `DIVE_SPEED` | `30` | Keeper dive speed — a shade above `PLAYER_SPEED` |
+| `BALL_SPEED` | `34` | Ground pass speed — **must** beat `PLAYER_SPEED` |
+| `SHOT_SPEED` | `40` | Shot speed — a shade above `BALL_SPEED` |
+| `DRILL_SPEED` | `22` | Off-ball drift / shape speed |
+| `CATCH_RADIUS` | `3` | Interception / control radius |
+| `KEEPER_REACH` | `6` | Open-play save reach |
+| `PENALTY_KEEPER_REACH` | `12` | Shootout save reach (the reach / tolerance test) |
+| `GOAL_HALF_WIDTH` | `12.5` | Half the mouth → mouth ≈ 25 units, centred on x = 50 |
+| `SHOT_RANGE` | `30` | Max distance from goal to attempt a shot |
+| `HALF_LENGTH` | `120` | Seconds per half (2:00) |
+| `PENALTY_SPOT` | `10.5` | Penalty spot, units off the goal line |
+| `KEEPER_LINE` | `4` | How far off their line a keeper stands |
+| `SHOOTOUT_KICKS` | `5` | Per side, then sudden death |
 
-Presentation-only values (`setupTime`, `resultTime`, `slowScale`, `playerSpeed`, `driftSpeed`) are free to change.
-The 3D palette is the `COL` object ([`COL`](src/scripts/game-source.js:68)); the matching CSS colours are
-[`CSS`](src/scripts/game-source.js:73) and the `--x-*` custom properties in
-[`game.css`](src/styles/game.css:18). Change them together or the 3D players and the DOM chrome will disagree.
+Presentation-only values (camera zoom and pan, shake decay, banner timing, the synth's voices) are free to
+change. The 3D palette is the `COL` object ([`COL`](src/scripts/game-source.js:72)); the matching CSS colours
+are [`CSS`](src/scripts/game-source.js:77) and the `--x-*` custom properties in
+[`game.css`](src/styles/game.css:1). Change them together or the 3D players and the DOM chrome will disagree.
 
 ---
 
-## 🧪 Verifying §4
+## 🧪 Verifying the rulebook
 
-In the browser — either press **RUN §4 VERIFICATION TESTS** on the menu, which renders the verdict inline, or:
+`rules.js` keeps the resolution logic as pure functions of position, so every claim the spec makes about the
+races is testable without a canvas. In the browser — press **RUN RULEBOOK TESTS** on the menu, which renders the
+verdict inline — or from the console:
 
 ```js
-window.__GAP.runVerification()          // { allPass, results }
-window.__GAP_VERIFY_RESULTS             // results of the most recent run
-window.__GAP.resolvePass(input, rng)    // call the pure resolver directly
-window.__GAP.T                          // live tunables
-window.__GAP.api                        // drive the state machine directly
+window.__GAP.runVerification()        // { allPass, results, properties }
+window.__GAP_VERIFY_RESULTS           // the report from the most recent run
+window.__GAP.RULES                    // live tunables
+window.__GAP.play                     // carrier, receiver, runners, flight
+window.__GAP.shootout                 // the shootout state machine
+window.__GAP.api                      // drive the match directly (beginMatch, shoot, setHalfTime…)
 ```
 
-Headlessly, from the same source file the page bundles:
+Headlessly, from the same module the page bundles:
 
 ```bash
 npm run verify
 ```
 
 ```
-  Guess & Pass — §4 resolution algorithm
+  Guess & Pass — real-time rulebook (§2, §5, §7, §10)
   ────────────────────────────────────────────────────────────────────────
-  PASS   better guess ⇒ higher pIntercept
-  PASS   longer pass ⇒ higher pIntercept
-  PASS   more defenders ⇒ higher pIntercept
-  PASS   closer defender ⇒ higher pIntercept
-  PASS   geo = 0 ⇒ pd = 0 (guess cannot help)
-  PASS   4000 random plays: valid outcomes, bounded pIntercept
+  PASS   BALL_SPEED > PLAYER_SPEED (passes outrun defenders)
+  PASS   SHOT_SPEED > BALL_SPEED (shots outrun passes)
+  PASS   DIVE_SPEED slightly exceeds PLAYER_SPEED
+  PASS   Squad is 1 GK + 5 outfield, 4 attacking controls
+  PASS   Goal mouth is 24–26 units, centred on x = 50
+  PASS   Two 2:00 halves (match = 240 s)
+  PASS   formatClock renders a countdown m:ss and floors at 0:00
+  PASS   A defender standing in the lane intercepts the pass
+  PASS   A defender near the lane intercepts sooner than one far off it
+  PASS   An open pass (no defender) always completes
+  PASS   A defender behind the ball cannot chase it down
+  PASS   A larger CATCH_RADIUS never delays the interception
+  PASS   Resolution is deterministic (same input, same outcome)
+  PASS   A completed pass is the only way to reach the receiver
+  PASS   A keeper sitting on the shot line saves it
+  PASS   A keeper diving the other way concedes
+  PASS   A shot wide of the mouth is off target
+  PASS   SHOT_SPEED beats a keeper who is not on the line
+  PASS   A bigger KEEPER_REACH turns the same shot into a save
+  PASS   The default dive goes toward the shot and stays within one reach
+  PASS   A penalty dive inside the reach saves, outside it scores
+  PASS   The penalty reach test is inclusive at exactly the reach
+  PASS   A penalty aimed outside the mouth is a miss
+  PASS   Shootout: level after five each goes to sudden death
+  PASS   Shootout: five each with a leader is settled
+  PASS   Shootout: an early clinch ends it before five each
+  PASS   Shootout: sudden death ends when a round breaks level
+  PASS   4000 synthetic plays stay inside the rules (no NaN, legal outcomes)
   ────────────────────────────────────────────────────────────────────────
-  ALL PASS 6 properties
+  ALL PASS 28 properties
+         ball 34 > player 26 · shot 40 · halves 2 × 120s
 ```
 
-[`tools/verify-4.mjs`](tools/verify-4.mjs) slices the pure region out of
-[`game-source.js`](src/scripts/game-source.js) between stable structural markers and evaluates it in a
-`node:vm` sandbox — it never duplicates the algorithm, so the tests cannot drift from the shipped code.
-It exits non-zero on failure, so it can gate a deploy.
+The interception properties are genuine kinematics checks, not calls into the resolver round-trip: each outcome
+is re-verified by asserting the defender **could not** have reached the ball's path in the time it took, and
+that the ball's own path was legal. [`tools/verify-4.mjs`](tools/verify-4.mjs) exits non-zero on failure, so it
+can gate a deploy.
 
 ---
 
@@ -198,13 +258,16 @@ long-lived caching for the content-hashed `/assets/*`.
 
 ## 🗺 Roadmap
 
-- [x] Canonical §3 four-state loop with a real-clock decision window
-- [x] Canonical §4 hybrid geometric + guess-bonus resolution
+- [x] Continuous real-time simulation — no turns, no decision window
+- [x] §7 proximity-race resolution: interception, shots and saves resolved by geometry, not dice
+- [x] Two 2:00 halves with a countdown match clock and a half-time end swap
+- [x] Goal / save / interception restarts (centre kickoff, goal kick, in-place possession flip)
+- [x] §10 penalty shootout with its own state machine and zoomed penalty view
 - [x] Seeded determinism
-- [x] Pointer Events controls (drag / swipe / tap)
+- [x] Pointer Events controls (drag-to-pass, tap, double-tap-to-shoot, keeper dive)
 - [x] Weighted CPU with a difficulty blend
-- [x] Headless §4 property verification
-- [x] Astro build with the single-file engine extracted verbatim
+- [x] Headless 28-property rulebook verification against the same module the page bundles
+- [x] Astro build with the engine bundled from `node_modules` — no runtime CDN
 - [x] DESIGN.md design system applied to every UI surface
 - [ ] Replay of a match from its seed
 - [ ] Persisted difficulty and mute preferences
@@ -213,9 +276,12 @@ long-lived caching for the content-hashed `/assets/*`.
 
 ## 📐 Design Docs
 
-- [`football-guess-game-design.md`](football-guess-game-design.md) — the mechanics and algorithm spec,
-  including the CANONICAL §3 loop and §4 resolution algorithm.
+- [`REALTIME-SPEC.md`](REALTIME-SPEC.md) — **the authoritative build spec**: the nine assumptions, the
+  constants, the lifecycle, the controls, the §7 race resolution, the HUD and the §10 shootout.
+- [`football-guess-game-design.md`](football-guess-game-design.md) — the original turn-based decision-window
+  spec. **Superseded**; kept as a record of the dice-era design.
 - [`DESIGN.md`](DESIGN.md) — the visual system: colour, type, spacing, radius, elevation, components.
 
-> **What must never change:** the §3 state machine and its timings, and the §4 resolution algorithm
-> and its constants. Everything else is presentation and may be tuned freely.
+> **What must never change:** the `RULES` constants and the relationships the suite asserts about them
+> (`BALL_SPEED > PLAYER_SPEED`, `SHOT_SPEED > BALL_SPEED`, mouth width, half length), and the purity of
+> `rules.js` — no DOM, no Three.js. Everything else is presentation and may be tuned freely.

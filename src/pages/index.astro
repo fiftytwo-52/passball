@@ -13,14 +13,14 @@ import '../styles/global.css';
     <meta name="color-scheme" content="light">
     <meta name="theme-color" content="#171717">
 
-    <title>Guess & Pass — decision-window football</title>
+    <title>Guess & Pass — real-time 6-a-side</title>
     <meta name="description"
-        content="Three seconds to read the lane, commit the pass and break the pattern. Low-poly 3D players on a 2D top-view pitch, resolved by the canonical geometric + guess-bonus algorithm.">
+        content="Two two-minute halves of continuous 6-a-side football on a top-view pitch. Pass, shoot and dive in real time — every interception and save is won by geometry, not dice.">
 
     <meta property="og:type" content="website">
     <meta property="og:title" content="Guess & Pass">
     <meta property="og:description"
-        content="Attacker and defender choose at the same time, hidden from each other. Three seconds to decide.">
+        content="Continuous real-time football: two 2-minute halves, and a penalty shootout if it's level. Nothing is resolved by dice — the ball is faster than the players, and that race is the game.">
     <meta name="twitter:card" content="summary_large_image">
 
     <link rel="icon"
@@ -37,18 +37,21 @@ import '../styles/global.css';
         <div class="card card-floating" style="position:fixed;inset:auto 16px 16px 16px;z-index:99">
             <div class="eyebrow">Needs JavaScript</div>
             <h3>This is a real-time game</h3>
-            <p>Guess & Pass renders a WebGL pitch and resolves its passes in the browser. Enable JavaScript to play.
+            <p>Guess & Pass renders a WebGL pitch and simulates the ball in the browser. Enable JavaScript to play.
             </p>
         </div>
     </noscript>
 
     <!--  ======================= APP SHELL =======================
-          A column of three stacked bands: a top dock, the stage, a bottom dock.
+          A column of stacked bands: top dock / stage / shootout strip / bottom dock.
           The docks are flow siblings of the stage rather than overlays, so at any
           viewport size they can only ever push the pitch smaller — never cover
-          it. Nothing in the game is ever drawn on top of the ground.  -->
+          it. The turf carries the players and the ball and nothing else.  -->
     <div id="app">
-        <!-- ============================== HUD (TOP) ============================== -->
+        <!-- ============================== HUD (TOP) ==============================
+             Identity on the left, clock and controls on the right. The clock is
+             written only when the displayed second changes — the HUD is never
+             polled per frame. -->
         <header id="hud-top" hidden>
             <div class="dock">
                 <div class="cluster">
@@ -62,23 +65,30 @@ import '../styles/global.css';
                         <span class="vs">VS</span>
                         <span class="score" id="score-cpu"><strong>0</strong><span class="hud-label">Cpu</span></span>
                     </span>
+
+                    <span class="panel panel-clock" aria-label="Match clock">
+                        <span class="clock-line">
+                            <span class="hud-label" id="half-label">HALF 1</span>
+                            <!-- role=timer implies aria-live=off: the countdown ticks every
+                                 second and must not be announced each tick. -->
+                            <span id="clock" role="timer" class="clock-num">2:00</span>
+                        </span>
+                        <span class="clock-track"><span id="clock-bar"></span></span>
+                    </span>
                 </div>
 
                 <div class="cluster">
-                    <span class="panel panel-flush">
-                        <span class="hud-label" id="plays">PLAY 1</span>
-                        <span id="timer-num" class="tnum">3.0</span>
-                    </span>
-
                     <div class="segmented" id="difficulty" role="group" aria-label="CPU difficulty">
-                        <button type="button" data-diff="0.15" aria-pressed="false">COIN-FLIP</button>
-                        <button type="button" data-diff="0.6" aria-pressed="true">SHARP</button>
-                        <button type="button" data-diff="1" aria-pressed="false">RUTHLESS</button>
+                        <button type="button" class="btn" data-diff="0.15" aria-pressed="false">COIN-FLIP</button>
+                        <button type="button" class="btn" data-diff="0.6" aria-pressed="true">SHARP</button>
+                        <button type="button" class="btn" data-diff="1" aria-pressed="false">RUTHLESS</button>
                     </div>
 
-                    <button type="button" class="btn-icon" id="btn-mute" aria-pressed="false" title="Mute (M)"
+                    <button type="button" class="btn btn-ghost-sm" id="btn-help">HOW TO PLAY</button>
+                    <button type="button" class="btn btn-icon" id="btn-mute" aria-pressed="false" title="Mute (M)"
                         aria-label="Mute sound">♪</button>
-                    <button type="button" class="btn-icon" id="btn-pause" title="Pause (Esc)" aria-label="Pause">❙❙</button>
+                    <button type="button" class="btn btn-icon" id="btn-pause" title="Pause (Esc)"
+                        aria-label="Pause">❙❙</button>
                 </div>
             </div>
         </header>
@@ -90,7 +100,39 @@ import '../styles/global.css';
             <canvas id="scene" aria-label="Football pitch, top-down view with 3D players"></canvas>
         </section>
 
-        <!-- ============================== HUD (BOTTOM) ============================== -->
+        <!-- ===================== HUD (SHOOTOUT STRIP) =====================
+             §8/§10 — the HUD swaps into a shootout view for the duration of the
+             shootout: kicker order, a separate shootout score, and whose turn it
+             is. It is a flow band like the docks, so it also cannot cover the
+             ground. The engine reveals it only while a shootout is live. -->
+        <section id="hud-pens" hidden aria-label="Penalty shootout">
+            <div class="dock">
+                <div class="cluster">
+                    <span class="panel panel-pens">
+                        <span class="hud-label" id="so-title">PENALTIES</span>
+                        <span class="pens-score" id="so-score" aria-live="polite">0 – 0</span>
+                    </span>
+
+                    <span class="panel pens-order">
+                        <span class="hud-label">You</span>
+                        <span class="pens-dots" id="so-you"></span>
+                    </span>
+
+                    <span class="panel pens-order">
+                        <span class="hud-label">Cpu</span>
+                        <span class="pens-dots" id="so-cpu"></span>
+                    </span>
+                </div>
+
+                <div class="cluster">
+                    <span class="panel panel-pens" id="so-turn">YOUR KICK</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================== HUD (BOTTOM) ==============================
+             The rolling log and the instruction line. Nothing here is ever drawn
+             over the pitch. -->
         <footer id="hud-bottom" hidden>
             <div class="dock">
                 <div class="cluster">
@@ -98,19 +140,11 @@ import '../styles/global.css';
                         <span class="hud-label">Match log</span>
                         <ul id="log"></ul>
                     </div>
-                    <p id="instruction">Swipe from the carrier to a teammate to pass.</p>
+                    <p id="instruction">Drag from the ball-carrier to a teammate and release to pass.</p>
                 </div>
 
                 <div class="cluster">
-                    <span class="panel panel-timer">
-                        <span class="hud-label">Decision window</span>
-                        <div id="timer-wrap"><span id="timer-bar"></span></div>
-                    </span>
-
                     <div id="banner" aria-live="polite"></div>
-
-                    <button type="button" class="btn-ghost-sm" id="btn-help">HOW TO PLAY</button>
-                    <button type="button" class="btn-primary-sm" id="btn-lock">LOCK IN ⏎</button>
                 </div>
             </div>
         </footer>
@@ -123,19 +157,19 @@ import '../styles/global.css';
 
             <div class="eyebrow">Phase 1 · Versus CPU</div>
             <h1 id="menu-title">Guess & Pass</h1>
-            <p class="body-lg">Read the lane. Commit the pass. Break the pattern. Three seconds to decide — attacker and
-                defender choose at the same time, hidden from each other.</p>
+            <p class="body-lg">Continuous real-time football. Six a side, two two-minute halves, no turns and no
+                hidden windows — the ball is faster than any player, and that race is the whole game.</p>
 
             <ul class="spec-list">
                 <li>Low-poly <strong>3D players</strong> standing on a <strong>2D top-view pitch</strong>.</li>
-                <li>First to <strong>3 goals</strong> wins. Play as long as it takes.</li>
-                <li>Every pass resolved by the canonical <strong>geometric + guess-bonus</strong> algorithm (§4).</li>
+                <li>Two <strong>2:00 halves</strong>. Level at full time and you can settle it from the spot.</li>
+                <li>Every pass and shot resolved by <strong>pure geometry</strong> — proximity races, never dice.</li>
             </ul>
 
             <div class="actions">
-                <button type="button" class="btn-primary" id="btn-start">KICK OFF</button>
-                <button type="button" class="btn-secondary" id="btn-tutorial">TUTORIAL</button>
-                <button type="button" class="btn-ghost-sm" id="btn-verify">RUN §4 VERIFICATION TESTS</button>
+                <button type="button" class="btn btn-primary" id="btn-start">KICK OFF</button>
+                <button type="button" class="btn btn-secondary" id="btn-tutorial">TUTORIAL</button>
+                <button type="button" class="btn btn-ghost-sm" id="btn-verify">RUN RULEBOOK TESTS</button>
             </div>
 
             <div class="test-result" id="verify-out" aria-live="polite" hidden></div>
@@ -145,25 +179,28 @@ import '../styles/global.css';
     <div class="screen" id="screen-tutorial" hidden>
         <div class="card" role="dialog" aria-modal="true" aria-labelledby="tut-title">
             <div class="eyebrow">How to play</div>
-            <h2 id="tut-title">One window, two hidden choices</h2>
+            <h2 id="tut-title">Play it live — the ball is already moving</h2>
 
             <ul class="spec-list">
-                <li><strong>Attacking</strong> — <em>swipe from the carrier</em> toward a teammate to pick the pass;
-                    release on a teammate to commit early. <em>Drag a teammate</em> to move your runner, or tap a
-                    teammate and then LOCK IN.</li>
-                <li><strong>Defending</strong> — <em>drag a defender</em> outward to commit its guess direction; it
-                    breaks that way the moment the ball is played.</li>
-                <li><strong>Running out of time</strong> — everything is auto-filled at the end of the 3-second window:
-                    the attacker gets the safest receiver, defenders keep their current facing.</li>
-                <li><strong>Keyboard</strong> — <span class="keyhint">Enter</span> / <span class="keyhint">Space</span>
-                    lock in · <span class="keyhint">Esc</span> pause · <span class="keyhint">M</span> mute ·
-                    <span class="keyhint">R</span> restart match.</li>
-                <li><strong>Shooting</strong> — a pass that lands within 30 units of goal becomes a shot, resolved
-                    against the keeper.</li>
+                <li><strong>On the ball</strong> — <em>drag from the ball-carrier toward a teammate</em> and
+                    <em>release</em> to fire the pass. The receiver takes over the moment it arrives.</li>
+                <li><strong>Moving off the ball</strong> — <em>tap a teammate</em> to make them the receiver, and
+                    <em>tap one or two more</em> to send them running into space.</li>
+                <li><strong>Shooting</strong> — inside 30 units of goal, <em>double-tap a point along the goal mouth</em>
+                    to shoot. Outside that range a double-tap does nothing.</li>
+                <li><strong>Defending</strong> — <em>drag a defender</em> across the passing lane to intercept, or
+                    <em>tap a teammate</em> to send them to a spot. The interceptor is live: the ball is cut out the
+                    instant they get within reach of it.</li>
+                <li><strong>In goal</strong> — when the CPU shoots, <em>drag or tap the dive point</em>. No input means a
+                    default dive toward the shot's side.</li>
+                <li><strong>Keyboard</strong> — <span class="keyhint">Esc</span> pause ·
+                    <span class="keyhint">M</span> mute · <span class="keyhint">R</span> restart match.</li>
+                <li><strong>Penalties</strong> — level at full time, press <strong>GO TO PENALTIES</strong>. Draw the aim
+                    line, then draw the dive line: within the keeper's reach it is saved, otherwise it is a goal.</li>
             </ul>
 
             <div class="actions">
-                <button type="button" class="btn-primary" id="btn-tut-close">GOT IT</button>
+                <button type="button" class="btn btn-primary" id="btn-tut-close">GOT IT</button>
             </div>
         </div>
     </div>
@@ -172,12 +209,12 @@ import '../styles/global.css';
         <div class="card" role="dialog" aria-modal="true" aria-labelledby="pause-title">
             <div class="eyebrow">Paused</div>
             <h2 id="pause-title">Time out</h2>
-            <p>The decision clock is paused too — it resumes exactly where it stopped.</p>
+            <p>The match clock is paused too — it resumes exactly where it stopped.</p>
 
             <div class="actions">
-                <button type="button" class="btn-primary" id="btn-resume">RESUME</button>
-                <button type="button" class="btn-secondary" id="btn-restart">RESTART MATCH</button>
-                <button type="button" class="btn-ghost-sm" id="btn-quit">QUIT TO MENU</button>
+                <button type="button" class="btn btn-primary" id="btn-resume">RESUME</button>
+                <button type="button" class="btn btn-secondary" id="btn-restart">RESTART MATCH</button>
+                <button type="button" class="btn btn-ghost-sm" id="btn-quit">QUIT TO MENU</button>
             </div>
         </div>
     </div>
@@ -189,37 +226,47 @@ import '../styles/global.css';
             <p id="over-detail"></p>
 
             <div class="actions">
-                <button type="button" class="btn-primary" id="btn-again">PLAY AGAIN</button>
-                <button type="button" class="btn-secondary" id="btn-menu">MAIN MENU</button>
+                <button type="button" class="btn btn-primary" id="btn-pens" hidden>GO TO PENALTIES</button>
+                <button type="button" class="btn btn-secondary" id="btn-again">PLAY AGAIN</button>
+                <button type="button" class="btn btn-ghost-sm" id="btn-menu">MAIN MENU</button>
             </div>
         </div>
     </div>
 
     <div id="err" role="alert"></div>
 
-    <!-- Three.js r0.149.0 is bundled from node_modules by Vite (no CDN dependency). -->
+    <!-- Three.js is bundled from node_modules by Vite (no CDN dependency). -->
     <script>
         import '../scripts/game-source.js';
 
-        /* The engine's §4 self-test logs a console table and stashes the results
-           on window.__GAP_VERIFY_RESULTS. Mirror that verdict into the menu card
-           so it is legible without opening devtools — the engine stays the sole
+        /* The engine's rulebook self-test logs a table and stashes the report on
+           window.__GAP_VERIFY_RESULTS. Mirror that verdict into the menu card so
+           it is legible without opening devtools — the engine stays the sole
            authority on pass/fail; this only renders what it reported.
 
            Registration order matters and is safe: importing the engine above
-           synchronously installs its click handler first, so `out` is already
-           populated by the time this listener runs. */
+           synchronously installs its own click handler first, so by the time this
+           listener runs the report has already been refreshed. */
         const verifyOut = document.getElementById('verify-out');
         const verifyBtn = document.getElementById('btn-verify');
 
         if (verifyOut && verifyBtn) {
             verifyBtn.addEventListener('click', () => {
-                const results = window.__GAP_VERIFY_RESULTS;
-                if (!results) return;
+                const report = window.__GAP_VERIFY_RESULTS;
+                if (!report) {
+                    verifyOut.textContent = 'No report available — reload the page and try again.';
+                    verifyOut.hidden = false;
+                    return;
+                }
 
-                verifyOut.textContent = results
-                    .map(r => (r.pass ? 'PASS  ' : 'FAIL  ') + r.name)
-                    .join('\n');
+                const failed = report.results.filter(r => !r.pass);
+                const head = (report.allPass ? 'ALL PASS · ' : 'FAILURES · ')
+                    + report.properties + ' properties';
+                const body = failed.length
+                    ? failed.map(r => 'FAIL  ' + r.name + (r.detail ? '\n      ' + r.detail : '')).join('\n')
+                    : 'Every property held — the resolution races agree with the geometry.';
+
+                verifyOut.textContent = head + '\n' + body;
                 verifyOut.hidden = false;
             });
         }

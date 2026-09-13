@@ -8,10 +8,11 @@
      · the HUD is a near-white sheet carrying ink, structured by 1px hairlines;
      · system controls are 6px squares / 64px category pills — never marketing
        pills, so the "which surface am I on" signal stays honest (the one true
-       marketing pill, the full-time CTA on the menu card, is a deliberate
+       marketing pill, the kick-off CTA on the menu card, is a deliberate
        exception: it is the landing surface);
      · colour appears only as small accent marks (possession, outcomes, the
-       timer fill) and in the hero mesh gradient — never as a chrome fill;
+       clock fill, shootout dots) and in the hero mesh gradient — never as a
+       chrome fill;
      · depth is a 1px hairline plus, at most, a whisper shadow.
    ========================================================================= */
 
@@ -48,12 +49,14 @@ body {
 }
 
 /* ============================================================================
-   THE APP SHELL — a column of three bands: top dock / stage / bottom dock
+   THE APP SHELL — a column of bands: top dock / stage / shootout strip / bottom
+   dock
    ----------------------------------------------------------------------------
-   The docks are *flow siblings* of the stage, never overlays on it. The stage
-   therefore takes whatever height the docks leave, so at any viewport size the
-   chrome can only push the pitch smaller — it can never cover any part of the
-   ground. The turf carries the players and the ball and nothing else.
+   The docks and the penalty strip are *flow siblings* of the stage, never
+   overlays on it. The stage therefore takes whatever height the chrome leaves,
+   so at any viewport size the chrome can only push the pitch smaller — it can
+   never cover any part of the ground. The turf carries the players and the ball
+   and nothing else.
    ========================================================================= */
 
 #app {
@@ -67,9 +70,11 @@ body {
 }
 
 /* The docks are inert so a stray tap on a panel does not reach the pitch (or the
-   ground's drag handler); their controls opt back in individually. */
+   ground's drag handler); their controls opt back in individually. The shootout
+   strip is inert too — it is pure readout, with no controls of its own. */
 #hud-top,
-#hud-bottom {
+#hud-bottom,
+#hud-pens {
     pointer-events: none;
 }
 
@@ -103,13 +108,14 @@ body {
     cursor: grabbing;
 }
 
-/* --- the two docks ------------------------------------------------------ */
+/* --- the docks and the penalty strip ------------------------------------ */
 
 #hud-top,
-#hud-bottom {
+#hud-bottom,
+#hud-pens {
     flex: 0 0 auto;
     /* horizontal safe-area only; the vertical insets belong to the outermost
-       edge of each dock, so they are applied separately below */
+       edge of each band, so they are applied separately below */
     padding-left: calc(var(--hud-pad) + var(--sa-l));
     padding-right: calc(var(--hud-pad) + var(--sa-r));
 }
@@ -118,16 +124,23 @@ body {
     padding-top: calc(var(--hud-pad) + var(--sa-t));
 }
 
+/* The shootout strip sits between the pitch and the bottom dock. It only exists
+   while a shootout is live, so during normal play the pitch keeps the space. */
+#hud-pens {
+    padding-bottom: var(--hud-pad);
+}
+
 #hud-bottom {
     padding-bottom: calc(var(--hud-pad) + var(--sa-b));
 }
 
 #hud-top[hidden],
-#hud-bottom[hidden] {
+#hud-bottom[hidden],
+#hud-pens[hidden] {
     display: none;
 }
 
-/* One row of clusters per dock: identity on the left, controls on the right */
+/* One row of clusters per band: identity on the left, controls on the right */
 .dock {
     display: flex;
     align-items: flex-start;
@@ -147,6 +160,42 @@ body {
     gap: clamp(6px, 1.1vmin, 10px);
 }
 
+/* --- buttons ------------------------------------------------------------
+   The token layer styles every `.btn-*` variant but deliberately ships no
+   `.btn` base, so the shared button chrome is normalised here: the reset
+   (background/border/colour inherit nothing) plus the pointer affordances.
+   `btn-` alone is exempted from `pointer-events: none` up in the shell, so this
+   is what makes a dock button actually clickable. */
+.btn {
+    pointer-events: auto;
+    appearance: none;
+    -webkit-appearance: none;
+    border: 0;
+    margin: 0;
+    background: none;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+/* Keyboard focus has to be visible on an ink fill as well as a light one, so the
+   ring is drawn outside the box rather than as an outline that the fill hides. */
+.btn:focus-visible {
+    outline: 2px solid var(--c-link);
+    outline-offset: 2px;
+}
+
+/* LOCK-style disabled affordances are gone, but the pens CTA still hides itself
+   when the match was not level */
+.btn[disabled] {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 /* The HUD panel: a white hairline card floating over the dark board */
 .panel {
     background: var(--c-canvas-elevated);
@@ -154,29 +203,6 @@ body {
     border-radius: var(--r-md);
     box-shadow: var(--e-1);
     padding: 7px 11px;
-}
-
-.panel-flush {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-/* The decision-window well — one shallow horizontal strip, so it costs the
-   pitch as little vertical space as possible. */
-.panel-timer {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    padding: 7px 13px;
-}
-
-/* LOCK IN is disabled outside the decision phase — say so quietly */
-button:disabled,
-button:disabled:active {
-    opacity: 0.4;
-    cursor: not-allowed;
-    transform: none;
 }
 
 /* The mono eyebrow, used for every HUD field label */
@@ -308,17 +334,49 @@ button:disabled:active {
     color: var(--c-faint);
 }
 
-/* --- decision timer ---------------------------------------------------- */
-#timer-wrap {
+/* ============================================================================
+   THE MATCH CLOCK (§8)
+   ----------------------------------------------------------------------------
+   The clock counts DOWN the current half and is written by the engine only when
+   the displayed second changes — never per frame. It is a shallow strip, like
+   the scoreboard, so the pair of them cost the pitch as little height as
+   possible. The fill drains as the half runs out; the last stretch turns it
+   warm, which is the one moment the chrome is allowed to go red.
+   ========================================================================= */
+
+.panel-clock {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 7px 13px;
+    min-width: clamp(96px, 17vmin, 148px);
+}
+
+.clock-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.clock-num {
+    font-family: var(--f-mono);
+    font-size: clamp(0.9rem, 2.2vmin, 1.15rem);
+    font-weight: 500;
+    color: var(--c-ink);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+}
+
+.clock-track {
     position: relative;
     height: 4px;
-    min-width: clamp(120px, 26vmin, 260px);
     border-radius: var(--r-full);
     background: var(--c-hairline);
     overflow: hidden;
 }
 
-#timer-bar {
+#clock-bar {
     position: absolute;
     inset: 0;
     transform-origin: 0 50%;
@@ -328,17 +386,13 @@ button:disabled:active {
     border-radius: var(--r-full);
 }
 
-/* Running out of time is the one moment the chrome is allowed to go warm */
-#timer-wrap.low #timer-bar {
+/* Time nearly up is the one moment the chrome is allowed to go warm */
+.panel-clock.low #clock-bar {
     background: var(--c-error);
 }
 
-#timer-num {
-    font-family: var(--f-mono);
-    font-size: clamp(0.9rem, 2.2vmin, 1.15rem);
-    font-weight: 500;
-    color: var(--c-ink);
-    font-variant-numeric: tabular-nums;
+.panel-clock.low .clock-num {
+    color: var(--c-error-deep);
 }
 
 /* --- difficulty selector: the category-pill row ------------------------ */
@@ -373,6 +427,82 @@ button:disabled:active {
 .segmented button[aria-pressed='true'] {
     background: var(--c-ink);
     color: var(--c-on-primary);
+}
+
+/* ============================================================================
+   THE SHOOTOUT STRIP (§8 / §10)
+   ----------------------------------------------------------------------------
+   While a shootout is live the HUD swaps into this view: a separate shootout
+   score, the kicker order as a row of dots per side, and whose turn it is. The
+   dots mirror the regulation scoreboard's colour contract — mint for you, pink
+   for the CPU — so "scored" reads at a glance without a legend.
+   ========================================================================= */
+
+.panel-pens {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 13px;
+}
+
+.pens-score {
+    font-family: var(--f-mono);
+    font-size: clamp(0.9rem, 2.2vmin, 1.15rem);
+    font-weight: 500;
+    color: var(--c-ink);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.pens-order {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 12px;
+}
+
+.pens-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.pens-dots .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--c-hairline);
+    background: transparent;
+    display: inline-block;
+}
+
+/* taken but missed — still counts, so it tints rather than fills */
+.pens-dots .dot.taken {
+    background: var(--c-hairline-soft);
+}
+
+/* scored — the side's accent, the same two colours the pitch uses */
+.pens-dots .dot.scored {
+    border-color: transparent;
+}
+
+#so-you .dot.scored {
+    background: var(--x-you);
+}
+
+#so-cpu .dot.scored {
+    background: var(--x-cpu);
+}
+
+#so-turn {
+    font-family: var(--f-sans);
+    font-weight: 600;
+    font-size: var(--t-body-sm-size);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--c-ink);
+    white-space: nowrap;
 }
 
 /* --- match log --------------------------------------------------------- */
@@ -555,6 +685,10 @@ button:disabled:active {
     width: 100%;
 }
 
+.card .actions>[hidden] {
+    display: none;
+}
+
 /* A hairline-divided spec list, in place of bullets, for the tutorial */
 .spec-list {
     list-style: none;
@@ -580,7 +714,7 @@ button:disabled:active {
     color: var(--c-ink);
 }
 
-/* The §4 self-test result, rendered as a hairline well */
+/* The rulebook self-test result, rendered as a hairline well */
 .test-result {
     margin-top: var(--s-md);
     padding: var(--s-sm) var(--s-md);
@@ -623,18 +757,28 @@ button:disabled:active {
    ========================================================================= */
 
 @media (max-width: 720px) {
-    #log-panel {
-        max-width: 58vw;
-    }
 
+    /* The bottom dock stacks controls-first, so the banner ends up nearest the
+       thumb; the top dock keeps identity above controls. */
     #hud-bottom .dock {
         align-items: stretch;
         flex-direction: column-reverse;
         gap: var(--s-xs);
     }
 
+    #log-panel {
+        max-width: 58vw;
+    }
+
     #instruction {
         max-width: 100%;
+    }
+
+    /* The shootout strip stacks too: score on one line, order and turn on the
+       next, so it never becomes a single unscrollable row. */
+    #hud-pens .dock {
+        flex-direction: column;
+        align-items: stretch;
     }
 }
 
@@ -644,18 +788,46 @@ button:disabled:active {
         /* the log is a luxury at this width; the pitch matters more */
     }
 
-    /* one cluster per line, and the dock is already column-reversed, so the
-       controls end up as the bottom-most band — closest to the thumb */
+    /* At this width the pitch is the scarce resource, so the shootout dots drop
+       the "taken but missed" tint to one glyph each — the score line still
+       carries the exact state. */
+    .pens-dots .dot {
+        width: 7px;
+        height: 7px;
+    }
+
+    /* one cluster per line, and the bottom dock is already column-reversed, so
+       the controls end up as the bottom-most band — closest to the thumb */
     #hud-bottom .cluster,
-    #hud-top .cluster {
+    #hud-top .cluster,
+    #hud-pens .cluster {
         flex-wrap: nowrap;
         overflow-x: auto;
         scrollbar-width: none;
     }
 
     #hud-bottom .cluster::-webkit-scrollbar,
-    #hud-top .cluster::-webkit-scrollbar {
+    #hud-top .cluster::-webkit-scrollbar,
+    #hud-pens .cluster::-webkit-scrollbar {
         display: none;
+    }
+}
+
+/* On a touch device every control has to clear the 44px thumb target — the dock
+   can be the only thing between the player and a mis-tap on the pitch. This
+   costs the stage a few pixels of height, and it is worth it. */
+@media (pointer: coarse) {
+    .btn-icon {
+        width: var(--tap);
+        height: var(--tap);
+    }
+
+    .segmented button {
+        min-height: var(--tap);
+    }
+
+    .btn-ghost-sm {
+        height: var(--tap);
     }
 }
 
