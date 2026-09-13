@@ -61,18 +61,39 @@ import {
     /* --- §12.b ball motion: a struck ball rolls, it does not snap to a spot ---
        Presentation only. The rulebook still decides *who* wins a ball (§7);
        these numbers decide how the ball looks getting there, and not one of them
-       is read by a property test. A pass is a decelerating ground ball: it
-       leaves the boot fast, is down to PASS_SLOW of its kick speed by the time
-       it resolves, and has covered PASS_REACH of the distance it was aimed at.
-       That 0.86 is load-bearing — it is the reason a pass to a standing man
-       still lands inside CATCH_RADIUS of him and still counts as completed,
-       while the ball, and not the receiver, is the thing that looks like it is
-       running out of steam. */
+       is read by a property test.
+
+       A pass is a decelerating ground ball, but it has one hard constraint that
+       is about the rules and not at all about the look: IT MUST STAY FASTER THAN
+       A RUNNING MAN FOR ITS WHOLE FLIGHT. The previous profile did not. It faded
+       to PASS_SLOW·BALL_SPEED by the time it resolved and AVERAGED
+       PASS_PACE·BALL_SPEED — 0.78 × 23.8 = 18.6 against a run of 18.2. On paper
+       the ball had won by 0.4 units/s; on the board the whole second half of
+       every pass was the slowest thing on the pitch and the receiver simply
+       overtook it. From above, that reads as "the players are faster than the
+       ball", which is exactly what it was.
+
+       So the ball is now kicked harder than it needs to be and dies into the
+       receiver instead of crawling to him: v0 = PASS_PACE·BALL_SPEED = 26.7, and
+       still PASS_SLOW·v0 = 19.2 when it arrives — faster than a 18.2 run all the
+       way down, and only just beatable in the final stride. `dec` is solved
+       backwards from that single requirement, so the arrival fraction is exactly
+       PASS_SLOW at every distance.
+
+       PASS_REACH is how much of the aimed distance the ball covers before it
+       resolves, and it is 1.0 — the whole of it — because the aimed distance IS
+       the drawn line. Anything less puts the ball down short of the spot the
+       player drew: 0.94 hides the error at 18 units (1.1 short) but not at 92,
+       where it strands the ball 5.5 units away, well outside CATCH_RADIUS, and
+       the line and the ball visibly disagree again. Landing exactly on the point
+       is also the SAFE choice rather than a reckless one, because resolution
+       picks the NEAREST body: a receiver standing on the drawn spot is at
+       distance 0 and no defender can be nearer than that. */
     const BALL_CARRY = 1.15;      // how far ahead of the boot the ball is carried
-    const PASS_SLOW = 0.56;       // speed at resolution, as a fraction of the kick
-    const PASS_PACE = 0.78;       // ...so the pass averages this fraction of it
-    const PASS_REACH = 0.86;      // and it has covered this much ground by then
-    const BALL_ROLL_STOP = 9.0;   // fallback friction for a loose ball, u/s²
+    const PASS_SLOW = 0.72;       // speed at resolution, as a fraction of the kick
+    const PASS_PACE = 1.12;       // kick speed, as a multiple of BALL_SPEED
+    const PASS_REACH = 1.0;       // and it has covered this much ground by then
+    const BALL_ROLL_STOP = 14.0;  // turf friction for a loose ball, u/s²
     const BALL_ROLL_ARC = 0.06;   // a rolled ball is on the deck, not in the air
     /* --- and how it is *drawn*, which is the half nobody could see ------------
        The ball is a 0.42-unit sphere on a board 100 units wide, and it was also
@@ -830,15 +851,20 @@ import {
            modelled off that speed in shoot()/cpuKeeperDive(), so slowing shots
            here would break the save, not just the look.
 
-           A pass is rolled. It is resolved at PASS_REACH (0.86) of the distance
-           it was aimed at, still travelling, and `dec` is chosen so that the
-           speed at that instant is exactly PASS_SLOW·v0. Total time is therefore
-           PASS_REACH·d / (PASS_PACE·v0) — the average of v0 and PASS_SLOW·v0 —
-           which is the one number the whole feel hangs on: kick slower than this
-           and a pass dies in the grass, faster and it is the old bullet again. */
+           A pass is rolled, and the roll is derived backwards from the single
+           requirement that is about the rules rather than the look: THE BALL HAS
+           TO BE FASTER THAN A RUNNING MAN UNTIL THE MOMENT IT RESOLVES. So the
+           KICK speed is fixed first — PASS_PACE·BALL_SPEED, 26.7, a shade under
+           SHOT_SPEED, which is what a firmly struck pass actually is — and `dec`
+           is then chosen so that the ball is still moving at PASS_SLOW of that
+           kick when it reaches PASS_REACH of the aimed distance. Total time is
+           the mean of the two speeds. Pass the `speed` argument in and it is
+           ignored for a roll: the profile is the profile. */
         if (ball.roll) {
-            const v0 = Math.max(1e-6, speed);
-            ball.total = PASS_REACH * d / (PASS_PACE * v0);
+            const v0 = BALL_SPEED * PASS_PACE;
+            const avg = v0 * (1 + PASS_SLOW) * 0.5;
+            ball.s0 = ball.s = ball.speed = v0;
+            ball.total = PASS_REACH * d / Math.max(1e-6, avg);
             ball.dec = v0 * (1 - PASS_SLOW) / Math.max(1e-6, ball.total);
             ball.arc = BALL_ROLL_ARC;
         } else {
@@ -928,10 +954,13 @@ import {
         const c = PLAY && PLAY.carrier;
         const move = PLAN.atk === 'you' ? (PLAN.shot.you || PLAN.pass.you) : null;
         if (c && move && move.x !== undefined) {
-            /* a pass onto a team-mate leads their queued run, so preview it there */
-            const to = (move.queued && move.queued.x !== undefined) ? move.queued : move;
+            /* §12.c — the preview line ends on the ball's actual destination, and
+               the ball's destination is this bare point. It used to be previewed
+               at the receiver's queued run while the ball itself went even
+               further, to that receiver's live position: three places at once.
+               One point, one line, one ball. */
             queueLine.visible = true;
-            queueLine.setEnds(c, to);
+            queueLine.setEnds(c, move);
         } else {
             queueLine.visible = false;
         }
@@ -1666,7 +1695,13 @@ import {
                comes to rest rather than stopping dead, so `alive` is only turned
                off once it genuinely has none left. */
             if (ball.alive) {
-                const dec = ball.dec > 0 ? ball.dec : BALL_ROLL_STOP;
+                /* §12.b — a loose ball is slowed by TURF, not by the pass
+                   profile. It has been handled — cut out, spilled — and it should
+                   trickle and die. Carrying the pass's much gentler `dec` meant a
+                   cut-out ball kept rolling for another 30-odd units and straight
+                   out of the passage, which is the opposite of a ball worth
+                   chasing. */
+                const dec = BALL_ROLL_STOP;
                 const s = Math.max(0, ball.s - dec * dt);
                 ball.travel += (ball.s + s) * 0.5 * dt;
                 ball.s = s;
@@ -1844,7 +1879,7 @@ import {
     }
 
     /** Score each pass with the very race the player will face. */
-    function cpuChoosePass(rng) {
+    function cpuChoosePass(rng, spots) {
         const from = { x: PLAY.carrier.x, y: PLAY.carrier.y };
         const cands = teamOutfield('cpu').filter(p => p !== PLAY.carrier);
         /* The defending keeper is a defender too — it is the one body that can
@@ -1857,7 +1892,13 @@ import {
         const gk = keeperOf('you');
         const defenders = defenderInputs('you').concat(gk ? [{ x: gk.x, y: gk.y, speed: PLAYER_SPEED }] : []);
         const scored = cands.map(m => {
-            const to = { x: m.x, y: m.y };
+            /* Score the race to the SPOT the mate is being sent to whenever the
+               planner knows it, because that is where the ball is actually going
+               and therefore the race that will really be run. Falls back to his
+               current feet for the safety-net pass in cpuThink(), which has no
+               plan to read. */
+            const s = spots ? spots.get(m) : null;
+            const to = s ? { x: s.x, y: s.y } : { x: m.x, y: m.y };
             const race = resolvePassRace({ from, to, defenders });
             const safe = race.outcome === 'COMPLETE' ? 1 : 0.15;
             const progress = clamp((dist(from, PLAY.goal) - dist(to, PLAY.goal)) / 60, 0, 1);
@@ -1904,14 +1945,20 @@ import {
        ========================================================================== */
     function passTo(from, to, speed) {
         ball.lastTouch = from;
-        /* §12.b — every pass is a rolled ball. It leaves the boot fast, flat on
-           the deck, and loses pace the whole way, so it arrives as something the
-           receiver steps onto rather than something fired at his back. The CPU's
-           pass, the human's pass and autoPass() all come through here, so there
-           is exactly one kind of pass in the game. */
+        /* §12.b/c — every pass is a rolled ball. It leaves the boot firm, flat on
+           the deck, and keeps more than a running pace the whole way, so it beats
+           the receiver to the spot and arrives as something he steps onto rather
+           than something he overtakes. The CPU's pass, the human's pass and
+           autoPass() all come through here, so there is exactly one kind of pass
+           in the game.
+
+           `to` is a POINT, always — the spot on the turf that was drawn. The
+           ball is never played to a player's live position. */
         launchBall({ x: from.x, y: from.y }, { x: to.x, y: to.y },
-            speed || BALL_SPEED, { mode: 'pass', passTarget: to, arc: ARC_PASS, roll: true });
-        if (PLAY) PLAY.receiver = to;
+            speed || BALL_SPEED,
+            { mode: 'pass', passTarget: to.team ? to : null, arc: ARC_PASS, roll: true });
+        /* only a real body can be the receiver; a pass into space has none */
+        if (PLAY && to.team) PLAY.receiver = to;
         tutorOnPass(from);
         Sfx.kick();
     }
@@ -2362,12 +2409,19 @@ import {
         drag.moved = Math.hypot(pt.x - drag.x0, pt.y - drag.y0);
 
         if (drag.kind === 'aim' && drag.moved > TAP_SLOP) {
+            /* §12.c — the line IS the ball's destination. It used to snap its end
+               onto whichever teammate the drag pointed at, so the shot you drew
+               and the pass you got were two different things: the line finished
+               on the player while the ball was led to that player's run. Now the
+               drag draws a point on the turf and the ball goes to that point. The
+               marker still lights up to say a teammate is in the lane, but the
+               line never leaves your finger. */
             const tgt = aimPoint(drag.x0, drag.y0, drag.x, drag.y);
             const mate = mateInDirection(drag.x0, drag.y0, drag.x, drag.y);
             aimLine.visible = true;
             aimLine.material.color.setHex(mate ? COL.aim : COL.ghost);
             aimLine.material.opacity = mate ? .85 : .3;
-            aimLine.setEnds({ x: drag.x0, y: drag.y0 }, mate ? { x: mate.x, y: mate.y } : tgt);
+            aimLine.setEnds({ x: drag.x0, y: drag.y0 }, tgt);
             runnerMarker.visible = !!mate;
             if (mate) runnerMarker.position.set(worldX(mate.x), 0.09, worldZ(mate.y));
         } else if (drag.kind === 'move' && drag.moved > TAP_SLOP) {
@@ -2452,10 +2506,16 @@ import {
             aimLine.visible = false;
             runnerMarker.visible = false;
             if (moved > TAP_SLOP) {
+                /* §12.c — the ball goes to the POINT that was drawn, full stop.
+                   This line used to read `mate || aimPoint(...)`: the moment the
+                   drag pointed anywhere near a teammate the drawn point was
+                   thrown away and the teammate OBJECT was queued instead, and
+                   beginExecution() then resolved the ball to wherever that player
+                   had run to. The line ended on the man, the ball went somewhere
+                   else, and the two never agreed. A mate in the lane is now only
+                   a hint that lights the line up — it does not retarget it. */
+                const target = aimPoint(drag.x0, drag.y0, pt.x, pt.y);
                 const mate = mateInDirection(drag.x0, drag.y0, pt.x, pt.y);
-                const target = mate || aimPoint(drag.x0, drag.y0, pt.x, pt.y);
-                /* §17.b — the pass is stacked, not played. queuePass() knows the
-                   receiver by label and leads the ball to where they are going. */
                 if (queuePass(target) && !mate) log('Queued: played into space.', '');
             } else {
                 /* a tap on the carrier: is this the second half of a double-tap? */
@@ -2605,14 +2665,20 @@ import {
         bus.emit('plan-markers');
     }
 
-    /** Stack the pass. `to` is either a teammate (the ball leads their run) or a
-        bare point — a pass into space. Either way, the nearest body at arrival
-        decides who really gets it. */
+    /** Stack the pass. `to` is always a POINT on the turf — the spot the drag
+        drew — and that is where the ball will go, whatever the intended
+        receiver does next. Aim ahead of a runner to lead him; aim at his feet
+        to hit him. The nearest body at arrival decides who really gets it. */
     function queuePass(to) {
         if (!PLAN || PLAN.armed || !to) return false;
         const team = state.possession;
-        PLAN.pass[team] = to;
+        /* copied to a fresh bare point on purpose: storing the player object here
+           is what used to let the ball be led to that player's live position
+           instead of travelling to the point that was drawn */
+        PLAN.pass[team] = { x: to.x, y: to.y };
         PLAN.shot[team] = null;
+        /* the carrier is told to stay put, so a queued pass is a pass and not
+           also a sprint — the ball leaves his boot, not his boot and his legs */
         const c = PLAY && PLAY.carrier;
         if (c) setIntent(c, { x: c.x, y: c.y });
         if (team === 'you') log('Queued: pass to ' + (to.label || 'space') + '.', '');
@@ -2647,20 +2713,39 @@ import {
             cpuAssignDuties();
             PLAY.threat = cpuThreat();
             const c = PLAY.carrier;
+            const mates = teamOutfield('cpu').filter(m => m !== c);
+            /* §12.c — settle WHERE everybody is going FIRST, then aim the ball at
+               that spot. The pass is struck from the carrier's feet and the
+               receiver breaks at the same instant, so a ball aimed at his boots
+               is aimed at a place he is leaving: it lands at his marker's feet and
+               the only thing waiting at the end of it is a defender running the
+               other way. Leading the receiver here is not a nicety, it is the
+               difference between a pass and a turnover. */
+            const spots = new Map();
+            mates.forEach((m, i) => spots.set(m, attackingSpot(c, PLAY.goal, i)));
+
             if (dist(c, PLAY.goal) <= SHOT_RANGE && rng() < 0.25 + 0.5 * state.difficulty) {
                 PLAN.shot.cpu = {
                     x: clamp(PLAY.goal.x + randRange(rng, -GOAL_HALF_WIDTH * 0.85, GOAL_HALF_WIDTH * 0.85), 0, 100),
                     y: PLAY.goal.y
                 };
-                setIntent(c, { x: c.x, y: c.y });
             } else {
-                const target = cpuChoosePass(rng);
-                PLAN.pass.cpu = target || { x: PLAY.goal.x, y: PLAY.goal.y };
-                setIntent(c, PLAN.pass.cpu);
+                /* §12.c — the ball is aimed at the chosen receiver's DESTINATION,
+                   never at the receiver himself. Handing the plan the live player
+                   object is what let the ball follow him; and because the carrier
+                   was then also given that same object as a run, it is what made
+                   the CPU look like it was dribbling the length of the pitch
+                   single-handed. */
+                const target = cpuChoosePass(rng, spots);
+                const s = target ? spots.get(target) : null;
+                PLAN.pass.cpu = s
+                    ? { x: s.x, y: s.y }
+                    : { x: PLAY.goal.x, y: PLAY.goal.y };
             }
-            teamOutfield('cpu').filter(m => m !== c).forEach((m, i) => {
-                setIntent(m, attackingSpot(c, PLAY.goal, i));
-            });
+            mates.forEach(m => setIntent(m, spots.get(m)));
+            /* the carrier is told to stand exactly where he is: he holds the
+               ball, he does not carry it upfield on his own */
+            setIntent(c, { x: c.x, y: c.y });
             return;
         }
 
@@ -2788,20 +2873,32 @@ import {
         hideQueueMarkers();
         /* runs are handed from the plan to the body all in one pass, so no side
            gets a head start on the other */
+        /* Read the carrier once, and guard it. This loop is on the live frame
+           path: a throw here would skip simPlayers(), stepBall() and the render
+           for good, because frame() re-arms itself at the top of its callback. */
+        const carrier = PLAY ? PLAY.carrier : null;
         allPlayers.forEach(p => {
-            if (p.queued) { p.dest = p.queued; p.speed = PLAYER_SPEED; p.queued = null; }
+            /* §12.c — THE CARRIER NEVER RUNS. Possession only advances by a pass
+               or a shot, so giving the man on the ball a destination is exactly
+               what produced a solo run the length of the pitch. Enforced here as
+               well as in the two planners, because this is the last stop before a
+               body actually moves and one forgotten call must not be enough to
+               bring dribbling back. */
+            if (p.queued && p !== carrier) { p.dest = p.queued; p.speed = PLAYER_SPEED; }
+            p.queued = null;
         });
-        const c = PLAY && PLAY.carrier;
+        const c = carrier;
         if (c) {
             const shot = plan.shot[plan.atk];
             const pass = plan.pass[plan.atk];
             if (shot && dist(c, PLAY.goal) <= SHOT_RANGE) {
                 shoot(c, shot);
-            } else if (pass) {
-                /* the pass is played to where the receiver is *going*, so the run
-                   and the ball arrive together rather than one after the other */
-                const src = (pass.queued && pass.queued.x !== undefined) ? pass.queued : pass;
-                passTo(c, { x: src.x, y: src.y }, BALL_SPEED);
+            } else if (pass && pass.x !== undefined) {
+                /* §12.c — the ball is played to the POINT that was drawn and to
+                   nothing else. This used to resolve to `pass.queued` — the
+                   intended receiver's planned run — so the ball silently left
+                   the drawn line and chased the man. Read the bare point. */
+                passTo(c, { x: pass.x, y: pass.y }, BALL_SPEED);
             } else {
                 autoPass();
             }
