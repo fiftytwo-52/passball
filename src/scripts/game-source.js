@@ -74,6 +74,16 @@ import {
     const PASS_REACH = 0.86;      // and it has covered this much ground by then
     const BALL_ROLL_STOP = 9.0;   // fallback friction for a loose ball, u/s²
     const BALL_ROLL_ARC = 0.06;   // a rolled ball is on the deck, not in the air
+    /* --- and how it is *drawn*, which is the half nobody could see ------------
+       The ball is a 0.42-unit sphere on a board 100 units wide, and it was also
+       rendered pure white with emissive blown to full, so every pixel of it was
+       clipping at white and it had no shading at all: a flat white dot on a dark
+       pitch that has white lines painted across it is genuinely hard to find.
+       It is now plain Lambert white, scaled up a touch, wearing a dark rim so it
+       cannot vanish against the paint, with a beacon ring on the turf under it.
+       All three are light-independent on purpose — see the material's comment. */
+    const BALL_VIS = 1.16;        // drawn this much larger than it is, to be findable
+    const BALL_PING = 1.25;       // seconds per beacon ring
     const LANE_OFFSET = [-30, -14, 14, 30];
     const LANE_DEPTH = [0.55, 0.82, 0.62, 0.34];
     const TAP_SLOP = 6;           // game units a pointer must travel to be a drag
@@ -727,13 +737,65 @@ import {
        One moving object, four modes. `held` rides the carrier; `pass` and `shot`
        are the two flights the §7 races run against; `loose` is a dead ball
        waiting for whoever is nearest. */
-    /* §12.b — a self-lit white ball. `emissive` is what carries the blink: the
-       pulse in frame() drives emissive, so the ball brightens on its own with no
-       second light in a scene that is deliberately lit flat. */
+    /* Plain white Lambert, and deliberately nothing more. This material used to
+       carry `emissive: 0xffffff` at full intensity, which is why the ball could
+       not be made to read: the lights total about 2.1× irradiance (hemisphere
+       0.85 + key 0.9 + rim 0.35), so `color × irradiance` already clips at 1.0
+       on every pixel the ball has. A full-strength emissive term then pushed an
+       already-white surface further past white and flattened away the last of
+       its shading — the ball rendered as a uniform blown-out disc, not a sphere.
+       Worse, the blink was driving that emissive value: it was modulating a
+       channel that was pinned at the ceiling, so it changed literally no pixel.
+       With the emissive gone the ball gets its lit side and its shaded side
+       back, and the blink moved to geometry and to unlit materials, which is
+       where it can actually be seen. */
     const ballMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(.42, 14, 12),
-        new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0xffffff })
+        new THREE.SphereGeometry(.42, 16, 14),
+        new THREE.MeshLambertMaterial({ color: 0xffffff })
     );
+    /* The rim: a dark annulus in the ball's own equatorial plane, just outside
+       its silhouette, so the ball keeps a hard edge whether it is crossing the
+       dark turf or running straight over a white painted line — the one place a
+       white ball on this board disappears completely. MeshBasic, so no light
+       touches it. */
+    const ballRim = new THREE.Mesh(
+        new THREE.RingGeometry(.44, .62, 28),
+        new THREE.MeshBasicMaterial({
+            color: 0x06120b, transparent: true, opacity: .5,
+            side: THREE.DoubleSide, depthWrite: false
+        })
+    );
+    ballRim.rotation.x = -Math.PI / 2;
+    ballMesh.add(ballRim);
+    /* The beacon: a ring flat on the grass that swells outward from under the
+       ball and fades, forever. Drawn on the deck rather than on the ball, so it
+       marks the ball's position even while the ball itself is in the air mid-
+       pass, and MeshBasic, so its visibility has nothing to do with how the
+       pitch is lit. */
+    const ballPing = new THREE.Mesh(
+        new THREE.RingGeometry(.62, .86, 32),
+        new THREE.MeshBasicMaterial({
+            color: 0xffffff, transparent: true, opacity: 0,
+            side: THREE.DoubleSide, depthWrite: false
+        })
+    );
+    ballPing.rotation.x = -Math.PI / 2;
+    ballPing.position.y = 0.07;
+    scene.add(ballPing);
+    /* The possession mark: a three-sided cone flipped apex-down, so from this
+       tilted top view it reads as a flat triangle hanging over the carrier with
+       its point at their head. A cone rather than a flat triangle because a flat
+       one would be squashed to a sliver by the camera tilt; this one keeps its
+       shape from anywhere on the board. 'YXZ' so the yaw is applied last, in
+       world terms, and spinning the mark to the carrier's facing cannot tip the
+       flip over — the flip and the spin are on the same object. */
+    const carrierMark = new THREE.Mesh(
+        new THREE.ConeGeometry(1.0, 0.85, 3),
+        new THREE.MeshBasicMaterial({ color: COL.you, transparent: true, opacity: .95 })
+    );
+    carrierMark.rotation.order = 'YXZ';
+    carrierMark.visible = false;
+    scene.add(carrierMark);
     const ballShadow = makeBlobShadow(0.6);
     scene.add(ballMesh, ballShadow);
     const ball = {
@@ -2966,27 +3028,52 @@ import {
     }
 
     let last = performance.now();
-    /* §12.b — the ball blinks. It is the smallest object on a large dark board
-       and the one thing every eye is actually tracking, so it is the one thing
-       allowed to move on its own between two frames. The pulse is driven off
-       wall time rather than update(), so it keeps beating while a decision
-       window is open and the world underneath it is frozen — a dead-still ball
-       in a paused window is the last thing anyone needs. */
+    /* §12.b — the ball has to be findable. It is a 0.42-unit sphere on a board
+       100 units wide, and the one thing every eye is tracking, so it is the one
+       thing allowed to move on its own between two frames. Driven off wall time
+       rather than update(), so it keeps beating while a decision window is open
+       and the world underneath it is frozen — a dead-still ball in a paused
+       window is the last thing anyone needs. */
     let blinkT = 0;
     function frame(now) {
         requestAnimationFrame(frame);
         const dt = Math.min(0.05, (now - last) / 1000);
         last = now;
         if (!state.paused && !topScreen() && state.phase !== 'idle') update(dt);
-        /* A slow two-beat pulse. The ball is never invisible and never flashes:
-           it breathes. `emissive` is what carries the blink, so the ball lights
-           itself without a second light in a scene that is deliberately flat;
-           the size lift stays tiny, because a big sphere swallows its own
-           shadow and reads as a slide rather than a pulse. */
+        /* Two things pulse, and neither of them is the ball's brightness — that
+           has no room left to move (see the ball's material). A small breath in
+           size with the rim tightening as it swells, and the beacon ring, which
+           is the part that actually pulls the eye: it swells out from under the
+           ball and fades, on a loop, so there is always something moving on the
+           turf at the ball's feet and its position on the board is unambiguous
+           even when it is still. */
         blinkT += dt;
         const beat = 0.5 + 0.5 * Math.sin(blinkT * 4.2);
-        ballMesh.scale.setScalar(1 + beat * 0.14);
-        ballMesh.material.emissive.setScalar(0.18 + beat * 0.5);
+        ballMesh.scale.setScalar(BALL_VIS * (1 + beat * 0.12));
+        ballRim.material.opacity = 0.42 + beat * 0.3;
+        const cyc = (blinkT % BALL_PING) / BALL_PING;
+        ballPing.position.set(worldX(ball.x), 0.07, worldZ(ball.y));
+        ballPing.scale.setScalar(0.7 + cyc * 2.2);
+        ballPing.material.opacity = Math.pow(1 - cyc, 1.7) * 0.42;
+        /* And the carrier wears the triangle. Possession is the thing a viewer
+           has to know at a glance — it is what decides whose decision window is
+           open — and at this zoom "which of the twelve has it" is genuinely not
+           obvious from the ball alone, because the ball is the smaller object of
+           the two and it sits at their feet. The mark hangs over the head, in the
+           team's own colour, bobbing on the same beat as everything else so the
+           eye reads it and the ball as one signal. */
+        const holder = (!SO.active && ball.mode === 'held') ? ball.holder : null;
+        carrierMark.visible = !!holder;
+        if (holder) {
+            carrierMark.position.set(
+                worldX(holder.x),
+                4.55 + Math.sin(blinkT * 4.2) * 0.22,
+                worldZ(holder.y)
+            );
+            carrierMark.rotation.set(Math.PI, holder.yaw, 0);
+            carrierMark.material.color.setHex(teamRingHex(holder));
+            carrierMark.material.opacity = 0.68 + beat * 0.32;
+        }
         updateHud();
         placeCamera();
         renderer.render(scene, camera);
