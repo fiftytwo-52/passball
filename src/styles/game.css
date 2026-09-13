@@ -379,7 +379,10 @@ body {
     overflow: hidden;
 }
 
-#clock-bar {
+/* Both clocks share the fill strip: the half draining and the decision window
+   draining are the same signal, drawn the same way. */
+#clock-bar,
+#plan-bar {
     position: absolute;
     inset: 0;
     transform-origin: 0 50%;
@@ -390,12 +393,73 @@ body {
 }
 
 /* Time nearly up is the one moment the chrome is allowed to go warm */
-.panel-clock.low #clock-bar {
+.panel-clock.low #clock-bar,
+.panel-clock.low #plan-bar {
     background: var(--c-error);
 }
 
 .panel-clock.low .clock-num {
     color: var(--c-error-deep);
+}
+
+/* ============================================================================
+   THE DECISION WINDOW (§17.b)
+   ----------------------------------------------------------------------------
+   Sits in the bottom dock beside the log and the shoot button. The panel is the
+   same shallow clock strip as the match clock — a label, the countdown, and a
+   draining fill — so "how long have I got" reads identically in both places.
+   Everything here is `hidden` in open play: the board being frozen is the only
+   thing that puts it on screen.
+   ========================================================================= */
+
+.panel-plan {
+    min-width: clamp(104px, 18vmin, 152px);
+}
+
+/* `.panel-clock` sets display:inline-flex, which would beat the UA `[hidden]`
+   rule, so the plan panel has to be hidden explicitly — same reason the docks
+   are spelled out up top. The button is inline-level too. */
+#plan-panel[hidden],
+#btn-done[hidden] {
+    display: none;
+}
+
+/* The right-hand cluster of the bottom dock. It is the action end of the band,
+   so it hugs the thumb-side edge rather than the log's. */
+.dock-actions {
+    justify-content: flex-end;
+}
+
+/* --- MOVES DONE ----------------------------------------------------------
+   The commit control for the whole phase: ink-filled because it is the primary
+   action, and the same pill geometry as the other dock buttons. Hover inverts
+   it — border colour rather than a border swap, so the box never shifts. */
+.btn-done {
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 14px;
+    border-radius: var(--r-sm);
+    background: var(--c-ink);
+    color: var(--c-on-primary);
+    border: 1px solid var(--c-ink);
+    font-family: var(--f-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    transition: background-color 0.15s ease, color 0.15s ease,
+        border-color 0.15s ease;
+}
+
+.btn-done:hover {
+    background: var(--c-canvas-elevated);
+    color: var(--c-ink);
+    border-color: var(--c-hairline);
+}
+
+.btn-done:focus-visible {
+    outline: 2px solid var(--c-ink);
+    outline-offset: 2px;
 }
 
 /* --- difficulty selector: the category-pill row ------------------------ */
@@ -819,6 +883,12 @@ body {
         gap: var(--s-xs);
     }
 
+    /* With the dock reversed the action cluster is the bottom-most band, so it
+       reads left-to-right from the thumb edge instead of being pushed right. */
+    .dock-actions {
+        justify-content: flex-start;
+    }
+
     #log-panel {
         max-width: 58vw;
     }
@@ -859,6 +929,16 @@ body {
         scrollbar-width: none;
     }
 
+    /* …except the decision window. MOVES DONE is the one control that must never
+       be the item that scrolled off, so this cluster wraps instead of scrolling:
+       the plan clock takes the first line with the shoot button, and the commit
+       button rides the second. */
+    #hud-bottom .dock-actions {
+        flex-wrap: wrap;
+        overflow-x: visible;
+        width: 100%;
+    }
+
     #hud-bottom .cluster::-webkit-scrollbar,
     #hud-top .cluster::-webkit-scrollbar,
     #hud-pens .cluster::-webkit-scrollbar {
@@ -893,7 +973,8 @@ body {
         height: var(--tap);
     }
 
-    .btn-shoot {
+    .btn-shoot,
+    .btn-done {
         height: var(--tap);
     }
 }

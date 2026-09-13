@@ -84,23 +84,6 @@ import '../styles/global.css';
                         <button type="button" class="btn" data-diff="1" aria-pressed="false">RUTHLESS</button>
                     </div>
 
-                    <!-- The one action worth a button: a shot at the goal. It is
-                         disabled and dimmed until the human is actually on the
-                         ball, inside range, in open play — so it doubles as the
-                         range indicator. Kept first in this cluster, because on a
-                         narrow screen the cluster scrolls sideways and this is
-                         the control that must never be the one that scrolls off. -->
-                    <button type="button" class="btn btn-shoot" id="btn-shoot" title="Shoot (S)"
-                        aria-label="Shoot at goal" disabled>
-                        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                            <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.7" />
-                            <circle cx="12" cy="12" r="3.9" fill="currentColor" />
-                            <path d="M12 1.6v3.1M12 19.3v3.1M1.6 12h3.1M19.3 12h3.1"
-                                stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
-                        </svg>
-                        <span class="ico-label">SHOOT</span>
-                    </button>
-
                     <button type="button" class="btn btn-ghost-sm" id="btn-help">HOW TO PLAY</button>
                     <button type="button" class="btn btn-icon" id="btn-mute" aria-pressed="false" title="Mute (M)"
                         aria-label="Mute sound">♪</button>
@@ -148,8 +131,10 @@ import '../styles/global.css';
         </section>
 
         <!-- ============================== HUD (BOTTOM) ==============================
-             The rolling log and the instruction line. Nothing here is ever drawn
-             over the pitch. -->
+             The rolling log and the instruction line on the left; the decision
+             window on the right — its countdown, MOVES DONE, and the SHOOT button.
+             All of it is a flow band under the pitch, so none of it is ever drawn
+             over the turf. -->
         <footer id="hud-bottom" hidden>
             <div class="dock">
                 <div class="cluster">
@@ -157,11 +142,46 @@ import '../styles/global.css';
                         <span class="hud-label">Match log</span>
                         <ul id="log"></ul>
                     </div>
-                    <p id="instruction">Draw a line from the ball-carrier into space and release to play the
-                        pass — you attack the TOP goal.</p>
+                    <p id="instruction">Your ball — drag the carrier to stack a pass or a shot, drag your runners,
+                        then press MOVES DONE.</p>
                 </div>
 
-                <div class="cluster">
+                <div class="cluster dock-actions">
+                    <!-- §17.b — the decision window. Revealed only while a plan is
+                         open, so the dock is a two-item row in open play and a
+                         four-item row while the board is frozen. role=timer implies
+                         aria-live=off, so the countdown is not announced each tick. -->
+                    <span class="panel panel-clock panel-plan" id="plan-panel" hidden aria-label="Decision window">
+                        <span class="clock-line">
+                            <span class="hud-label" id="plan-state">PLANNING</span>
+                            <span id="plan-clock" role="timer" class="clock-num">10</span>
+                        </span>
+                        <span class="clock-track"><span id="plan-bar"></span></span>
+                    </span>
+
+                    <!-- Closes the window for the human. The CPU also has to be
+                         ready: if it has stacked its moves and you have not, the
+                         board stays frozen until you do. -->
+                    <button type="button" class="btn btn-done" id="btn-done" title="Lock in your moves (Enter)"
+                        hidden>MOVES DONE</button>
+
+                    <!-- The one action worth a button, and it lives down here beside
+                         the plan clock rather than in the top cluster: it only ever
+                         means anything while the window is open, and a thumb-rest
+                         position beats a corner. Disabled and dimmed until the human
+                         is on the ball and inside range, so it doubles as the range
+                         indicator. Space and S fire it from the keyboard. -->
+                    <button type="button" class="btn btn-shoot" id="btn-shoot" title="Shoot (S or Space)"
+                        aria-label="Shoot at goal" disabled>
+                        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.7" />
+                            <circle cx="12" cy="12" r="3.9" fill="currentColor" />
+                            <path d="M12 1.6v3.1M12 19.3v3.1M1.6 12h3.1M19.3 12h3.1"
+                                stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                        </svg>
+                        <span class="ico-label">SHOOT</span>
+                    </button>
+
                     <div id="banner" aria-live="polite"></div>
                 </div>
             </div>
@@ -175,13 +195,16 @@ import '../styles/global.css';
 
             <div class="eyebrow">Phase 1 · Versus CPU</div>
             <h1 id="menu-title">Guess & Pass</h1>
-            <p class="body-lg">Continuous real-time football. Six a side, two two-minute halves, no turns and no
-                hidden windows — the ball is faster than any player, and that race is the whole game.</p>
+            <p class="body-lg">Simultaneous-move football. Six a side, two two-minute halves. Every change of
+                possession freezes the board and hands you ten seconds to stack every move at once — pass, runs,
+                keeper, shot — then both sides play them out together.</p>
 
             <ul class="spec-list">
                 <li>Low-poly <strong>3D players</strong> standing on a <strong>2D top-view pitch</strong>.</li>
-                <li>Two <strong>2:00 halves</strong>. Level at full time and you can settle it from the spot.</li>
-                <li>Every pass and shot resolved by <strong>pure geometry</strong> — proximity races, never dice.</li>
+                <li>A <strong>ten-second decision window</strong> on every possession — the match clock stops while
+                    the board is frozen, so thinking never costs you time.</li>
+                <li>When the window closes <strong>both sides move at once</strong>. Every pass and shot is resolved
+                    by <strong>pure geometry</strong> — proximity races, never dice.</li>
             </ul>
 
             <div class="actions">
@@ -197,26 +220,34 @@ import '../styles/global.css';
     <div class="screen" id="screen-tutorial" hidden>
         <div class="card" role="dialog" aria-modal="true" aria-labelledby="tut-title">
             <div class="eyebrow">How to play</div>
-            <h2 id="tut-title">Play it live — the ball is already moving</h2>
+            <h2 id="tut-title">Stack your moves, then watch them play out</h2>
 
             <ul class="spec-list">
                 <li><strong>Your end</strong> — <strong>you defend the BOTTOM goal and attack the TOP one.</strong>
                     Six a side: your keeper and five outfielders all start in your own half, so you always play
                     away from yourself.</li>
-                <li><strong>On the ball</strong> — <em>draw a line from the ball-carrier into space</em> and
-                    <em>release</em> to play the pass there. The ball goes <em>where you drew</em>, not to a
-                    teammate's feet.</li>
-                <li><strong>Moving off the ball</strong> — <em>drag the player who goes for the ball</em> to run them
-                    onto the pass, then <em>drag the passer</em> to move them on after releasing.</li>
-                <li><strong>Shooting</strong> — inside 30 units of goal, <em>double-tap a point along the goal mouth</em>
-                    to shoot, or <em>drag one player towards the goal</em> to make a committed move. Outside that
-                    range a double-tap does nothing.</li>
-                <li><strong>Defending</strong> — <em>drag a defender</em> across the passing lane to intercept, or
-                    <em>tap a teammate</em> to send them to a spot. The interceptor is live: the ball is cut out the
-                    instant they get within reach of it.</li>
-                <li><strong>In goal</strong> — when the CPU shoots, <em>drag or tap the dive point</em>. No input means a
-                    default dive toward the shot's side.</li>
-                <li><strong>Keyboard</strong> — <span class="keyhint">Esc</span> pause ·
+                <li><strong>The decision window</strong> — the moment either side wins the ball, the board freezes
+                    and the plan clock starts at <strong>10</strong>. Nothing moves until the window closes. You
+                    stack <em>as many moves as you like</em> in that time; they all resolve together.</li>
+                <li><strong>The pass</strong> — <em>drag from the ball-carrier onto a team-mate</em> to pass to them,
+                    or <em>into empty space</em> to play it there. Anyone can receive, keeper included. The ball is
+                    led into a team-mate's run, so a pass to a moving player meets them on the way.</li>
+                <li><strong>The runs</strong> — <em>drag any of your players</em> to drop a ring where they should be
+                    when the ball is played. Stack as many runners as you have players.</li>
+                <li><strong>The shot</strong> — inside 30 units of goal, press <strong>SHOOT</strong> (or
+                    <span class="keyhint">Space</span>, or double-tap the goal mouth) to stack a shot. Outside that
+                    range it does nothing.</li>
+                <li><strong>The save</strong> — defending, <em>drag your keeper to the dive point</em> to stack the
+                    save. Leave it and the keeper dives on their own read.</li>
+                <li><strong>Closing the window</strong> — press <strong>MOVES DONE</strong> (or
+                    <span class="keyhint">Enter</span>). The CPU has to be ready too: if it has finished and you
+                    have not, the board <em>stays frozen</em>. If you give no instruction at all, your side plays a
+                    random pass.</li>
+                <li><strong>The race</strong> — a pass only belongs to you if <em>the nearest player to the ball is
+                    yours</em> when it lands. Send the wrong man and it spills loose, and the closest body from
+                    either side goes for it. Whoever wins it opens the next window.</li>
+                <li><strong>Keyboard</strong> — <span class="keyhint">Space</span> shoot ·
+                    <span class="keyhint">Enter</span> moves done · <span class="keyhint">Esc</span> pause ·
                     <span class="keyhint">M</span> mute · <span class="keyhint">R</span> restart match.</li>
                 <li><strong>Penalties</strong> — level at full time, press <strong>GO TO PENALTIES</strong>. Draw the aim
                     line, then draw the dive line: within the keeper's reach it is saved, otherwise it is a goal.</li>
@@ -235,14 +266,14 @@ import '../styles/global.css';
             <p>The match clock is paused too — it resumes exactly where it stopped.</p>
 
             <ul class="spec-list">
-                <li><strong>1 · Pass into space</strong> — <em>draw a line from the ball-carrier into space</em>,
-                    then release. You are playing the ball <em>into an area</em>, not at a player.</li>
-                <li><strong>2 · Send the runner</strong> — <em>drag the player who goes for the ball</em>, so they
-                    chase the pass you just released.</li>
-                <li><strong>3 · Follow the pass</strong> — <em>drag the passer</em> to move them after they have
-                    released it.</li>
-                <li><strong>4 · Make the move</strong> — <em>choose one player and drag them towards the goal</em> to
-                    commit someone to the attack.</li>
+                <li><strong>1 · Stack the pass</strong> — <em>drag from the ball-carrier</em> onto a team-mate to
+                    pass to them, or into space to play it into an area.</li>
+                <li><strong>2 · Send the runners</strong> — <em>drag your players</em> to drop a ring where each of
+                    them should be when the ball is played.</li>
+                <li><strong>3 · Set the finish</strong> — inside range, press <strong>SHOOT</strong> to stack a shot;
+                    defending, <em>drag your keeper</em> to the dive point.</li>
+                <li><strong>4 · Close the window</strong> — press <strong>MOVES DONE</strong>. Both sides' moves then
+                    resolve at once — nothing here happens one move at a time.</li>
             </ul>
 
             <div class="actions">

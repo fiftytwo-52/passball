@@ -594,6 +594,7 @@ import {
             id: team + num, team, role, num,
             label: role === 'keeper' ? (team === 'you' ? 'YOU-GK' : 'CPU-GK') : (team === 'you' ? 'YOU' : 'CPU') + '-' + num,
             x: 50, y: 50, tx: 50, ty: 50, dest: null, ax: 50, ay: 50,
+            queued: null,        // §17.b — where this player will run at execution
             mesh, ring, shadow,
             yaw: team === 'you' ? Math.PI : 0, walk: 0, px: 50, py: 50,
             hasBall: false, selected: false, controlled: false, held: false,
@@ -781,6 +782,49 @@ import {
     const runnerMarker = mkRing(COL.aim, 0.9, 1.25);
     const diveMarker = mkRing(COL.gkYou, 1.0, 1.5);
 
+    /* --- §8.b the stacked moves (§17.b) -------------------------------------
+       A ring per queued run, plus one line for the queued ball. These show the
+       human *their own* plan only: the CPU's stacked runs are deliberately not
+       drawn, so the window is a decision and not a read-out of the answer. */
+    const queueRings = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(() => mkRing(COL.aim, 0.55, 0.95));
+    const queueLine = groundLine(COL.aim, 2);
+
+    function hideQueueMarkers() {
+        queueRings.forEach(m => { m.visible = false; });
+        queueLine.visible = false;
+    }
+
+    /** Drop every stacked move. Called whenever a window opens or closes. */
+    function clearIntents() {
+        allPlayers.forEach(p => { p.queued = null; });
+        hideQueueMarkers();
+    }
+
+    /** Draw the stack: a ring where each of the human's players will end up, and
+        the line of the queued ball when the human is the side in possession. */
+    function drawQueueMarkers() {
+        if (SO.active || !PLAN || PLAN.armed) { hideQueueMarkers(); return; }
+        let n = 0;
+        allPlayers.forEach(p => {
+            if (p.team !== 'you' || !p.queued || !queueRings[n]) return;
+            const m = queueRings[n++];
+            m.visible = true;
+            m.position.set(worldX(p.queued.x), 0.09, worldZ(p.queued.y));
+        });
+        for (let i = n; i < queueRings.length; i++) queueRings[i].visible = false;
+
+        const c = PLAY && PLAY.carrier;
+        const move = PLAN.atk === 'you' ? (PLAN.shot.you || PLAN.pass.you) : null;
+        if (c && move && move.x !== undefined) {
+            /* a pass onto a team-mate leads their queued run, so preview it there */
+            const to = (move.queued && move.queued.x !== undefined) ? move.queued : move;
+            queueLine.visible = true;
+            queueLine.setEnds(c, to);
+        } else {
+            queueLine.visible = false;
+        }
+    }
+
     /* --- base rings under every player, plus the selection highlight ---------
        Every player keeps a faint ring in their own kit colour, so the two teams
        can be counted at a glance (six mint discs vs six magenta discs) instead of
@@ -879,6 +923,12 @@ import {
         };
         assignControls();
         bus.emit('role');
+        /* §17.b — every possession change is the start of a new passage, and every
+           passage begins with a decision window. setCarrier() is the single writer
+           of state.possession, so this is the one hook the whole model needs.
+           openPlan() itself refuses to open during the assemble beat, a shootout
+           or a half whose clock has run out. */
+        openPlan();
     }
 
     /**
@@ -917,6 +967,7 @@ import {
         shotLine.visible = false;
         runnerMarker.visible = false;
         diveMarker.visible = false;
+        hideQueueMarkers();
     }
 
     /* ==========================================================================
@@ -999,6 +1050,9 @@ import {
         log: el('log'), instruction: el('instruction'),
         mute: el('btn-mute'), pause: el('btn-pause'), help: el('btn-help'),
         shoot: el('btn-shoot'),
+        plan: el('plan-panel'), planState: el('plan-state'),
+        planClock: el('plan-clock'), planBar: el('plan-bar'),
+        done: el('btn-done'),
         difficulty: el('difficulty'),
         soTitle: el('so-title'), soYou: el('so-you'), soCpu: el('so-cpu'),
         soScore: el('so-score'), soTurn: el('so-turn')
@@ -1026,11 +1080,20 @@ import {
         ui.role.className = attacking ? 'attack' : 'defend';
         ui.poss.className = 'chip ' + state.possession;
         ui.poss.innerHTML = '<i class="dot"></i>' + (state.possession === 'you' ? 'YOU · BALL' : 'CPU · BALL');
-        ui.instruction.textContent = attacking
-            ? 'You attack the TOP goal — drag from the ball-carrier into space and release · double-tap the goal mouth to shoot.'
-            : 'You defend the BOTTOM goal — drag your interceptor and marker to close the lane · drag your keeper to set the dive.';
+        /* §17.b — the copy depends on whether the board is frozen. While the
+           window is open the human is stacking; once it closes, moves are running. */
+        const planning = !!(PLAN && !PLAN.armed && state.phase === 'play');
+        ui.instruction.textContent = planning
+            ? (attacking
+                ? 'Your ball — stack every move now: drag the carrier onto a team-mate or into space, drag your runners, then press MOVES DONE.'
+                : 'Their ball — stack your moves now: drag the interceptor and the marker to close the lane, set your keeper, then press MOVES DONE.')
+            : (attacking
+                ? 'Decisions are running — you attack the TOP goal.'
+                : 'Decisions are running — you defend the BOTTOM goal.');
     });
     bus.on('log', d => pushLog(d.text, d.cls));
+    /* §17.b — the stacked-move markers are redrawn only when the stack changes */
+    bus.on('plan-markers', drawQueueMarkers);
     bus.on('half', () => {
         ui.halfLabel.textContent = SO.active ? 'PENALTIES'
             : (state.phase === 'over' ? 'FULL TIME' : 'HALF ' + state.half);
@@ -1084,12 +1147,17 @@ import {
        teaches by doing: each step below is checked against what actually
        happened on the pitch, never against a button press. The old restart put
        *both* teams in the half being attacked, which left the human's own half
-       empty — that is precisely why the board felt like "the wrong way round". */
+       empty — that is precisely why the board felt like "the wrong way round".
+       §17.b — the steps are now phrased in the vocabulary of the decision
+       window, because that is the first thing the player has to understand: the
+       board is frozen, every drag *stacks* a move, and nothing happens until
+       MOVES DONE. Step 1 completes on the release (which is beginExecution's
+       pass), and steps 2–4 are the same three drags as before. */
     const TUTOR_STEPS = [
-        'Draw a line from the ball-carrier into space — release to pass.',
-        'Now drag the player who goes for the ball, so they run onto it.',
-        'Now drag the passer to move after passing.',
-        'Choose one player and drag them towards the goal to make a move.'
+        'Board frozen — drag the carrier onto a team-mate, then press MOVES DONE.',
+        'Now drag the player who will run onto the ball.',
+        'Now drag the passer, so they move on after playing it.',
+        'Drag a runner towards the goal to commit somebody to the attack.'
     ];
 
     /* Four slots for the coached opening. `dy` is measured *behind* the ball, so
@@ -1172,9 +1240,14 @@ import {
             k.dest = null; k.held = false; k.dive = null;
         });
 
-        setCarrier(carrier);
+        /* §17.b — the phase flips to `restart` BEFORE the carrier is handed over,
+           so setCarrier()'s openPlan() hook cannot fire during the assemble beat.
+           The decision window is opened by update() once the shape has walked out. */
         state.phase = 'restart';
         state.phaseT = 0;
+        PLAN = null;
+        clearIntents();
+        setCarrier(carrier);
         hideOverlays();
     }
 
@@ -1274,6 +1347,10 @@ import {
 
     function finishMatch() {
         state.phase = 'over';
+        /* the window belongs to live play only — drop it and its stacked moves,
+           or the next match opens with a stale clock and a board full of rings */
+        PLAN = null;
+        clearIntents();
         bus.emit('half');
         Sfx.whistle();
         const level = state.humanScore === state.cpuScore;
@@ -1389,9 +1466,19 @@ import {
             return goalKick(other(state.possession));
         }
 
-        const recv = ball.passTarget;
-        if (recv && recv.team === state.possession) {
-            setCarrier(recv);
+        /* §17.b — a pass is only *completed* if the nearest body to the ball when
+           it arrives is a team-mate. Testing `passTarget` alone was fine while
+           moves resolved one at a time, but with simultaneous moves a defender can
+           arrive on the same frame: a pass no one claims cleanly has to be a
+           genuine fifty-fifty, so the ball goes loose and the nearest player in
+           each kit races for it. Whoever wins that race gets the next window. */
+        let best = null, bd = Infinity;
+        for (const p of allPlayers) {
+            const d = dist(p, ball);
+            if (d < bd) { bd = d; best = p; }
+        }
+        if (best && best.team === state.possession) {
+            setCarrier(best);
             Sfx.good();
             return;
         }
@@ -1620,6 +1707,12 @@ import {
 
     function cpuThink(dt) {
         if (state.possession !== 'cpu') return;
+        /* §17.b — the CPU's choices are made inside the decision window now
+           (planForCpu) and fired by beginExecution(). This is only a safety net
+           for a possession that somehow arrived without a window: it must never
+           fire a second, unplanned pass on top of a queued one. */
+        if (!PLAN || PLAN.armed) return;
+        if (ball.mode !== 'held' || ball.holder !== PLAY.carrier) return;
         cpuAssignDuties();
         PLAY.threat = cpuThreat();
         PLAY.cpuThink -= dt;
@@ -1752,6 +1845,9 @@ import {
         SO.takenYou = 0; SO.takenCpu = 0;
         SO.result = null;
         state.phase = 'shootout';
+        /* §17.b — penalties are their own machine: no decision window survives it */
+        PLAN = null;
+        clearIntents();
         setPenaltyView(true);
         /* §8 — the HUD has swapped modes: the readouts are the shootout's now, so
            the regulation log and instruction line would only be stale copy. */
@@ -2065,7 +2161,10 @@ import {
             else drag.kind = null;
             return;
         }
-        if (state.phase !== 'play' && state.phase !== 'restart') { drag.kind = null; return; }
+        /* §17.b — a gesture only means anything while the decision window is open.
+           Everything it can do now *stacks* a move instead of making one, so the
+           board stays frozen until both sides have finished deciding. */
+        if (state.phase !== 'play' || !PLAN || PLAN.armed) { drag.kind = null; return; }
 
         const p = pickPlayer(pt);
         if (humanAttacking() && p === PLAY.carrier) {
@@ -2075,9 +2174,11 @@ import {
             drag.kind = 'keeper'; drag.player = p;
         } else if (p && p.team === 'you') {
             drag.kind = 'move'; drag.player = p; p.selected = true;
-        } else if (humanAttacking() && !p && PLAY.receiver) {
-            /* tap a teammate or an empty spot to nominate a receiver */
-            drag.kind = 'pick'; drag.player = PLAY.receiver;
+        } else if (humanAttacking() && !p) {
+            /* a bare tap on the turf nobody is standing on. There is no gesture
+               left that this can mean while stacking except the goal, so it
+               reaches for the goal — out of range it stays silent. */
+            drag.kind = 'tap-shot';
         } else {
             drag.kind = null;
         }
@@ -2157,13 +2258,16 @@ import {
         return best;
     }
 
-    /** §5 — a double-tap on the goal mouth, inside range, is a shot. */
-    function tryShootAt(x, y) {
+    /** §5/§17.b — a double-tap on the goal mouth, inside range, stacks a shot. */
+    function tryShootAt() {
         if (!humanAttacking()) return false;
         const c = PLAY.carrier;
         if (!c) return false;
-        if (dist(c, PLAY.goal) > SHOT_RANGE) return false;
-        return shoot(c, { x: clamp(x, 0, 100), y: PLAY.goal.y });
+        if (dist(c, PLAY.goal) > SHOT_RANGE) {
+            log('Shooting only works inside ' + SHOT_RANGE + ' units of the goal.', '');
+            return false;
+        }
+        return queueShot();
     }
 
     function onUp(e) {
@@ -2179,18 +2283,17 @@ import {
             runnerMarker.visible = false;
             if (moved > TAP_SLOP) {
                 const mate = mateInDirection(drag.x0, drag.y0, pt.x, pt.y);
-                const target = mate ? { x: mate.x, y: mate.y } : aimPoint(drag.x0, drag.y0, pt.x, pt.y);
-                passTo(player, target, BALL_SPEED);
-                if (!mate) {
-                    log('Played into space.', '');
-                }
+                const target = mate || aimPoint(drag.x0, drag.y0, pt.x, pt.y);
+                /* §17.b — the pass is stacked, not played. queuePass() knows the
+                   receiver by label and leads the ball to where they are going. */
+                if (queuePass(target) && !mate) log('Queued: played into space.', '');
             } else {
                 /* a tap on the carrier: is this the second half of a double-tap? */
                 const now = performance.now();
                 const near = Math.hypot(pt.x - lastTap.x, pt.y - lastTap.y) < 9;
                 if (now - lastTap.t < DOUBLE_TAP_MS && near) {
-                    const shot = tryShootAt(pt.x, pt.y);
-                    if (!shot) log('Shooting only works inside ' + SHOT_RANGE + ' units of the goal.', '');
+                    /* §17.b — stacks the shot; the ball leaves the boot on execute */
+                    tryShootAt();
                     lastTap = { t: 0, x: 0, y: 0 };
                 } else {
                     lastTap = { t: now, x: pt.x, y: pt.y };
@@ -2206,9 +2309,11 @@ import {
         } else if (kind === 'move') {
             if (moved > TAP_SLOP) {
                 const dest = { x: clamp(pt.x, 5, 95), y: clamp(pt.y, 5, 95) };
-                player.dest = dest;
-                player.speed = PLAYER_SPEED;
-                log(player.label + ' sent wide.', '');
+                /* §17.b — a run is *stacked*, never started: the ring appears where
+                   this player will end up, and the step itself waits for the
+                   window to close so it fires alongside everybody else's. */
+                setIntent(player, dest);
+                log(player.label + ' set to run.', '');
                 tutorOnSend(player, dest);
             }
             player.selected = false;
@@ -2224,8 +2329,9 @@ import {
             }
             diveLine.visible = false;
             diveMarker.visible = false;
-        } else if (kind === 'pick') {
-            log('Receiver: ' + (PLAY.receiver ? PLAY.receiver.label : '—') + '.', '');
+        } else if (kind === 'tap-shot') {
+            const c = PLAY && PLAY.carrier;
+            if (c && moved <= TAP_SLOP && dist(c, PLAY.goal) <= SHOT_RANGE) tryShootAt();
         } else if (kind === 'so-aim') {
             aimLine.visible = false;
             shotLine.visible = false;
@@ -2251,7 +2357,7 @@ import {
            crosshair would be a promise the input cannot keep. */
         const active = SO.active
             ? (SO.phase === 'aim' && SO.turn === 'you') || (SO.phase === 'dive' && SO.turn === 'cpu')
-            : (state.phase === 'play' || state.phase === 'restart');
+            : !!(state.phase === 'play' && PLAN && !PLAN.armed);
         canvas.style.cursor = drag.kind ? 'grabbing' : (active ? 'crosshair' : 'default');
     }
 
@@ -2274,7 +2380,264 @@ import {
         if (e.key === 'r' || e.key === 'R') { if (state.phase !== 'idle') beginMatch(); }
         if (e.key === 'h' || e.key === 'H') pushScreen('tutorial', { focus: '#btn-tut-close' });
         if (e.key === 's' || e.key === 'S') shootFromButton();
+        /* §17.b — Space is the PC shoot key, and Enter closes the decision window
+           the same way the MOVES DONE button does. */
+        if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); shootFromButton(); }
+        if (e.key === 'Enter') { e.preventDefault(); humanDone(); }
     });
+
+    /* ==========================================================================
+       § 17.b SIMULTANEOUS PLANNING — the decision window.
+       The match now runs in two beats. A *decision window* opens the moment a
+       side wins the ball; for PLAN_WINDOW seconds the board is frozen and the
+       match clock stops for both sides, while each side stacks up every move it
+       means to make — a pass, a run for each player, a keeper dive, a shot.
+       Nothing resolves one at a time. The window closes when the human presses
+       MOVES DONE (or when it expires), and both sides' stacked moves fire
+       together. A side that says nothing auto-plays, so the match never stalls.
+       ========================================================================== */
+    const PLAN_WINDOW = 10;       // seconds each side has to set every move
+    const PLAN_CPU_BEAT = 0.9;    // the CPU quietly "clicks Done" about here
+
+    let PLAN = null;
+
+    function newPlan() {
+        return {
+            atk: state.possession, def: other(state.possession),
+            t: PLAN_WINDOW, cpuT: 0, cpuPlanned: false, armed: false,
+            pass: { you: null, cpu: null },
+            shot: { you: null, cpu: null }
+        };
+    }
+
+    /** Open a fresh decision window for whoever just won the ball. */
+    function openPlan() {
+        /* A plan only belongs to live, undecided play: never during the assemble
+           beat, a shootout, or a half whose clock has already run out. */
+        if (state.phase !== 'play' || SO.active || state.pendingHalf) {
+            PLAN = null;
+            clearIntents();
+            return;
+        }
+        PLAN = newPlan();
+        clearIntents();
+        /* A dive lives for exactly one execution, so both keepers start clean —
+           this is what keeps a queued dive from leaking into the next window. */
+        [keeperOf('you'), keeperOf('cpu')].forEach(k => { if (k) { k.dive = null; k.held = false; } });
+        bus.emit('role');
+        bus.emit('plan-markers');
+    }
+
+    /** Stack a run. Nothing moves until the window closes. */
+    function setIntent(p, dest) {
+        if (!p || !dest) return;
+        p.queued = { x: clamp(dest.x, 5, 95), y: clamp(dest.y, 5, 95) };
+        bus.emit('plan-markers');
+    }
+
+    /** Stack the pass. `to` is either a teammate (the ball leads their run) or a
+        bare point — a pass into space. Either way, the nearest body at arrival
+        decides who really gets it. */
+    function queuePass(to) {
+        if (!PLAN || PLAN.armed || !to) return false;
+        const team = state.possession;
+        PLAN.pass[team] = to;
+        PLAN.shot[team] = null;
+        const c = PLAY && PLAY.carrier;
+        if (c) setIntent(c, { x: c.x, y: c.y });
+        if (team === 'you') log('Queued: pass to ' + (to.label || 'space') + '.', '');
+        return true;
+    }
+
+    /** Stack a shot. The button, Space and S, and the double-tap all land here. */
+    function queueShot() {
+        if (!PLAN || PLAN.armed || !PLAY || PLAY.atk !== 'you') return false;
+        const c = PLAY.carrier;
+        if (!c) return false;
+        if (ball.mode !== 'held' || ball.holder !== c) return false;
+        if (dist(c, PLAY.goal) > SHOT_RANGE) {
+            log('Shooting only works inside ' + SHOT_RANGE + ' units of the goal.', '');
+            return false;
+        }
+        PLAN.shot.you = { x: clamp(PLAY.goal.x, 0, 100), y: PLAY.goal.y };
+        PLAN.pass.you = null;
+        setIntent(c, { x: c.x, y: c.y });
+        log('Queued: shot at goal.', '');
+        return true;
+    }
+
+    /** The CPU's half of the window: read the board once, then stack its moves. */
+    function planForCpu() {
+        if (!PLAN || PLAN.cpuPlanned) return;
+        PLAN.cpuPlanned = true;
+        const rng = mulberry32(hashSeed(state.seed, state.half, Math.floor(state.halfT * 60) + 7));
+
+        /* --- the CPU is the side in possession: choose the ball's destination --- */
+        if (state.possession === 'cpu') {
+            cpuAssignDuties();
+            PLAY.threat = cpuThreat();
+            const c = PLAY.carrier;
+            if (dist(c, PLAY.goal) <= SHOT_RANGE && rng() < 0.25 + 0.5 * state.difficulty) {
+                PLAN.shot.cpu = {
+                    x: clamp(PLAY.goal.x + randRange(rng, -GOAL_HALF_WIDTH * 0.85, GOAL_HALF_WIDTH * 0.85), 0, 100),
+                    y: PLAY.goal.y
+                };
+                setIntent(c, { x: c.x, y: c.y });
+            } else {
+                const target = cpuChoosePass(rng);
+                PLAN.pass.cpu = target || { x: PLAY.goal.x, y: PLAY.goal.y };
+                setIntent(c, PLAN.pass.cpu);
+            }
+            teamOutfield('cpu').filter(m => m !== c).forEach((m, i) => {
+                setIntent(m, attackingSpot(c, PLAY.goal, i));
+            });
+            return;
+        }
+
+        /* --- the CPU is defending: hold the half in front of its own goal and
+               press the carrier. Both keepers are deliberately left alone: shoot()
+               reads the real flight at execution time, which is a better keeper
+               than any guess made from here would be. --- */
+        cpuDefendDuties();
+        PLAY.threat = cpuThreat();
+        const mine = ownGoal('cpu');
+        teamOutfield('cpu').forEach((p, i) => {
+            if (p.duty === 'interceptor') {
+                const to = PLAY.threat || PLAY.carrier;
+                const s = interceptTarget(p, PLAY.carrier, to);
+                setIntent(p, { x: s.x, y: ownHalf('cpu', s.y) });
+            } else if (p.duty === 'marker') {
+                const c = PLAY.carrier;
+                setIntent(p, {
+                    x: clamp(c.x - (mine.x - c.x) * 0.12, 6, 94),
+                    y: ownHalf('cpu', clamp(lerp(c.y, mine.y, 0.12), 6, 94))
+                });
+            } else {
+                const s = defendingSpot(PLAY.carrier, mine, i);
+                setIntent(p, { x: s.x, y: ownHalf('cpu', s.y) });
+            }
+        });
+    }
+
+    /** Called every frame the window is open. */
+    function planUpdate(dt) {
+        if (!PLAN || PLAN.armed) return;
+        if (!PLAN.cpuPlanned) {
+            PLAN.cpuT += dt;
+            if (PLAN.cpuT >= PLAN_CPU_BEAT) planForCpu();
+        }
+        PLAN.t -= dt;
+        if (PLAN.t <= 0) {
+            PLAN.t = 0;
+            if (!PLAN.cpuPlanned) planForCpu();
+            aiPlanForHuman();
+            beginExecution();
+        }
+    }
+
+    /** MOVES DONE — the human's half of the window is closed and the board runs. */
+    function humanDone() {
+        if (!PLAN || PLAN.armed) return;
+        /* the CPU has to be ready too, and then a silent human side gets its own
+           automatic plan — done in that order, so the auto-plan can read where
+           the CPU's ball is going before it reacts to it */
+        if (!PLAN.cpuPlanned) planForCpu();
+        aiPlanForHuman();
+        beginExecution();
+    }
+
+    /** "If the player makes no move, their player will pass the ball randomly."
+        A real pass to somebody, chosen without any help from the geometry. */
+    function autoPass() {
+        if (!PLAY || !PLAY.carrier) return;
+        const c = PLAY.carrier;
+        const mates = teamOutfield(c.team).filter(m => m !== c);
+        const rng = mulberry32(hashSeed(state.seed, state.half, Math.floor(state.halfT * 60) + 31));
+        const options = mates.concat([{
+            x: clamp(c.x + (rng() - 0.5) * 44, 8, 92),
+            y: clamp(c.y + attackSide(c.team) * (12 + rng() * 26), 8, 92)
+        }]);
+        const pick = options[Math.floor(rng() * options.length)];
+        if (pick) passTo(c, pick, BALL_SPEED);
+    }
+
+    /** True when the human has said nothing at all this window — no pass, no
+        shot, no run. That is the case the "no instruction" rule covers. */
+    function humanPlanEmpty() {
+        if (!PLAN) return false;
+        if (PLAN.pass.you || PLAN.shot.you) return false;
+        return !allPlayers.some(p => p.team === 'you' && p.queued);
+    }
+
+    /** The human's side, left to itself, still has to play football — standing
+        still is not an option, because the other side is about to move. It is
+        shaped like the CPU's own plan so both teams look like the same sport:
+        attacking, the ball goes somewhere random (autoPass's job the moment the
+        window closes) while the rest of the team makes attacking runs; defending,
+        one body goes for the ball, one sits on the carrier, the rest hold a shape
+        in front of goal. It only ever fires on a side that said nothing, so
+        anything the human actually stacked always wins. */
+    function aiPlanForHuman() {
+        if (!PLAN || PLAN.armed || !humanPlanEmpty()) return;
+        const c = PLAY && PLAY.carrier;
+
+        if (state.possession === 'you') {
+            if (c) {
+                teamOutfield('you').filter(m => m !== c).forEach((m, i) => {
+                    setIntent(m, attackingSpot(c, PLAY.goal, i));
+                });
+            }
+            return;
+        }
+
+        /* Defending. Both keepers are left out on purpose: shoot() reads the real
+           flight when the ball is actually struck, which beats guessing from here. */
+        const mine = ownGoal('you');
+        const bound = c ? (c.queued || c) : { x: 50, y: 50 };
+        teamOutfield('you').forEach((p, i) => {
+            if (c && i === 0) {
+                const s = interceptTarget(p, c, bound);
+                setIntent(p, { x: s.x, y: ownHalf('you', s.y) });
+            } else if (c && i === 1) {
+                setIntent(p, {
+                    x: clamp(c.x - (mine.x - c.x) * 0.12, 6, 94),
+                    y: ownHalf('you', clamp(lerp(c.y, mine.y, 0.12), 6, 94))
+                });
+            } else {
+                const s = defendingSpot(c || bound, mine, i);
+                setIntent(p, { x: s.x, y: ownHalf('you', s.y) });
+            }
+        });
+    }
+
+    /** Both sides are ready: every stacked move fires together. */
+    function beginExecution() {
+        if (!PLAN) return;
+        const plan = PLAN;
+        plan.armed = true;
+        hideQueueMarkers();
+        /* runs are handed from the plan to the body all in one pass, so no side
+           gets a head start on the other */
+        allPlayers.forEach(p => {
+            if (p.queued) { p.dest = p.queued; p.speed = PLAYER_SPEED; p.queued = null; }
+        });
+        const c = PLAY && PLAY.carrier;
+        if (c) {
+            const shot = plan.shot[plan.atk];
+            const pass = plan.pass[plan.atk];
+            if (shot && dist(c, PLAY.goal) <= SHOT_RANGE) {
+                shoot(c, shot);
+            } else if (pass) {
+                /* the pass is played to where the receiver is *going*, so the run
+                   and the ball arrive together rather than one after the other */
+                const src = (pass.queued && pass.queued.x !== undefined) ? pass.queued : pass;
+                passTo(c, { x: src.x, y: src.y }, BALL_SPEED);
+            } else {
+                autoPass();
+            }
+        }
+        bus.emit('role');
+    }
 
     /* ==========================================================================
        § 18. UPDATE + RENDER
@@ -2286,21 +2649,32 @@ import {
                sent somewhere alone */
             allPlayers.forEach(p => { if (!p.dest) moveToward(p, p.ax, p.ay, ASSEMBLE_SPEED, dt); });
             stepBall(dt);
-            if (state.phaseT >= SETUP_TIME) { state.phase = 'play'; state.phaseT = 0; }
+            if (state.phaseT >= SETUP_TIME) {
+                state.phase = 'play';
+                state.phaseT = 0;
+                /* §17.b — the restart is the first planning window of the passage */
+                openPlan();
+            }
         } else if (state.phase === 'play') {
-            if (state.pendingHalf) {
-                /* §3/§3 — the whistle waits for the ball to become dead */
-                if (ball.mode === 'held' || ball.mode === 'loose') endHalf();
-            } else {
-                state.halfT += dt;
-                if (state.halfT >= HALF_LENGTH) {
-                    state.halfT = HALF_LENGTH;
-                    state.pendingHalf = true;
+            /* §17.b — while a decision window is open the board is frozen: the
+               match clock stops for BOTH sides, nobody takes a step, and the only
+               thing that moves is the planning countdown. */
+            const planning = !!(PLAN && !PLAN.armed);
+            if (!planning) {
+                if (state.pendingHalf) {
+                    /* §3 — the whistle waits for the ball to become dead */
+                    if (ball.mode === 'held' || ball.mode === 'loose') endHalf();
+                } else {
+                    state.halfT += dt;
+                    if (state.halfT >= HALF_LENGTH) {
+                        state.halfT = HALF_LENGTH;
+                        state.pendingHalf = true;
+                    }
                 }
             }
             if (PLAY) {
-                cpuThink(dt);
-                simPlayers(dt);
+                if (planning) planUpdate(dt);
+                else { cpuThink(dt); simPlayers(dt); }
             }
             stepBall(dt);
         } else if (state.phase === 'shootout') {
@@ -2328,31 +2702,34 @@ import {
             return;
         }
         if (!PLAY) return;
-        /* the human's keeper shows a dive line whenever a shot is live */
-        if (ball.mode === 'shot' && PLAY.def === 'cpu') {
-            const k = keeperOf('you');
-            if (k && k.dive && !drag.kind) {
-                diveLine.visible = true;
-                diveLine.setEnds(k, k.dive);
-                diveMarker.visible = true;
-                diveMarker.position.set(worldX(k.dive.x), 0.09, worldZ(k.dive.y));
-            }
-        } else if (!drag.kind) {
+        /* §17.b — the human's keeper dive line lives in two places now: while the
+           decision window is open it shows the dive that has been *stacked*, and
+           it still shows the live dive once a shot is in flight. */
+        if (drag.kind) return;
+        const planning = !!(PLAN && !PLAN.armed);
+        const liveShot = ball.mode === 'shot' && PLAY.def === 'cpu';
+        const k = (planning || liveShot) ? keeperOf('you') : null;
+        if (k && k.dive) {
+            diveLine.visible = true;
+            diveLine.setEnds(k, k.dive);
+            diveMarker.visible = true;
+            diveMarker.position.set(worldX(k.dive.x), 0.09, worldZ(k.dive.y));
+        } else {
             diveLine.visible = false;
             diveMarker.visible = false;
         }
     }
 
     /* --- the shoot button ---------------------------------------------------
-       Enabled exactly when a shot is legal: the human is on the ball, the ball
-       is live at their feet, play is running, and the carrier is inside
-       SHOT_RANGE of the goal it attacks. While the human is defending, or out of
-       range, it is dimmed and inert — so the icon also tells the player why a
-       shot is not on. */
+       §17.b — the button no longer fires a shot, it *stacks* one. It is enabled
+       exactly when a shot is legal and still unclaimed: the human is attacking,
+       the ball is at their feet inside SHOT_RANGE, and the decision window is
+       open. The ball actually leaves the boot when both sides execute. */
     let lastShootOn = null;
     function canShootNow() {
         if (SO.active || state.paused) return false;
-        if (state.phase !== 'play' && state.phase !== 'restart') return false;
+        if (state.phase !== 'play' || !PLAN || PLAN.armed) return false;
+        if (PLAN.shot.you) return false;
         if (!topScreen() && PLAY && PLAY.atk === 'you' && PLAY.carrier) {
             return ball.mode === 'held' && ball.holder === PLAY.carrier
                 && dist(PLAY.carrier, PLAY.goal) <= SHOT_RANGE;
@@ -2369,18 +2746,51 @@ import {
         ui.shoot.classList.toggle('ready', on);
     }
 
-    /** §5 — the button is a straight shot at the middle of the goal the human
-        attacks, the same call the double-tap makes. */
+    /** §5 — the button stacks a straight shot at the middle of the goal the
+        human attacks, the same call the double-tap makes. Space and S do too. */
     function shootFromButton() {
         if (!canShootNow()) return;
-        const c = PLAY.carrier;
-        const shot = shoot(c, { x: clamp(PLAY.goal.x, 0, 100), y: PLAY.goal.y });
-        if (!shot) log('Shooting only works inside ' + SHOT_RANGE + ' units of the goal.', '');
+        queueShot();
         refreshShootButton();
+    }
+
+    /* --- the plan panel -----------------------------------------------------
+       The countdown and the MOVES DONE button sit in the bottom dock beside the
+       log. Like the match clock this is change-guarded: nothing is written to
+       the DOM unless the tenth-of-a-second bucket actually moved. */
+    let lastPlanSec = -1, lastPlanBar = -1, lastPlanState = '', lastPlanShow = null;
+    function refreshPlanHud() {
+        if (!ui.plan || !ui.planClock) return;
+        const show = !!(PLAN && !PLAN.armed && state.phase === 'play' && !SO.active);
+        if (lastPlanShow !== show) {
+            lastPlanShow = show;
+            ui.plan.hidden = !show;
+            if (ui.done) ui.done.hidden = !show;
+        }
+        if (ui.done) ui.done.disabled = !show;
+        if (!show) { lastPlanSec = -1; lastPlanBar = -1; lastPlanState = ''; return; }
+
+        const secs = Math.max(0, Math.ceil(PLAN.t - 1e-6));
+        if (secs !== lastPlanSec) {
+            lastPlanSec = secs;
+            ui.planClock.textContent = String(secs);
+            ui.plan.classList.toggle('low', secs <= 3);
+        }
+        const k = clamp(PLAN.t / PLAN_WINDOW, 0, 1);
+        if (Math.abs(k - lastPlanBar) > 0.004) {
+            lastPlanBar = k;
+            ui.planBar.style.transform = 'scaleX(' + k.toFixed(3) + ')';
+        }
+        const label = PLAN.cpuPlanned ? 'CPU READY · YOUR MOVE' : 'PLANNING';
+        if (label !== lastPlanState) {
+            lastPlanState = label;
+            ui.planState.textContent = label;
+        }
     }
 
     function updateHud() {
         refreshShootButton();
+        refreshPlanHud();
         if (SO.active) return;
         const left = Math.max(0, HALF_LENGTH - state.halfT);
         const secs = Math.ceil(left - 1e-6);
@@ -2473,6 +2883,8 @@ import {
     el('btn-tut-close').addEventListener('click', () => popScreen());
     el('btn-help').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
     if (ui.shoot) ui.shoot.addEventListener('click', shootFromButton);
+    /* §17.b — the human's half of the decision window */
+    if (ui.done) ui.done.addEventListener('click', humanDone);
     el('btn-pause').addEventListener('click', () => pauseGame());
     el('btn-mute').addEventListener('click', toggleMute);
     el('btn-resume').addEventListener('click', resumeGame);
@@ -2519,11 +2931,13 @@ import {
     window.__GAP = {
         RULES, state, runVerification,
         get play() { return PLAY; },
+        get plan() { return PLAN; },
         get shootout() { return SO; },
         get ball() { return ball; },
         api: {
             beginMatch, kickoff, goalKick, beginShootout, soSetupKick,
             passTo, shoot, pauseGame, resumeGame, toggleMute,
+            humanDone, openPlan, beginExecution, queuePass, queueShot,
             setDifficulty: d => { state.difficulty = clamp(d, 0, 1); },
             /** Pin the clock, for testing full time without playing 2:00. */
             setHalfTime: t => { state.halfT = clamp(t, 0, HALF_LENGTH); },
