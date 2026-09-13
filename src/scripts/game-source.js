@@ -367,7 +367,10 @@ import * as THREE from 'three';
         return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setClearColor(0x07110f, 1);
+    /* Surround colour. Matched to the pitch texture's base turf, so the area
+       beyond the touchline reads as the same grass under the same light and the
+       plane's edges disappear into it. */
+    renderer.setClearColor(0x0e2413, 1);
 
     const scene = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -400, 400);
@@ -399,29 +402,61 @@ import * as THREE from 'three';
         c.width = c.height = px;
         const g = c.getContext('2d');
 
-        /* mown stripes — the ink board, stepped in near-black greys */
-        g.fillStyle = '#171717';
+        /* turf — a base green, then the mown cut in a lighter one. These values
+           are deliberately darker than the finished pitch: the plane is shaded
+           by the scene's hemisphere + key light, which add roughly a third more
+           brightness on top of whatever is painted here. */
+        g.fillStyle = '#1e4726';
         g.fillRect(0, 0, px, px);
+        g.fillStyle = '#245229';
         for (let i = 0; i < 10; i++) {
             if (i % 2) continue;
-            g.fillStyle = '#1d1d1d';
             g.fillRect(0, i * 10 * S, px, 10 * S);
         }
-        /* grass speckle */
-        for (let i = 0; i < px * 7; i++) {
-            const x = Math.random() * px, y = Math.random() * px;
-            g.fillStyle = Math.random() < .5 ? 'rgba(255,255,255,.022)' : 'rgba(0,0,0,.05)';
-            g.fillRect(x, y, 2, 2);
-        }
-        /* soft centre lighting */
-        const rad = g.createRadialGradient(px / 2, px / 2, px * .1, px / 2, px / 2, px * .72);
-        rad.addColorStop(0, 'rgba(255,255,255,.075)');
-        rad.addColorStop(1, 'rgba(0,0,0,.28)');
-        g.fillStyle = rad;
-        g.fillRect(0, 0, px, px);
 
-        /* markings — 1px-equivalent hairlines in the canvas tone */
-        g.strokeStyle = 'rgba(250,250,250,.48)';
+        /* blades — thousands of short, jittered strokes. The mown bands on their
+           own read as flat vinyl from directly above; this pass is what makes the
+           surface look cut rather than printed. */
+        g.save();
+        g.globalAlpha = .16;
+        for (let i = 0; i < 4200; i++) {
+            const x = Math.random() * px, y = Math.random() * px;
+            g.strokeStyle = Math.random() < .52 ? '#2f6234' : '#173a1e';
+            g.lineWidth = 1;
+            g.beginPath();
+            g.moveTo(x, y);
+            g.lineTo(x + (Math.random() - .5) * 1.8 * S, y - (1.2 + Math.random() * 3.4) * S);
+            g.stroke();
+        }
+        g.restore();
+
+        /* daylight fall-off — shade gathering along the touchlines. Kept shallow:
+           from a top-down camera a strong vignette reads as a spotlight. */
+        [0, 1].forEach(axis => {
+            const edge = g.createLinearGradient(0, 0, axis ? px : 0, axis ? 0 : px);
+            edge.addColorStop(0, 'rgba(2,16,8,.30)');
+            edge.addColorStop(.17, 'rgba(2,16,8,0)');
+            edge.addColorStop(.83, 'rgba(2,16,8,0)');
+            edge.addColorStop(1, 'rgba(2,16,8,.30)');
+            g.fillStyle = edge;
+            g.fillRect(0, 0, px, px);
+        });
+
+        /* worn goalmouths — a hint of scuffed, yellower grass where the play
+           actually happens, which is what separates a pitch from a pattern. */
+        [4.5, 95.5].forEach(cy => {
+            const wear = g.createRadialGradient(X(50), Y(cy), 0, X(50), Y(cy), 20 * S);
+            wear.addColorStop(0, 'rgba(150,168,96,.12)');
+            wear.addColorStop(.55, 'rgba(150,168,96,.05)');
+            wear.addColorStop(1, 'rgba(150,168,96,0)');
+            g.fillStyle = wear;
+            g.fillRect(0, 0, px, px);
+        });
+
+        /* markings — paint on grass, so a hair off pure white rather than the
+           hairline grey a dark board called for */
+        g.strokeStyle = 'rgba(255,255,255,.75)';
+        g.fillStyle = 'rgba(255,255,255,.75)';
         g.lineWidth = Math.max(2, 0.26 * S);
         g.lineCap = 'round';
         const rect = (x0, y0, x1, y1) => {
@@ -440,7 +475,6 @@ import * as THREE from 'three';
         rect(2, 2, 98, 98);                     // touchlines
         line(2, 50, 98, 50);                    // halfway
         circle(50, 50, 9);                      // centre circle
-        g.fillStyle = 'rgba(250,250,250,.48)';
         g.beginPath(); g.arc(X(50), Y(50), 0.7 * S, 0, Math.PI * 2); g.fill();
 
         /* both penalty areas + six-yard boxes */
@@ -481,18 +515,11 @@ import * as THREE from 'three';
         net(50, +1);   // human's goal (gameY 0, image bottom)
         net(50, -1);   // CPU's goal (gameY 100, image top)
 
-        /* ownership tints + labels so the top-view reads instantly */
-        g.save();
-        g.globalAlpha = .14;
-        g.fillStyle = CSS.cyan; g.fillRect(0, Y(0) - 0, px, 0);
-        g.fillStyle = CSS.cyan; g.fillRect(X(31), Y(0), (69 - 31) * S, 0);
-        g.restore();
-        g.fillStyle = 'rgba(120,225,208,.85)';
-        g.font = '900 ' + Math.round(2.6 * S) + 'px ui-sans-serif, system-ui, sans-serif';
-        g.textAlign = 'center';
-        g.fillText('YOUR GOAL', X(50), Y(6.4));
-        g.fillStyle = 'rgba(255,131,110,.85)';
-        g.fillText('CPU GOAL', X(50), Y(93.2));
+        /* No ownership tint and no painted end labels. The half the player
+           defends is already unambiguous — they attack up the screen, the kits
+           and the goal frames carry the colour, and the goal banners are drawn
+           over the goal itself rather than printed on the turf. Anything else
+           painted here only made the grass look less like grass. */
 
         const tex = new THREE.CanvasTexture(c);
         tex.anisotropy = renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1;

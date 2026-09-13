@@ -76,21 +76,19 @@ src/
   styles/game.css             ← game chrome built on those tokens
   styles/global.css           ← page layer: responsive type, HUD stacking, focus, motion
 tools/
-  publish.mjs                 ← mirrors out/ to the repo root after a build
+  publish.mjs                 ← validates the out/ artifact and reports what will ship
   verify-4.mjs                ← runs the §4 property tests headlessly in Node
+public/
+  _headers                    ← Cloudflare response headers (CSP + caching)
 out/                          ← the build artifact (git-ignored); this is what deploys
-public/                       ← static passthrough (not used yet)
 
-football-guess-game-design.md      ← mechanics + algorithm spec (§3 loop, §4 resolution)
-DESIGN.md                          ← the design system every UI surface is built from
-step-by-step-build-prompt.md       ← phased build plan
-guess-and-pass-2d.html             ← Canvas2D-only reference prototype (useful for §4 comparison)
-js/ css/ legacy-3d/                ← earlier implementations, kept for reference only
+football-guess-game-design.md  ← mechanics + algorithm spec (§3 loop, §4 resolution)
+DESIGN.md                      ← the design system every UI surface is built from
 ```
 
-Only `src/` is authored. `index.html` and `assets/` at the repo root are **generated** — `tools/publish.mjs`
-mirrors `out/` over them after every build so the site also works when served straight from the repository.
-They are overwritten wholesale, so a stale file from an earlier build can never survive.
+Only `src/` and `public/` are authored. `out/` is **generated** and is the single deployable artifact — nothing
+is mirrored to the repo root, because a second copy of the same site is one more thing that can drift out of
+date. `astro build` cleans `out/` on every run, so the artifact is always a complete, fresh site.
 
 ---
 
@@ -104,15 +102,15 @@ npm run dev            # http://localhost:4321 — HMR, no build step
 To produce and inspect the deployable artifact:
 
 ```bash
-npm run build          # astro build + publish out/ to the repo root
+npm run build          # astro build + validate out/
 npm run preview        # serve the built site
 ```
 
-`npm run build` writes a self-contained site to `out/` and then mirrors `index.html`, `assets/` and `_headers`
-to the repo root. Serving the repository root with any static server works too:
+`npm run build` writes a self-contained site to `out/` and then checks that both the page and `_headers` made
+it in. Serving that artifact directly works with any static server:
 
 ```bash
-python3 -m http.server 8080
+python3 -m http.server 8080 --directory out
 ```
 
 ---
@@ -181,17 +179,17 @@ It exits non-zero on failure, so it can gate a deploy.
 
 ## ☁️ Deploy
 
-Live at **https://guess-and-pass.pages.dev** — Cloudflare Pages, direct upload:
+Live at **https://passball.pages.dev** — Cloudflare Pages, direct upload:
 
 ```bash
 npm run deploy
-# ≡ npm run build && npx wrangler pages deploy out --project-name guess-and-pass
+# ≡ npm run build && npx wrangler pages deploy out --project-name passball
 ```
 
 [`wrangler.toml`](wrangler.toml) points `pages_build_output_dir` at `out`, which is self-contained.
-[`_headers`](_headers) is hand-authored at the repo root and copied into `out` by the publish step; it sets a
-strict CSP (first-party scripts, Google Fonts as the only external origin) and long-lived caching for the
-content-hashed `/assets/*`.
+[`public/_headers`](public/_headers) is the source of the response headers and is copied into `out` by
+`astro build`; it sets a strict CSP (first-party scripts, Google Fonts as the only external origin) and
+long-lived caching for the content-hashed `/assets/*`.
 
 ---
 
@@ -215,7 +213,6 @@ content-hashed `/assets/*`.
 - [`football-guess-game-design.md`](football-guess-game-design.md) — the mechanics and algorithm spec,
   including the CANONICAL §3 loop and §4 resolution algorithm.
 - [`DESIGN.md`](DESIGN.md) — the visual system: colour, type, spacing, radius, elevation, components.
-- [`step-by-step-build-prompt.md`](step-by-step-build-prompt.md) — the phased build plan.
 
 > **What must never change:** the §3 state machine and its timings, and the §4 resolution algorithm
 > and its constants. Everything else is presentation and may be tuned freely.

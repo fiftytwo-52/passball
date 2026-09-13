@@ -80,7 +80,10 @@ import '../styles/global.css';
             </div>
         </div>
 
-        <div class="row row-center">
+        <!-- The decision window rides directly under the top row. It used to sit
+             on a vertically-centred row, which put the bar across the middle of
+             the pitch; anchored here it stays off the play area entirely. -->
+        <div class="row row-timer">
             <div class="panel panel-timer">
                 <span class="hud-label">Decision window</span>
                 <div id="timer-wrap"><span id="timer-bar"></span></div>

@@ -7,11 +7,11 @@
    a rule could live in `tokens.css` or `game.css`, it belongs there instead.
    ========================================================================= */
 
-/* The stage is always the ink board. The WebGL canvas paints over it, but the
-   ink is what shows through during the first frame and any resize gap — never
-   a white flash. */
+/* The stage is always the turf. The WebGL canvas paints over it, but the green
+   is what shows through during the first frame and any resize gap — never a
+   white flash, and never a different green than the renderer's clear colour. */
 body {
-    background: var(--pitch-ink);
+    background: var(--pitch-turf);
 }
 
 /* ============================================================================

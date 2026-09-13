@@ -1,13 +1,13 @@
 # Cloudflare Pages — config for direct-upload deploys.
 #
 #   npm run deploy
-#   # ≡ npm run build && npx wrangler pages deploy out --project-name guess-and-pass
+#   # ≡ npm run build && npx wrangler pages deploy out --project-name passball
 #
 # `pages_build_output_dir` points at Astro's output directory, which is a
-# self-contained static site (index.html, assets/, and _headers copied in by
-# tools/publish.mjs). `.gitignore` is respected for the upload, so out/ is the
-# artifact and node_modules/ is never shipped.
-name = "guess-and-pass"
+# self-contained static site: index.html, assets/, and `_headers` copied in from
+# public/_headers by the build. `.gitignore` is respected for the upload, so out/
+# is the artifact and node_modules/ is never shipped.
+name = "passball"
 pages_build_output_dir = "out"
 
 compatibility_date = "2026-09-13"

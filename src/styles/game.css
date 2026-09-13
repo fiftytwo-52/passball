@@ -22,9 +22,10 @@
     --x-cpu: #eb367f;
     --x-aim: #f5a623;
 
-    /* The ink board the 3D players stand on */
-    --pitch-ink: #171717;
-    --pitch-stripe: #1d1d1d;
+    /* The turf the 3D players stand on. Mirrors the engine's ground texture and
+       the renderer's clear colour, so neither the first frame nor a resize gap
+       ever flashes a different green. */
+    --pitch-turf: #16301a;
 
     --sa-t: env(safe-area-inset-top, 0px);
     --sa-r: env(safe-area-inset-right, 0px);
@@ -59,7 +60,7 @@ body {
     touch-action: none;
     /* Pointer Events own every gesture */
     cursor: crosshair;
-    background: var(--pitch-ink);
+    background: var(--pitch-turf);
 }
 
 #scene.grabbing {
@@ -76,7 +77,11 @@ body {
     z-index: 10;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    /* Top-anchored. Everything stacks down from the top edge and the bottom row
+       is pushed to the foot with `margin-top: auto`, so the centre of the screen
+       — which is the centre of the pitch — is never covered by chrome. */
+    justify-content: flex-start;
+    gap: var(--s-xs);
     padding: calc(var(--hud-pad) + var(--sa-t)) calc(var(--hud-pad) + var(--sa-r)) calc(var(--hud-pad) + var(--sa-b)) calc(var(--hud-pad) + var(--sa-l));
     pointer-events: none;
 }
@@ -106,10 +111,13 @@ body {
     justify-content: space-between;
     align-items: flex-end;
     gap: var(--s-sm);
+    /* #hud is top-anchored now, so the foot has to claim its own space */
+    margin-top: auto;
 }
 
-/* The decision window sits on its own centred row */
-.row-center {
+/* The decision-window strip: a centred line directly under the top row, so the
+   timer always sits in the same place and never crosses the pitch's midline. */
+.row-timer {
     justify-content: center;
 }
 
@@ -135,10 +143,13 @@ body {
     gap: 10px;
 }
 
-/* The decision-window well */
+/* The decision-window well — one shallow horizontal strip, so it costs the
+   pitch as little vertical space as possible. */
 .panel-timer {
-    padding: 8px 14px 10px;
-    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 13px;
 }
 
 /* LOCK IN is disabled outside the decision phase — say so quietly */
@@ -282,8 +293,7 @@ button:disabled:active {
 #timer-wrap {
     position: relative;
     height: 4px;
-    min-width: clamp(132px, 30vmin, 300px);
-    margin-top: 7px;
+    min-width: clamp(120px, 26vmin, 260px);
     border-radius: var(--r-full);
     background: var(--c-hairline);
     overflow: hidden;

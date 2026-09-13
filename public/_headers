@@ -1,8 +1,8 @@
 # Cloudflare Pages response headers — https://developers.cloudflare.com/pages/configuration/headers/
 #
-# This file is the *source* copy: it is hand-authored at the repo root and
-# tools/publish.mjs copies it into ./out so the deployed directory is
-# self-contained.
+# This is THE source copy. It sits in Astro's publicDir, so `astro build` copies
+# it verbatim to `out/_headers` — the upload root Cloudflare reads it from.
+# tools/publish.mjs fails the build if it ever goes missing.
 
 /*
   X-Content-Type-Options: nosniff
