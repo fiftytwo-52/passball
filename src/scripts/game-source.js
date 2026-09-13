@@ -1301,9 +1301,37 @@ import {
     function contestFlight() {
         const atk = state.possession, def = other(atk);
 
-        /* outfielders of the defending side may cut any ball in flight */
-        for (const p of teamOutfield(def)) {
-            if (dist(p, ball) <= CATCH_RADIUS) return cutOut(p, atk);
+        /* --- a pass is not contestable until it has actually been played ------
+           `ball.travel` is how far the ball has covered since it left the boot.
+           While that is still inside CATCH_RADIUS the ball has not gone
+           anywhere: it is still exactly where the passer was standing, and a
+           defender standing over the passer is not reading a pass — they are
+           just standing where the ball started.
+
+           Without this guard the cut-out fired on the very first frame of every
+           pass made under pressure. launchBall() puts the ball at the boot, the
+           next frame advances it by speed·dt (a few tenths of a unit), and so
+           the ball was still inside the control radius of the defender who was
+           already standing there — an "interception" of a ball that had never
+           been played. A marked player could not complete a pass at all: the
+           ball bounced between the two of them on the same spot, frame after
+           frame. From above, that is precisely what "the AI never passes once
+           it wins the ball" looks like — the CPU wins the ball in a tussle,
+           holds it, releases it, and loses it again inside a single frame,
+           every single time.
+
+           It also had the engine contradicting its own rulebook. cpuChoosePass()
+           scores every option with resolvePassRace(), and that race gives a
+           defender time to *move* into the lane — it has no concept of a
+           defender who is already on top of the ball. So the CPU kept choosing
+           the pass its own model called safe and the engine kept killing it at
+           t = 0. A defender genuinely in the lane still wins the ball: the
+           moment the ball has cleared the boot, the normal race applies. */
+        if (ball.mode !== 'pass' || ball.travel >= CATCH_RADIUS) {
+            /* outfielders of the defending side may cut any ball in flight */
+            for (const p of teamOutfield(def)) {
+                if (dist(p, ball) <= CATCH_RADIUS) return cutOut(p, atk);
+            }
         }
         /* the defending keeper: a full reach against a shot, a normal catch
            radius against a pass */
@@ -1567,7 +1595,15 @@ import {
     function cpuChoosePass(rng) {
         const from = { x: PLAY.carrier.x, y: PLAY.carrier.y };
         const cands = teamOutfield('cpu').filter(p => p !== PLAY.carrier);
-        const defenders = defenderInputs('you').concat([{ x: keeperOf('you').x, y: keeperOf('you').y, speed: PLAYER_SPEED }]);
+        /* The defending keeper is a defender too — it is the one body that can
+           take a pass out of the air for free inside its own reach. Guarded,
+           because this is on the hot path of a live frame: an undefined keeper
+           here would throw out of cpuThink(), and frame() re-arms itself at the
+           *top* of the callback, so the throw would skip simPlayers(), stepBall()
+           and the render — the match would appear to lock up the instant the CPU
+           tried to pass. */
+        const gk = keeperOf('you');
+        const defenders = defenderInputs('you').concat(gk ? [{ x: gk.x, y: gk.y, speed: PLAYER_SPEED }] : []);
         const scored = cands.map(m => {
             const to = { x: m.x, y: m.y };
             const race = resolvePassRace({ from, to, defenders });
@@ -1688,16 +1724,18 @@ import {
 
     const soGoal = () => GOAL.you;                       // one end, always
     const soSpot = () => ({ x: 50, y: soGoal().y - PENALTY_SPOT });
-    const soKeeper = () => {
-        const k = keeperOf(other(SO.turn));
-        const home = keeperHomeSnapshot(k);
-        return home;
-    };
-    /** The keeper stands on the line for a kick, not at their open-play post. */
-    function keeperHomeSnapshot(k) {
-        const g = soGoal();
-        return { x: k.x, y: g.y + (g.y === 0 ? KEEPER_LINE : -KEEPER_LINE) * -1 };
-    }
+    /* Who defends this kick, and which body does it with. Every phase asks the
+       same question — the keeper standing on the line belongs to the *defending*
+       side, which is the opponent's whenever the human is the shooter. Deriving
+       it in one place is what keeps the human out of the opponent's goalkeeper. */
+    const soDefTeam = () => other(SO.turn);
+    const soDefKeeper = () => keeperOf(soDefTeam());
+    /* §10 timings. Every one of them is a countdown to zero, because soUpdate
+       opens with `SO.t -= dt`. */
+    const SO_FLIGHT = 0.55;        // ball in flight
+    const SO_KICK_BEAT = 0.75;     // the keeper sets off before the strike
+    const SO_DIVE_WINDOW = 4.5;    // the human's time to draw a dive
+    const SO_RESULT_PAUSE = 1.2;   // the banner, before the next kicker
 
     function setPenaltyView(on) {
         view.zoom = on ? SO_ZOOM : 1;
@@ -1748,8 +1786,13 @@ import {
         const k = keeperOf(defTeam);
         const keeperY = goal.y - PENALTY_LINE();
         allPlayers.forEach(p => { p.controlled = false; p.dest = null; p.dive = null; p.held = false; });
-        if (kicker) { kicker.controlled = true; setPlayerPos(kicker, spot.x, spot.y); }
-        if (k) { k.controlled = true; setPlayerPos(k, 50, keeperY); }
+        /* Only the human's own bodies ever carry the "controlled" ring: the
+           kicker on your own kick, your keeper on the CPU's. The ring is a
+           promise that a drag will move that player, so painting it on the
+           opposing goalkeeper while you are the shooter reads as if you are
+           holding their keeper. */
+        if (kicker) { kicker.controlled = turn === 'you'; setPlayerPos(kicker, spot.x, spot.y); }
+        if (k) { k.controlled = defTeam === 'you'; setPlayerPos(k, 50, keeperY); }
         ball.mode = 'held'; ball.holder = kicker; ball.alive = false;
         if (kicker) { ball.x = spot.x; ball.y = spot.y; ball.h = 0.42; }
 
@@ -1788,49 +1831,56 @@ import {
 
     /** CHECK_ON_TARGET then DIVE. */
     function soCommitAim() {
-        if (!SO.aim) return;
+        /* Guarded on the phase as well as the aim: committing twice would re-roll
+           the keeper's read, and a stray release from the gesture that started
+           the kick could reach here while the dive is already playing. */
+        if (!SO.aim || SO.phase !== 'aim') return;
         const goal = soGoal();
-        if (!isOnTarget(SO.aim.x, goal.x, GOAL_HALF_WIDTH)) {
-            /* §10 — off target is an automatic miss */
+        const off = !isOnTarget(SO.aim.x, goal.x, GOAL_HALF_WIDTH);
+        if (off) {
+            /* §10 — off target is an automatic miss, keeper or no keeper */
             SO.result = { outcome: 'MISS', dist: Infinity, onTarget: false };
-            soFly({ x: SO.aim.x, y: goal.y }, () => soResolve());
-            return;
         }
         SO.phase = 'dive';
         SO.t = 0;
-        const defTeam = other(SO.turn);
-        const k = keeperOf(defTeam);
-        if (defTeam === 'cpu') {
-            /* the CPU's keeper reads the kick with probability = difficulty */
+        const k = soDefKeeper();
+        if (soDefTeam() === 'cpu') {
+            /* the CPU's keeper reads the kick with probability = difficulty,
+               and carries a committed dive to the wrong side when it does not */
             const read = Math.random() < 0.22 + 0.78 * state.difficulty;
             const side = Math.random() < 0.5 ? -1 : 1;
             const target = read
                 ? { x: SO.aim.x, y: k.y }
                 : { x: clamp(SO.aim.x + side * (GOAL_HALF_WIDTH * 1.35), 4, 96), y: k.y };
-            k.dive = target;
+            if (k) k.dive = target;
             SO.dive = target;
-            SO.t = 0.75;
+            /* a beat for the keeper to set off, then the strike itself */
+            SO.t = off ? SO_KICK_BEAT * 0.6 : SO_KICK_BEAT;
             setPenaltyView(true);
         } else {
-            log('Draw your dive — anywhere along the line.', '');
-            SO.t = 4.5;   // no dive? default to the shot's side
+            log(off ? 'Off target — the keeper dives anyway.' : 'Draw your dive — anywhere along the line.', '');
+            SO.t = SO_DIVE_WINDOW;   // no dive? default to the shot's side
         }
     }
 
     function soCommitDive(point) {
         if (SO.phase !== 'dive') return;
         SO.dive = point;
-        const k = keeperOf(other(SO.turn));
+        const k = soDefKeeper();
         if (k) k.dive = point;
-        soResolve();
+        soStrike();
     }
 
-    function soFly(to, after) {
+    /** The kick itself: the ball travels to the goal, and only then is the
+        outcome read. Resolving the moment the dive was drawn skipped the flight
+        entirely — the ball sat on the spot while the banner appeared. */
+    function soStrike() {
+        if (SO.phase !== 'dive') return;
         SO.phase = 'flight';
-        SO.t = 0;
+        SO.t = SO_FLIGHT;                 // a countdown, like every other phase
         SO.from = { x: ball.x, y: ball.y };
-        SO.to = to;
-        SO.after = after;
+        SO.to = { x: SO.aim ? SO.aim.x : soGoal().x, y: soGoal().y };
+        SO.after = () => soResolve();
     }
 
     function soResolve() {
@@ -1843,7 +1893,7 @@ import {
             });
         }
         SO.phase = 'result';
-        SO.t = 0;
+        SO.t = SO_RESULT_PAUSE;           // a beat to read the banner, then on
 
         const kicker = SO.turn;
         if (SO.result.outcome === 'GOAL') {
@@ -1914,12 +1964,22 @@ import {
             }
         } else if (SO.phase === 'dive') {
             if (SO.t <= 0) {
-                /* the human never dived — §7 says no input means the default dive */
-                const k = keeperOf(other(SO.turn));
-                soCommitDive(k ? defaultDiveTarget(k, SO.aim, KEEPER_REACH) : { x: SO.aim.x, y: 0 });
+                const k = soDefKeeper();
+                if (k && k.dive) {
+                    /* The keeper is already committed — the CPU's own read, or the
+                       dive the human just drew. Strike without touching it: the
+                       old fallback re-derived the dive here, which handed the CPU
+                       keeper a second, better guess on every kick the human took
+                       and quietly turned an honest read into a free save. */
+                    soStrike();
+                } else {
+                    /* §7 — no input means the default dive, to the shot's side */
+                    soCommitDive(k ? defaultDiveTarget(k, SO.aim, KEEPER_REACH)
+                        : { x: SO.aim.x, y: soGoal().y });
+                }
             }
         } else if (SO.phase === 'flight') {
-            const f = clamp(SO.t / 0.55, 0, 1);
+            const f = clamp(1 - SO.t / SO_FLIGHT, 0, 1);
             if (SO.from) {
                 ball.x = lerp(SO.from.x, SO.to.x, f);
                 ball.y = lerp(SO.from.y, SO.to.y, f);
@@ -1930,10 +1990,10 @@ import {
                 if (cb) cb();
             }
         } else if (SO.phase === 'result') {
-            if (SO.t >= 1.2) soNext();
+            if (SO.t <= 0) soNext();
         }
         /* the keeper's dive always plays out */
-        const k = keeperOf(other(SO.turn));
+        const k = soDefKeeper();
         if (k && k.dive) moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED, dt);
     }
 
@@ -2049,11 +2109,18 @@ import {
             shotLine.visible = true;
             shotLine.setEnds(soSpot(), t);
         } else if (drag.kind === 'so-dive' && drag.moved > TAP_SLOP * 0.5) {
-            const t = { x: clamp(pt.x, 4, 96), y: keeperOf('you').y };
-            diveLine.visible = true;
-            diveLine.setEnds(keeperOf('you'), t);
-            diveMarker.visible = true;
-            diveMarker.position.set(worldX(t.x), 0.09, worldZ(t.y));
+            /* The dive belongs to the keeper on the line — the defending side's,
+               which is *your* keeper exactly because the shootout only opens this
+               gesture when the CPU is the kicker. Taken from soDefKeeper() rather
+               than hard-coded to 'you' so the two can never drift apart. */
+            const k = soDefKeeper();
+            if (k) {
+                const t = { x: clamp(pt.x, 4, 96), y: k.y };
+                diveLine.visible = true;
+                diveLine.setEnds(k, t);
+                diveMarker.visible = true;
+                diveMarker.position.set(worldX(t.x), 0.09, worldZ(t.y));
+            }
         }
     }
 
@@ -2160,15 +2227,21 @@ import {
         } else if (kind === 'so-dive') {
             diveLine.visible = false;
             diveMarker.visible = false;
-            if (moved > TAP_SLOP * 0.5) {
-                soCommitDive({ x: clamp(pt.x, 4, 96), y: keeperOf('you').y });
+            const k = soDefKeeper();
+            if (k && moved > TAP_SLOP * 0.5) {
+                soCommitDive({ x: clamp(pt.x, 4, 96), y: k.y });
             }
         }
         refreshRings();
     }
 
     function updateCursor() {
-        const active = SO.active ? (SO.phase === 'aim' || SO.phase === 'dive')
+        /* In the shootout only the two human gestures are "active": drawing your
+           own kick, and drawing your keeper's dive against the CPU's. While the
+           opponent's keeper is setting off there is nothing to drag, so the
+           crosshair would be a promise the input cannot keep. */
+        const active = SO.active
+            ? (SO.phase === 'aim' && SO.turn === 'you') || (SO.phase === 'dive' && SO.turn === 'cpu')
             : (state.phase === 'play' || state.phase === 'restart');
         canvas.style.cursor = drag.kind ? 'grabbing' : (active ? 'crosshair' : 'default');
     }
