@@ -1,0 +1,123 @@
+/* ============================================================================
+   GUESS & PASS — page layer
+   ----------------------------------------------------------------------------
+   The last stylesheet in the cascade. Everything here is either (a) something
+   the DESIGN.md system could not know about this particular game, or (b) a
+   deliberate, narrow override of the two layers beneath it. Keep it short — if
+   a rule could live in `tokens.css` or `game.css`, it belongs there instead.
+   ========================================================================= */
+
+/* The stage is always the ink board. The WebGL canvas paints over it, but the
+   ink is what shows through during the first frame and any resize gap — never
+   a white flash. */
+body {
+    background: var(--pitch-ink);
+}
+
+/* ============================================================================
+   TYPE — the display sizes need one honest step down on small screens.
+   DESIGN.md's display-xl is a 48px desktop measure; at 360px it would wrap
+   into a wall of two-word lines.
+   ========================================================================= */
+
+@media (max-width: 640px) {
+    .card h1 {
+        font-size: 34px;
+        line-height: 36px;
+        letter-spacing: -1.7px;
+    }
+
+    .card h2 {
+        font-size: 24px;
+        line-height: 30px;
+        letter-spacing: -0.9px;
+    }
+}
+
+/* ============================================================================
+   LAYOUT — phones cannot fit two HUD clusters side by side without the chips
+   colliding, so the top row becomes two stacked, independently scrollable
+   lines. This is the standard responsive HUD move: stack, then scroll within
+   the line, rather than wrap into a wall.
+   ========================================================================= */
+
+@media (max-width: 720px) {
+    .row-top {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--s-xs);
+    }
+
+    .row-top .cluster {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .row-top .cluster::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* the row scrolls as a whole for the last cluster, so give the inner
+       controls a little breathing room at the tail of the scroll */
+    .row-top .cluster::after {
+        content: '';
+        flex: 0 0 var(--s-xxs);
+    }
+}
+
+/* Narrower still: the decision-window well can shrink with the viewport */
+@media (max-width: 480px) {
+    #timer-wrap {
+        min-width: 120px;
+    }
+
+    .card .actions {
+        margin-top: var(--s-md);
+    }
+}
+
+/* ============================================================================
+   SCREENS — the menu is a landing surface, so its card is allowed a little
+   more room than the utility screens.
+   ========================================================================= */
+
+#screen-menu .card {
+    width: min(600px, 100%);
+}
+
+/* ============================================================================
+   THE §4 SELF-TEST WELL — a monospace read-out, kept quiet until it fills.
+   ========================================================================= */
+
+#verify-out[hidden] {
+    display: none;
+}
+
+/* ============================================================================
+   FOCUS — the system's ring is the accent blue; on the ink board that needs a
+   white inner stop to stay legible.
+   ========================================================================= */
+
+#hud :focus-visible,
+.screen :focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* ============================================================================
+   MOTION — the banner and flash are feedback, not decoration, so they keep a
+   reduced-motion fallback rather than disappearing entirely.
+   ========================================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+    #banner {
+        transition: none;
+    }
+
+    [class^='btn-']:active,
+    [class*=' btn-']:active {
+        transform: none;
+    }
+}

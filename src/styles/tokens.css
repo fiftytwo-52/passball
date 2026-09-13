@@ -1,0 +1,512 @@
+/* ============================================================================
+   GUESS & PASS — DESIGN.md token layer
+   ----------------------------------------------------------------------------
+   A 1:1 transcription of the DESIGN.md (Vercel / Geist) system into CSS custom
+   properties, so every rule in the app reads from a named token rather than a
+   literal. Nothing here is game-specific — this file is the portable design
+   system; game chrome lives in `game.css`.
+
+   The one idea to hold on to: this is a black-and-white duet. A near-white
+   canvas carries near-black ink, structured by 1px hairlines, and the only
+   place colour is allowed to exist is the hero mesh gradient plus a handful of
+   small accent marks. Restraint is the aesthetic.
+   ========================================================================= */
+
+:root {
+    /* ----------------------------------------------------------------------
+       COLOUR
+       ---------------------------------------------------------------------- */
+
+    /* Brand & accent */
+    --c-primary: #171717;
+    --c-on-primary: #ffffff;
+    --c-ink: #171717;
+    --c-link: #0070f3;
+    --c-link-deep: #0761d1;
+    --c-link-soft: #d3e5ff;
+
+    /* Surface */
+    --c-canvas: #fafafa;
+    --c-canvas-elevated: #ffffff;
+    --c-hairline-soft: #f2f2f2;
+
+    /* Text ladder — step it deliberately, never skip a rung */
+    --c-body: #4d4d4d;
+    --c-mute: #8f8f8f;
+    --c-faint: #a1a1a1;
+
+    /* Border — the structural workhorse */
+    --c-hairline: #ebebeb;
+
+    /* Semantic */
+    --c-error: #ee0000;
+    --c-error-deep: #c50000;
+    --c-warning: #f5a623;
+    --c-warning-soft: #ffefcf;
+    --c-warning-deep: #ab570a;
+
+    /* Chromatic accents — illustration and mesh stops only, never chrome fills */
+    --c-violet: #7928ca;
+    --c-violet-soft: #d8ccf1;
+    --c-cyan: #50e3c2;
+    --c-cyan-soft: #aaffec;
+    --c-pink: #ff0080;
+    --c-magenta: #eb367f;
+
+    /* The legacy gradient trio, surviving as accent washes */
+    --g-develop-start: #007cf0;
+    --g-develop-end: #00dfd8;
+    --g-preview-start: #7928ca;
+    --g-preview-end: #ff0080;
+    --g-ship-start: #ff4d4d;
+    --g-ship-end: #f9cb28;
+
+    --g-develop: linear-gradient(90deg, var(--g-develop-start), var(--g-develop-end));
+    --g-preview: linear-gradient(90deg, var(--g-preview-start), var(--g-preview-end));
+    --g-ship: linear-gradient(90deg, var(--g-ship-start), var(--g-ship-end));
+
+    /* ----------------------------------------------------------------------
+       TYPOGRAPHY
+       Geist Sans for everything; Geist Mono for code and the uppercase
+       technical eyebrows. Inter / JetBrains Mono are the documented
+       substitutes and sit next in the stack.
+       ---------------------------------------------------------------------- */
+    --f-sans: 'Geist', 'Inter', Arial, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --f-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    /* Display — tight negative tracking is the signature; never loosen it */
+    --t-display-xl-size: 48px;
+    --t-display-xl-weight: 600;
+    --t-display-xl-leading: 48px;
+    --t-display-xl-track: -2.4px;
+
+    --t-heading-lg-size: 32px;
+    --t-heading-lg-weight: 600;
+    --t-heading-lg-leading: 40px;
+    --t-heading-lg-track: -1.28px;
+
+    --t-heading-md-size: 20px;
+    --t-heading-md-weight: 600;
+    --t-heading-md-leading: 28px;
+    --t-heading-md-track: -0.4px;
+
+    --t-label-sm-size: 14px;
+    --t-label-sm-weight: 500;
+    --t-label-sm-leading: 20px;
+    --t-label-sm-track: -0.28px;
+
+    /* Mono eyebrow — the spec-sheet section label */
+    --t-eyebrow-size: 12px;
+    --t-eyebrow-weight: 500;
+    --t-eyebrow-leading: 16px;
+    --t-eyebrow-track: 0;
+
+    --t-body-lg-size: 16px;
+    --t-body-lg-weight: 400;
+    --t-body-lg-leading: 24px;
+
+    --t-body-md-size: 14px;
+    --t-body-md-weight: 400;
+    --t-body-md-leading: 20px;
+
+    --t-body-sm-size: 12px;
+    --t-body-sm-weight: 400;
+    --t-body-sm-leading: 16px;
+
+    --t-button-lg-size: 16px;
+    --t-button-lg-weight: 500;
+    --t-button-md-size: 14px;
+    --t-button-md-weight: 500;
+
+    --t-code-size: 14px;
+    --t-code-weight: 400;
+
+    /* ----------------------------------------------------------------------
+       SPACING — base unit 4px, stepping 4 → 128
+       ---------------------------------------------------------------------- */
+    --s-xxs: 4px;
+    --s-xs: 8px;
+    --s-sm: 12px;
+    --s-md: 16px;
+    --s-lg: 24px;
+    --s-xl: 32px;
+    --s-2xl: 40px;
+    --s-3xl: 64px;
+    --s-4xl: 96px;
+    --s-section: 128px;
+
+    /* ----------------------------------------------------------------------
+       RADIUS — bimodal: 6px squares for functional chrome, full pills for
+       marketing CTAs, 12–16px for content cards.
+       ---------------------------------------------------------------------- */
+    --r-none: 0;
+    --r-sm: 6px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-pill-category: 64px;
+    --r-pill: 100px;
+    --r-full: 9999px;
+
+    /* ----------------------------------------------------------------------
+       ELEVATION — flat hairline by default; shadows are whisper-light and
+       finely layered, never a single heavy drop.
+       ---------------------------------------------------------------------- */
+    --e-0: none;
+    --e-1: 0px 1px 1px rgba(0, 0, 0, 0.04);
+    --e-2: 0px 2px 2px rgba(0, 0, 0, 0.04), 0px 8px 16px -4px rgba(0, 0, 0, 0.1);
+
+    /* Focus ring — the accent blue, as the system prescribes */
+    --focus-ring: 0 0 0 2px var(--c-canvas), 0 0 0 4px var(--c-link);
+}
+
+/* ============================================================================
+   BASE
+   ========================================================================= */
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+body {
+    margin: 0;
+    font-family: var(--f-sans);
+    font-size: var(--t-body-md-size);
+    line-height: var(--t-body-md-leading);
+    font-weight: var(--t-body-md-weight);
+    color: var(--c-body);
+    background: var(--c-canvas);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Body copy is never pure black — the ink is #171717 and body steps down */
+h1,
+h2,
+h3,
+h4 {
+    margin: 0;
+    color: var(--c-ink);
+    font-weight: 600;
+}
+
+h1 {
+    font-size: var(--t-display-xl-size);
+    line-height: var(--t-display-xl-leading);
+    letter-spacing: var(--t-display-xl-track);
+}
+
+h2 {
+    font-size: var(--t-heading-lg-size);
+    line-height: var(--t-heading-lg-leading);
+    letter-spacing: var(--t-heading-lg-track);
+}
+
+h3 {
+    font-size: var(--t-heading-md-size);
+    line-height: var(--t-heading-md-leading);
+    letter-spacing: var(--t-heading-md-track);
+}
+
+p {
+    margin: 0;
+}
+
+ul {
+    margin: 0;
+    padding-left: 1.35em;
+}
+
+li {
+    margin: 0;
+}
+
+a {
+    color: var(--c-link);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+code,
+kbd,
+pre,
+samp {
+    font-family: var(--f-mono);
+    font-size: var(--t-code-size);
+}
+
+button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    cursor: pointer;
+}
+
+/* A single, consistent focus treatment everywhere */
+:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--r-sm);
+}
+
+/* ============================================================================
+   COMPONENT PRIMITIVES — one class per documented component
+   ========================================================================= */
+
+/* --- type helpers ------------------------------------------------------- */
+
+/* The uppercase Geist Mono eyebrow that labels a section like a spec sheet */
+.eyebrow {
+    font-family: var(--f-mono);
+    font-size: var(--t-eyebrow-size);
+    font-weight: var(--t-eyebrow-weight);
+    line-height: var(--t-eyebrow-leading);
+    letter-spacing: var(--t-eyebrow-track);
+    text-transform: uppercase;
+    color: var(--c-mute);
+}
+
+.label-sm {
+    font-size: var(--t-label-sm-size);
+    font-weight: var(--t-label-sm-weight);
+    line-height: var(--t-label-sm-leading);
+    letter-spacing: var(--t-label-sm-track);
+    color: var(--c-ink);
+}
+
+.body-lg {
+    font-size: var(--t-body-lg-size);
+    line-height: var(--t-body-lg-leading);
+}
+
+.body-sm {
+    font-size: var(--t-body-sm-size);
+    line-height: var(--t-body-sm-leading);
+    color: var(--c-mute);
+}
+
+/* Tabular numerals — mandatory for anything that counts */
+.tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+}
+
+/* --- buttons ------------------------------------------------------------ */
+
+[class^='btn-'],
+[class*=' btn-'] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--s-xs);
+    white-space: nowrap;
+    transition: background-color 0.15s ease, border-color 0.15s ease,
+        color 0.15s ease, transform 0.08s ease;
+}
+
+[class^='btn-']:active,
+[class*=' btn-']:active {
+    transform: translateY(1px);
+}
+
+/* Marketing pill — the black CTA */
+.btn-primary {
+    height: 44px;
+    padding: 0 14px;
+    border-radius: var(--r-pill);
+    background: var(--c-primary);
+    color: var(--c-on-primary);
+    font-size: var(--t-button-lg-size);
+    font-weight: var(--t-button-lg-weight);
+}
+
+.btn-primary:hover {
+    background: #2b2b2b;
+}
+
+/* Marketing pill — inverted fill */
+.btn-secondary {
+    height: 44px;
+    padding: 0 14px;
+    border-radius: var(--r-pill);
+    background: var(--c-canvas-elevated);
+    color: var(--c-ink);
+    border: 1px solid var(--c-hairline);
+    font-size: var(--t-button-lg-size);
+    font-weight: var(--t-button-lg-weight);
+}
+
+.btn-secondary:hover {
+    border-color: #dcdcdc;
+}
+
+/* App chrome — the compact black 6px square */
+.btn-primary-sm {
+    height: 32px;
+    padding: 0 10px;
+    border-radius: var(--r-sm);
+    background: var(--c-primary);
+    color: var(--c-on-primary);
+    font-size: var(--t-button-md-size);
+    font-weight: var(--t-button-md-weight);
+}
+
+.btn-primary-sm:hover {
+    background: #2b2b2b;
+}
+
+/* App chrome — the white, hairline-bordered 6px square */
+.btn-ghost-sm {
+    height: 32px;
+    padding: 0 10px;
+    border-radius: var(--r-sm);
+    background: var(--c-canvas-elevated);
+    color: var(--c-ink);
+    border: 1px solid var(--c-hairline);
+    font-size: var(--t-button-md-size);
+    font-weight: var(--t-button-md-weight);
+}
+
+.btn-ghost-sm:hover {
+    background: var(--c-hairline-soft);
+}
+
+/* Category tab — a 64px pill, used for the difficulty selector */
+.btn-category {
+    height: 32px;
+    padding: 0 16px;
+    border-radius: var(--r-pill-category);
+    background: transparent;
+    color: var(--c-body);
+    border: 1px solid transparent;
+    font-size: var(--t-button-md-size);
+    font-weight: var(--t-button-md-weight);
+}
+
+.btn-category:hover {
+    color: var(--c-ink);
+}
+
+.btn-category[aria-pressed='true'] {
+    background: var(--c-canvas-elevated);
+    color: var(--c-ink);
+    border-color: var(--c-hairline);
+}
+
+/* Circular icon button */
+.btn-icon {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: var(--r-full);
+    background: var(--c-canvas-elevated);
+    color: var(--c-ink);
+    border: 1px solid var(--c-hairline);
+    font-size: var(--t-body-lg-size);
+}
+
+.btn-icon:hover {
+    background: var(--c-hairline-soft);
+}
+
+/* --- containers --------------------------------------------------------- */
+
+.card-flat {
+    background: var(--c-canvas-elevated);
+    border: 1px solid var(--c-hairline);
+    border-radius: var(--r-md);
+    padding: var(--s-lg);
+    color: var(--c-ink);
+}
+
+.card-floating {
+    background: var(--c-canvas-elevated);
+    border: 1px solid var(--c-hairline);
+    border-radius: var(--r-lg);
+    box-shadow: var(--e-2);
+}
+
+/* --- the hero mesh gradient --------------------------------------------
+   The entire decorative system. A soft multi-stop bloom of cyan → blue →
+   violet → magenta → amber against the near-white canvas. Nothing else in
+   the app is allowed this much colour.
+   ------------------------------------------------------------------------ */
+.mesh {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(38% 44% at 12% 18%, rgba(0, 223, 216, 0.5), transparent 70%),
+        radial-gradient(42% 48% at 86% 12%, rgba(0, 124, 240, 0.42), transparent 70%),
+        radial-gradient(46% 52% at 74% 82%, rgba(121, 40, 202, 0.34), transparent 70%),
+        radial-gradient(40% 46% at 26% 88%, rgba(255, 0, 128, 0.26), transparent 70%),
+        radial-gradient(34% 40% at 50% 50%, rgba(249, 203, 40, 0.24), transparent 72%);
+    filter: saturate(115%);
+}
+
+/* A whisper of grain, so the near-white sheet is a surface and not a void */
+.grain::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.045'/%3E%3C/svg%3E");
+}
+
+/* --- generic helpers ---------------------------------------------------- */
+
+.stack {
+    display: flex;
+    flex-direction: column;
+}
+
+.stack-sm {
+    gap: var(--s-sm);
+}
+
+.stack-md {
+    gap: var(--s-md);
+}
+
+.cluster {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--s-xs);
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
+}

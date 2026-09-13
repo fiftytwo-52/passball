@@ -1,0 +1,619 @@
+/* ============================================================================
+   GUESS & PASS — game chrome
+   ----------------------------------------------------------------------------
+   Everything in this file is the *application* layer sitting on top of the
+   DESIGN.md token layer in `tokens.css`. It follows the system's rules rather
+   than inventing its own:
+
+     · the HUD is a near-white sheet carrying ink, structured by 1px hairlines;
+     · system controls are 6px squares / 64px category pills — never marketing
+       pills, so the "which surface am I on" signal stays honest (the one true
+       marketing pill, the full-time CTA on the menu card, is a deliberate
+       exception: it is the landing surface);
+     · colour appears only as small accent marks (possession, outcomes, the
+       timer fill) and in the hero mesh gradient — never as a chrome fill;
+     · depth is a 1px hairline plus, at most, a whisper shadow.
+   ========================================================================= */
+
+:root {
+    /* Geist accent marks, mirrored from the engine's CSS palette so the 3D
+       players, the canvas marks and the DOM chrome all agree. */
+    --x-you: #50e3c2;
+    --x-cpu: #eb367f;
+    --x-aim: #f5a623;
+
+    /* The ink board the 3D players stand on */
+    --pitch-ink: #171717;
+    --pitch-stripe: #1d1d1d;
+
+    --sa-t: env(safe-area-inset-top, 0px);
+    --sa-r: env(safe-area-inset-right, 0px);
+    --sa-b: env(safe-area-inset-bottom, 0px);
+    --sa-l: env(safe-area-inset-left, 0px);
+
+    --hud-pad: clamp(10px, 1.6vmin, 18px);
+    --tap: 44px;
+}
+
+html,
+body {
+    height: 100%;
+}
+
+body {
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* ============================================================================
+   THE PITCH — a single WebGL canvas: 3D characters on a 2D top-view board
+   ========================================================================= */
+
+#scene {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    /* Pointer Events own every gesture */
+    cursor: crosshair;
+    background: var(--pitch-ink);
+}
+
+#scene.grabbing {
+    cursor: grabbing;
+}
+
+/* ============================================================================
+   HUD — overlay; inert by default, interactive children opt back in
+   ========================================================================= */
+
+#hud {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: calc(var(--hud-pad) + var(--sa-t)) calc(var(--hud-pad) + var(--sa-r)) calc(var(--hud-pad) + var(--sa-b)) calc(var(--hud-pad) + var(--sa-l));
+    pointer-events: none;
+}
+
+#hud[hidden] {
+    display: none;
+}
+
+#hud button,
+#hud .segmented {
+    pointer-events: auto;
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    gap: var(--s-xs);
+}
+
+.row-top {
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.row-bottom {
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: var(--s-sm);
+}
+
+/* The decision window sits on its own centred row */
+.row-center {
+    justify-content: center;
+}
+
+.cluster {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: clamp(6px, 1.1vmin, 10px);
+}
+
+/* The HUD panel: a white hairline card floating over the dark board */
+.panel {
+    background: var(--c-canvas-elevated);
+    border: 1px solid var(--c-hairline);
+    border-radius: var(--r-md);
+    box-shadow: var(--e-1);
+    padding: 7px 11px;
+}
+
+.panel-flush {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* The decision-window well */
+.panel-timer {
+    padding: 8px 14px 10px;
+    text-align: center;
+}
+
+/* LOCK IN is disabled outside the decision phase — say so quietly */
+button:disabled,
+button:disabled:active {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* The mono eyebrow, used for every HUD field label */
+.hud-label {
+    font-family: var(--f-mono);
+    font-size: 10px;
+    font-weight: var(--t-eyebrow-weight);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--c-mute);
+    display: block;
+}
+
+/* --- role badge: a category pill, the same shape as the difficulty tabs -- */
+#role-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 26px;
+    padding: 0 12px;
+    border-radius: var(--r-pill-category);
+    border: 1px solid var(--c-hairline);
+    background: var(--c-canvas-elevated);
+    font-size: var(--t-body-sm-size);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--c-ink);
+    gap: 6px;
+}
+
+#role-badge::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: var(--r-full);
+    background: currentColor;
+}
+
+#role-badge.attack {
+    color: var(--c-ink);
+}
+
+#role-badge.defend {
+    color: var(--c-link);
+}
+
+/* --- possession chip ---------------------------------------------------- */
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 11px;
+    border-radius: var(--r-pill-category);
+    border: 1px solid var(--c-hairline);
+    background: var(--c-canvas-elevated);
+    font-size: var(--t-body-sm-size);
+    font-weight: var(--t-label-sm-weight);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.chip .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: var(--r-full);
+    background: currentColor;
+    display: inline-block;
+}
+
+.chip.you {
+    color: var(--c-ink);
+    border-color: color-mix(in srgb, var(--x-you) 55%, var(--c-hairline));
+}
+
+.chip.you .dot {
+    background: var(--x-you);
+}
+
+.chip.cpu {
+    color: var(--c-ink);
+    border-color: color-mix(in srgb, var(--x-cpu) 55%, var(--c-hairline));
+}
+
+.chip.cpu .dot {
+    background: var(--x-cpu);
+}
+
+/* --- scoreboard -------------------------------------------------------- */
+.scoreboard {
+    display: flex;
+    align-items: center;
+    gap: clamp(8px, 1.4vmin, 16px);
+}
+
+.score {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: clamp(46px, 8vmin, 64px);
+    line-height: 1;
+}
+
+.score strong {
+    display: block;
+    font-size: clamp(1.25rem, 3.6vmin, 1.75rem);
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    color: var(--c-ink);
+}
+
+.score .hud-label {
+    margin-top: 3px;
+}
+
+#score-you strong {
+    color: color-mix(in srgb, var(--x-you) 72%, var(--c-ink));
+}
+
+#score-cpu strong {
+    color: color-mix(in srgb, var(--x-cpu) 78%, var(--c-ink));
+}
+
+.vs {
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--c-faint);
+}
+
+/* --- decision timer ---------------------------------------------------- */
+#timer-wrap {
+    position: relative;
+    height: 4px;
+    min-width: clamp(132px, 30vmin, 300px);
+    margin-top: 7px;
+    border-radius: var(--r-full);
+    background: var(--c-hairline);
+    overflow: hidden;
+}
+
+#timer-bar {
+    position: absolute;
+    inset: 0;
+    transform-origin: 0 50%;
+    transform: scaleX(1);
+    will-change: transform;
+    background: var(--c-ink);
+    border-radius: var(--r-full);
+}
+
+/* Running out of time is the one moment the chrome is allowed to go warm */
+#timer-wrap.low #timer-bar {
+    background: var(--c-error);
+}
+
+#timer-num {
+    font-family: var(--f-mono);
+    font-size: clamp(0.9rem, 2.2vmin, 1.15rem);
+    font-weight: 500;
+    color: var(--c-ink);
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- difficulty selector: the category-pill row ------------------------ */
+.segmented {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--c-hairline);
+    border-radius: var(--r-pill-category);
+    background: var(--c-canvas-elevated);
+    box-shadow: var(--e-1);
+    overflow: hidden;
+}
+
+.segmented button {
+    min-height: 28px;
+    padding: 0 clamp(8px, 1.5vmin, 14px);
+    border-radius: var(--r-pill-category);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--c-mute);
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.segmented button:hover {
+    color: var(--c-ink);
+}
+
+.segmented button[aria-pressed='true'] {
+    background: var(--c-ink);
+    color: var(--c-on-primary);
+}
+
+/* --- match log --------------------------------------------------------- */
+#log-panel {
+    max-width: min(44vw, 360px);
+}
+
+#log {
+    list-style: none;
+    margin: 5px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+#log li {
+    font-size: var(--t-body-sm-size);
+    line-height: 1.45;
+    color: var(--c-mute);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#log li:nth-child(1) {
+    color: var(--c-ink);
+}
+
+#log li.good {
+    color: #067a5f;
+}
+
+#log li.bad {
+    color: var(--c-error);
+}
+
+#instruction {
+    max-width: min(48vw, 420px);
+    font-size: var(--t-body-sm-size);
+    line-height: 1.5;
+    color: var(--c-body);
+    background: var(--c-canvas-elevated);
+    border: 1px solid var(--c-hairline);
+    border-radius: var(--r-md);
+    padding: 8px 11px;
+    box-shadow: var(--e-1);
+}
+
+/* ============================================================================
+   OUTCOME BANNER + FLASH — feedback only, kept monochrome and typographic
+   ========================================================================= */
+
+#banner {
+    position: fixed;
+    left: 50%;
+    top: 32%;
+    z-index: 20;
+    transform: translate(-50%, -50%) scale(0.94);
+    opacity: 0;
+    pointer-events: none;
+    text-align: center;
+    font-family: var(--f-sans);
+    font-weight: 600;
+    font-size: clamp(1.5rem, 6.4vmin, 3.5rem);
+    letter-spacing: -0.035em;
+    line-height: 1.02;
+    color: var(--c-canvas);
+    text-shadow: 0 2px 24px rgba(0, 0, 0, 0.55);
+    transition: opacity 0.14s ease, transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#banner.show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+#flash {
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    pointer-events: none;
+    opacity: 0;
+    background: var(--c-canvas);
+    mix-blend-mode: overlay;
+    transition: opacity 0.1s linear;
+}
+
+/* ============================================================================
+   SCREEN STACK — menu / tutorial / pause / full time
+   ========================================================================= */
+
+.screen {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    display: grid;
+    place-items: center;
+    overflow: auto;
+    padding: calc(var(--s-md) + var(--sa-t)) calc(var(--s-md) + var(--sa-r)) calc(var(--s-md) + var(--sa-b)) calc(var(--s-md) + var(--sa-l));
+    background: rgba(250, 250, 250, 0.9);
+    backdrop-filter: blur(14px) saturate(120%);
+    -webkit-backdrop-filter: blur(14px) saturate(120%);
+}
+
+.screen[hidden] {
+    display: none;
+}
+
+/* The modal card is the *floating* elevation level — the only surface in the
+   system permitted that much shadow. */
+.card {
+    position: relative;
+    width: min(560px, 100%);
+    background: var(--c-canvas-elevated);
+    border: 1px solid var(--c-hairline);
+    border-radius: var(--r-lg);
+    box-shadow: var(--e-2);
+    padding: clamp(20px, 3.6vmin, 34px);
+    overflow: hidden;
+}
+
+/* menu card only: the mesh gradient, washed to near-nothing behind the copy */
+.card .mesh-wash {
+    position: absolute;
+    inset: -40% -20% auto -20%;
+    height: 150%;
+    opacity: 0.5;
+}
+
+.card>* {
+    position: relative;
+    z-index: 1;
+}
+
+.card .eyebrow {
+    display: block;
+    margin-bottom: var(--s-sm);
+}
+
+.card h1 {
+    margin-bottom: var(--s-sm);
+}
+
+.card h2 {
+    margin-bottom: var(--s-sm);
+}
+
+.card p,
+.card li {
+    font-size: var(--t-body-md-size);
+    line-height: 1.55;
+    color: var(--c-body);
+}
+
+.card ul {
+    margin-top: var(--s-sm);
+}
+
+.card li {
+    margin-bottom: 5px;
+}
+
+.card strong {
+    color: var(--c-ink);
+    font-weight: 600;
+}
+
+.card .actions {
+    display: grid;
+    gap: var(--s-xs);
+    margin-top: var(--s-lg);
+}
+
+.card .actions>* {
+    width: 100%;
+}
+
+/* A hairline-divided spec list, in place of bullets, for the tutorial */
+.spec-list {
+    list-style: none;
+    padding: 0;
+    margin-top: var(--s-md);
+    border-top: 1px solid var(--c-hairline);
+}
+
+.spec-list li {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--c-hairline);
+    margin: 0;
+}
+
+.keyhint {
+    display: inline-block;
+    font-family: var(--f-mono);
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--c-hairline);
+    background: var(--c-hairline-soft);
+    color: var(--c-ink);
+}
+
+/* The §4 self-test result, rendered as a hairline well */
+.test-result {
+    margin-top: var(--s-md);
+    padding: var(--s-sm) var(--s-md);
+    border: 1px solid var(--c-hairline);
+    border-radius: var(--r-md);
+    background: var(--c-hairline-soft);
+    font-family: var(--f-mono);
+    font-size: 11px;
+    line-height: 1.65;
+    color: var(--c-body);
+    white-space: pre-wrap;
+    max-height: 168px;
+    overflow: auto;
+}
+
+.test-result[hidden] {
+    display: none;
+}
+
+/* --- error toast ------------------------------------------------------- */
+#err {
+    position: fixed;
+    inset: auto 12px 12px 12px;
+    z-index: 60;
+    display: none;
+    padding: var(--s-sm) var(--s-md);
+    border: 1px solid var(--c-error);
+    border-radius: var(--r-md);
+    background: var(--c-canvas-elevated);
+    color: var(--c-error-deep);
+    font-family: var(--f-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    box-shadow: var(--e-2);
+}
+
+/* ============================================================================
+   RESPONSIVE — collapse toward a single column on mobile
+   ========================================================================= */
+
+@media (max-width: 720px) {
+    #log-panel {
+        max-width: 58vw;
+    }
+
+    .row-bottom {
+        align-items: stretch;
+        flex-direction: column;
+        gap: var(--s-xs);
+    }
+
+    #instruction {
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    #log-panel {
+        display: none;
+        /* the log is a luxury at this width; the banner carries it */
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #banner {
+        transition: none;
+    }
+}
