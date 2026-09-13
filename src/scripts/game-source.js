@@ -76,13 +76,19 @@ import {
        reads these values.
        ========================================================================== */
     const COL = {
-        you: 0x50e3c2, cpu: 0xeb367f,        /* Geist cyan / Geist magenta   */
-        gkYou: 0x0070f3, gkCpu: 0x7928ca,    /* Geist link blue / Geist violet */
-        aim: 0xf5a623, ghost: 0xfafafa        /* gradient amber / Geist canvas */
+        /* Pulled up to full saturation and pushed apart on the colour wheel —
+           mint against hot magenta are near-opposite hues, so the two kits stay
+           separable even for the ~1 in 12 players with red-green colour vision
+           deficiency and even at the smallest zoom the board is ever drawn at.
+           The two keepers are deliberately *not* tints of their own team: a
+           keeper has to read as "the keeper" first and a shirt second. */
+        you: 0x2bf7c0, cpu: 0xff2d87,        /* electric mint / hot magenta */
+        gkYou: 0x1f6bff, gkCpu: 0xffc300,    /* keeper blue / keeper amber  */
+        aim: 0xffc300, ghost: 0xfafafa        /* selection amber / canvas    */
     };
     const CSS = {
-        you: '#50e3c2', cpu: '#eb367f', lime: '#f5a623',
-        goal: '#50e3c2', bad: '#eb367f', warn: '#f5a623'
+        you: '#2bf7c0', cpu: '#ff2d87', lime: '#ffc300',
+        goal: '#2bf7c0', bad: '#ff2d87', warn: '#ffc300'
     };
 
     /* ==========================================================================
@@ -208,6 +214,17 @@ import {
     const ownGoal = team => goalFor(other(team));
     /** The half a team attacks (+) or defends (−), as a y coordinate. */
     const attackSide = team => (team === 'you' ? 1 : -1);
+
+    /* 3 units of slack on the halfway line — deliberately wider than the ±2.5
+       restart jitter, so nothing that gets clamped into a half can be nudged
+       back out of it afterwards. */
+    const HALF_SLACK = 3;
+    /** A team's own half as a hard y-band, and the clamp that enforces it.
+        Symmetric about the halfway line, so both directions read identically:
+        the side that attacks +y is the side that defends −y. */
+    const ownHalf = (team, y) => (attackSide(team) > 0
+        ? Math.min(y, 50 - HALF_SLACK)
+        : Math.max(y, 50 + HALF_SLACK));
 
     /* ==========================================================================
        § 6. THREE.JS SCENE — 3D characters, 2D top-view ground
@@ -490,11 +507,15 @@ import {
        § 7. PLAYERS — low-poly 3D humanoids (reused construction pattern)
        ========================================================================== */
     const skinTones = [0xf1c9a5, 0xdba579, 0x8d5524, 0xc68642, 0xa9713f];
+    /* `flatShading` keeps the low-poly facets readable (a smooth-shaded 4-unit
+       stick figure just smears into a silhouette from directly overhead) and the
+       emissive lift means the kits still read on the darkest turf bands at the
+       far end of the pitch, where the lighting falls away. */
     const MAT = {
-        you: new THREE.MeshLambertMaterial({ color: COL.you }),
-        cpu: new THREE.MeshLambertMaterial({ color: COL.cpu }),
-        gkYou: new THREE.MeshLambertMaterial({ color: COL.gkYou }),
-        gkCpu: new THREE.MeshLambertMaterial({ color: COL.gkCpu })
+        you: new THREE.MeshLambertMaterial({ color: COL.you, emissive: COL.you, emissiveIntensity: 0.26, flatShading: true }),
+        cpu: new THREE.MeshLambertMaterial({ color: COL.cpu, emissive: COL.cpu, emissiveIntensity: 0.26, flatShading: true }),
+        gkYou: new THREE.MeshLambertMaterial({ color: COL.gkYou, emissive: COL.gkYou, emissiveIntensity: 0.26, flatShading: true }),
+        gkCpu: new THREE.MeshLambertMaterial({ color: COL.gkCpu, emissive: COL.gkCpu, emissiveIntensity: 0.26, flatShading: true })
     };
     const limbGeoCache = {};
     function limbGeo(r, h) {
@@ -511,7 +532,12 @@ import {
     function makeHuman(kitMat, role) {
         const g = new THREE.Group();
         const skin = new THREE.MeshLambertMaterial({ color: skinTones[Math.floor(Math.random() * skinTones.length)] });
-        const shorts = new THREE.MeshLambertMaterial({ color: 0x11241e });
+        /* shorts and cap take a darkened cut of the team hue rather than a shared
+           neutral, so each player reads as a whole kit — shirt, shorts and cap —
+           and not just a coloured torso floating over a dark pitch */
+        const shorts = new THREE.MeshLambertMaterial({
+            color: kitMat.color.clone().multiplyScalar(0.36)
+        });
         const keeperKit = role === 'keeper';
 
         const torso = new THREE.Mesh(new THREE.CylinderGeometry(.52, .63, 1.5, 12), kitMat);
@@ -556,7 +582,8 @@ import {
         const kit = role === 'keeper' ? (team === 'you' ? MAT.gkYou : MAT.gkCpu) : (team === 'you' ? MAT.you : MAT.cpu);
         const mesh = makeHuman(kit, role);
         const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
-            color: COL.aim, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false
+            color: team === 'you' ? COL.you : COL.cpu,
+            transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false
         }));
         ring.rotation.x = -Math.PI / 2;
         ring.position.y = 0.05;
@@ -572,7 +599,9 @@ import {
             hasBall: false, selected: false, controlled: false, held: false,
             duty: null,          // 'interceptor' | 'marker' for the human's two
             dive: null,          // keeper only: where this dive is going
-            speed: PLAYER_SPEED
+            /* a shade under the base speed, so a defender has to get a head start
+               rather than being able to simply outrun the player in possession */
+            speed: PLAYER_SPEED * 0.9
         };
         mesh.position.set(worldX(p.x), 0, worldZ(p.y));
         allPlayers.push(p);
@@ -590,6 +619,46 @@ import {
     const teamPlayers = team => allPlayers.filter(p => p.team === team);
     const teamOutfield = team => allPlayers.filter(p => p.team === team && p.role === 'outfield');
     const keeperOf = team => playersById[team + '6'];
+
+    /* --- body separation ----------------------------------------------------
+       Nothing in the engine used to stop two players occupying the exact same
+       coordinate. A human player and a CPU player converging on the same spot
+       therefore ended up drawn on top of one another, and from above that read
+       as the ball being stuck: the ball sat under a stack of two bodies, and any
+       drag on the spot was resolved to whichever of the two happened to be
+       nearest — sometimes the CPU player, whose drag does nothing.
+
+       Every frame, any pair closer than SEPARATE_R is pushed apart along the
+       line between them, half each, at a speed rather than instantly, so a
+       defender pressing the carrier reads as a shoulder-to-shoulder challenge
+       instead of a teleport. The keeper's dive is exempt: a save must never be
+       nudged off the line it is flying to. Exactly-coincident pairs get a
+       deterministic axis (no RNG) so the split is reproducible. */
+    const SEPARATE_R = CATCH_RADIUS * 1.15;
+    const SEPARATE_SPEED = PLAYER_SPEED;
+
+    function separatePlayers(dt) {
+        const maxPush = SEPARATE_SPEED * dt;
+        for (let i = 0; i < allPlayers.length; i++) {
+            for (let j = i + 1; j < allPlayers.length; j++) {
+                const a = allPlayers[i], b = allPlayers[j];
+                const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+                if (d >= SEPARATE_R) continue;
+                if (d < 1e-4) {
+                    /* dead centre: split along a fixed axis derived from the pair */
+                    const ang = (i * 7 + j * 13) * 2.399963229728653;
+                    const px = Math.cos(ang) * maxPush * 0.5, py = Math.sin(ang) * maxPush * 0.5;
+                    if (!a.dive) { a.x = clamp(a.x - px, 3, 97); a.y = clamp(a.y - py, 3, 97); }
+                    if (!b.dive) { b.x = clamp(b.x + px, 3, 97); b.y = clamp(b.y + py, 3, 97); }
+                    continue;
+                }
+                const push = Math.min((SEPARATE_R - d) * 0.5, maxPush);
+                const ux = dx / d, uy = dy / d;
+                if (!a.dive) { a.x = clamp(a.x - ux * push, 3, 97); a.y = clamp(a.y - uy * push, 3, 97); }
+                if (!b.dive) { b.x = clamp(b.x + ux * push, 3, 97); b.y = clamp(b.y + uy * push, 3, 97); }
+            }
+        }
+    }
 
     function syncToMesh(p) {
         p.mesh.position.set(worldX(p.x), p.mesh.position.y, worldZ(p.y));
@@ -623,7 +692,14 @@ import {
 
     function moveToward(p, tx, ty, speed, dt) {
         const dx = tx - p.x, dy = ty - p.y, d = Math.hypot(dx, dy);
-        if (d < 0.06) { p.x = tx; p.y = ty; return true; }
+        /* Snap onto the target so a player settles exactly on it rather than
+           oscillating — but never for a degenerate (zero-distance) target, which
+           would teleport the player onto whatever it was already sharing a point
+           with and undo the separation pass. */
+        if (d < 0.06) {
+            if (d > 1e-6) { p.x = tx; p.y = ty; }
+            return true;
+        }
         const step = Math.min(speed * dt, d);
         p.x = clamp(p.x + dx / d * step, 3, 97);
         p.y = clamp(p.y + dy / d * step, 3, 97);
@@ -705,13 +781,20 @@ import {
     const runnerMarker = mkRing(COL.aim, 0.9, 1.25);
     const diveMarker = mkRing(COL.gkYou, 1.0, 1.5);
 
-    /* --- selection rings on the human's players --- */
+    /* --- base rings under every player, plus the selection highlight ---------
+       Every player keeps a faint ring in their own kit colour, so the two teams
+       can be counted at a glance (six mint discs vs six magenta discs) instead of
+       having to read the shirts. The human's controlled players swap that for the
+       bright selection amber, which is a colour neither team uses. */
+    function teamRingHex(p) {
+        if (p.role === 'keeper') return p.team === 'you' ? COL.gkYou : COL.gkCpu;
+        return p.team === 'you' ? COL.you : COL.cpu;
+    }
     function refreshRings() {
         allPlayers.forEach(p => {
-            const show = p.controlled;
-            p.ring.material.opacity = show ? (p.hasBall ? 0.95 : 0.55) : 0;
-            p.ring.material.color.setHex(p.team === 'you' ? COL.aim : COL.cpu);
-            p.ring.scale.setScalar(p.hasBall ? 1.1 : 1);
+            p.ring.material.color.setHex(p.controlled ? COL.aim : teamRingHex(p));
+            p.ring.material.opacity = p.controlled ? (p.hasBall ? 0.95 : 0.6) : 0.3;
+            p.ring.scale.setScalar(p.hasBall ? 1.1 : p.controlled ? 1 : 0.82);
         });
     }
 
@@ -721,23 +804,36 @@ import {
        ========================================================================== */
     let PLAY = null;
 
-    /** The spot an attacking teammate holds, from the ball toward the goal. */
-    function attackingSpot(from, goal, i) {
+    /** The spot an attacking teammate holds — from the ball *back towards its own
+        half*. `home` is therefore the attacking side's own goal, not the one it
+        is attacking: lining attackers up along the direction of the attack is
+        what crowded both teams into one half and left the human's half empty. */
+    function attackingSpot(from, home, i) {
         const off = LANE_OFFSET[i % LANE_OFFSET.length];
         const t = LANE_DEPTH[i % LANE_DEPTH.length];
         return {
-            x: clamp(lerp(from.x, goal.x, t) + off * 0.55, 8, 92),
-            y: clamp(lerp(from.y, goal.y, t), 6, 94)
+            x: clamp(lerp(from.x, home.x, t) + off * 0.55, 8, 92),
+            y: clamp(lerp(from.y, home.y, t), 6, 94)
         };
     }
 
-    /** The spot an auto-drifting defender holds, between ball and own goal. */
+    /* FIVE distinct defender slots, not three. The old table was `i % 3`, so with
+       five outfielders defenders 0 & 3 shared a spot and 1 & 4 shared another —
+       two players were drawn exactly on top of each other, which is why a
+       defending team never read as six players: you could only ever see three
+       distinct outfielders plus the keeper. Every slot below differs from every
+       other in BOTH depth and width, and the deepest sits at 0.68 so it stays
+       clear of the keeper's line (the previous deepest slot landed on top of the
+       keeper — a fourth instance of the same stacking bug). */
+    const DEF_SPREAD = [-24, -12, 12, 24, 0];
+    const DEF_DEPTH = [0.34, 0.52, 0.52, 0.34, 0.68];
+
+    /** The spot a defender holds, between the ball and the goal they defend. */
     function defendingSpot(from, own, i) {
-        const t = [0.42, 0.60, 0.78][i % 3];
-        const ox = [-17, 0, 17][i % 3];
+        const k = i % DEF_DEPTH.length;
         return {
-            x: clamp(lerp(50, from.x, 0.62) + ox, 8, 92),
-            y: clamp(lerp(from.y, own.y, t), 6, 94)
+            x: clamp(lerp(50, from.x, 0.55) + DEF_SPREAD[k], 8, 92),
+            y: clamp(lerp(from.y, own.y, DEF_DEPTH[k]), 6, 94)
         };
     }
 
@@ -802,6 +898,9 @@ import {
             const sorted = mates.slice().sort((a, b) => dist(a, PLAY.goal) - dist(b, PLAY.goal));
             PLAY.receiver = sorted[0];
             if (PLAY.receiver) PLAY.receiver.duty = 'receiver';
+            /* The CPU is the defending side here, so hand it its own two
+               ball-side defenders — it defends too. */
+            cpuDefendDuties();
         } else {
             const near = teamOutfield('you').slice().sort((a, b) => dist(a, ball) - dist(b, ball));
             if (near[0]) { near[0].controlled = true; near[0].duty = 'interceptor'; }
@@ -899,6 +998,7 @@ import {
         halfLabel: el('half-label'), clock: el('clock'), clockBar: el('clock-bar'),
         log: el('log'), instruction: el('instruction'),
         mute: el('btn-mute'), pause: el('btn-pause'), help: el('btn-help'),
+        shoot: el('btn-shoot'),
         difficulty: el('difficulty'),
         soTitle: el('so-title'), soYou: el('so-you'), soCpu: el('so-cpu'),
         soScore: el('so-score'), soTurn: el('so-turn')
@@ -992,10 +1092,12 @@ import {
         'Choose one player and drag them towards the goal to make a move.'
     ];
 
-    /* four slots behind the ball, spread across the width — a shape you can read */
+    /* Four slots for the coached opening. `dy` is measured *behind* the ball, so
+       every one of these lands in the side's own half, and all four take a
+       different x — six players, six separate places on the board at kick-off. */
     const RESTART_SHAPE = [
-        { dx: -14, dy: 9 }, { dx: 14, dy: 9 },
-        { dx: -8, dy: 22 }, { dx: 12, dy: 25 }
+        { dx: -17, dy: 9 }, { dx: 17, dy: 9 },
+        { dx: -9, dy: 23 }, { dx: 9, dy: 27 }
     ];
 
     /** Where the coached slots go for a restart at `pos`. All four sit behind
@@ -1024,11 +1126,15 @@ import {
         const rng = mulberry32(hashSeed(state.seed, state.half, Math.floor(state.halfT)));
         const centred = Math.abs(pos.y - 50) < 2;
 
+        /* ownHalf() is the shared, symmetric clamp (HALF_SLACK, see §1). Only the
+           player taking the kick-off stands on the line itself; everybody else is
+           unambiguously in their own half. */
         const place = (p, spot, jitter) => {
-            p.ax = spot.x; p.ay = spot.y;
+            const s = { x: spot.x, y: ownHalf(p.team, spot.y) };
+            p.ax = s.x; p.ay = s.y;
             p.dest = null; p.selected = false; p.held = false;
-            p.x = clamp(spot.x + (jitter ? randRange(rng, -2.5, 2.5) : 0), 6, 94);
-            p.y = clamp(spot.y + (jitter ? randRange(rng, -2.5, 2.5) : 0), 5, 95);
+            p.x = clamp(s.x + (jitter ? randRange(rng, -2.5, 2.5) : 0), 6, 94);
+            p.y = clamp(s.y + (jitter ? randRange(rng, -2.5, 2.5) : 0), 5, 95);
             p.px = p.x; p.py = p.y;
         };
 
@@ -1288,10 +1394,27 @@ import {
             contestFlight();
             if (ball.t >= ball.total && ball.mode !== 'held') resolveArrival();
         } else if (ball.mode === 'loose') {
-            /* the loose ball sits still; whoever reaches it takes it */
+            /* The loose ball sits still; the CLOSEST player inside the control
+               radius takes it. This used to be "the first player in allPlayers
+               order", which is not the same thing: with two bodies on the spot —
+               exactly the case where a player and a defender arrive together —
+               the ball changed hands between them on alternating frames, and
+               every handover wipes every player's destination (setCarrier), so
+               neither of them could ever complete a step away from the pile. The
+               ball looked welded to the spot.
+
+               Nearest-wins is deterministic and frame-order independent; an exact
+               tie resolves on the same fixed ordering every frame, so the ball
+               cannot ping-pong. */
+            let best = null, bd = Infinity;
             for (const p of allPlayers) {
-                if (dist(p, ball) <= CATCH_RADIUS) { setCarrier(p); return; }
+                const d = dist(p, ball);
+                if (d > CATCH_RADIUS) continue;
+                if (d < bd - 1e-9 || (d < bd + 1e-9 && best && p.team === 'you' && best.team !== 'you')) {
+                    best = p; bd = d;
+                }
             }
+            if (best) { setCarrier(best); return; }
         }
         ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
         ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
@@ -1335,37 +1458,71 @@ import {
         /* 2. the CPU holds its shape. The human's outfielders never move by
               themselves: every step they take is a step the player asked for.
               That is both what the walkthrough teaches — "then drag a player" —
-              and what stops the board looking like it is playing itself. */
+              and what stops the board looking like it is playing itself.
+
+              A defender's shape is keyed to the goal it is ACTUALLY defending —
+              ownGoal(p.team) — and never to PLAY.own, which is the own goal of
+              whichever side is attacking. Handing a defender the attacker's own
+              goal is precisely what used to march the whole CPU team down into
+              the human's half the moment the human won the ball: the reference
+              point was the human's own goal, so every defender lerped towards it
+              and the CPU ended up crowding the end it was supposed to be
+              attacking.
+
+              Every defending target is then clamped into the defending team's own
+              half, so the CPU presses up to the halfway line and no further: it
+              defends its own goal and its own post. Only the attacking branch is
+              allowed to cross the line. */
         teamOutfield('cpu').forEach((p, i) => {
             if (p.dest) return;
             if (atk === 'cpu' && p === PLAY.carrier) return;
-            if (p.team === def && p.duty === 'interceptor') {
+
+            /* --- CPU in possession: free to advance, shape along its attack --- */
+            if (atk === 'cpu') {
+                const s = attackingSpot(PLAY.carrier, PLAY.goal, i);
+                moveToward(p, s.x, s.y, DRILL_SPEED, dt);
+                return;
+            }
+
+            /* --- CPU defending: hold the half in front of its own goal --- */
+            const mine = ownGoal(p.team);
+            if (p.duty === 'interceptor') {
                 const to = PLAY.threat || PLAY.carrier;
                 const s = interceptTarget(p, PLAY.carrier, to);
-                moveToward(p, s.x, s.y, PLAYER_SPEED * 0.9, dt);
+                moveToward(p, s.x, ownHalf(p.team, s.y), PLAYER_SPEED * 0.9, dt);
                 return;
             }
-            if (p.team === def && p.duty === 'marker') {
+            if (p.duty === 'marker') {
                 const c = PLAY.carrier;
-                const s = { x: clamp(c.x - (PLAY.goal.x - c.x) * 0.12, 6, 94), y: clamp(lerp(c.y, PLAY.goal.y, 0.12), 6, 94) };
-                moveToward(p, s.x, s.y, PLAYER_SPEED * 0.88, dt);
+                /* stand goal-side of the carrier, where "goal" means the one
+                   being defended — so the marker drops off towards its own end
+                   rather than being pulled towards the human's */
+                const s = {
+                    x: clamp(c.x - (mine.x - c.x) * 0.12, 6, 94),
+                    y: clamp(lerp(c.y, mine.y, 0.12), 6, 94)
+                };
+                moveToward(p, s.x, ownHalf(p.team, s.y), PLAYER_SPEED * 0.88, dt);
                 return;
             }
-            const s = atk === 'cpu'
-                ? attackingSpot(PLAY.carrier, PLAY.goal, i)
-                : defendingSpot(PLAY.carrier, PLAY.own, i);
-            moveToward(p, s.x, s.y, DRILL_SPEED, dt);
+            const s = defendingSpot(PLAY.carrier, mine, i);
+            moveToward(p, s.x, ownHalf(p.team, s.y), DRILL_SPEED, dt);
         });
 
         moveCarrier(dt);
 
-        /* 3. a loose ball is a race for the nearest player in each kit */
+        /* 3. a loose ball is a race for the nearest player in each kit. The
+              chaser is clamped to its own half while it is the defending side,
+              so a ball spilling back towards the human's end cannot drag a CPU
+              player over the line with it: the CPU contests the ball in front of
+              its own goal and leaves the human's half alone. */
         if (ball.mode === 'loose') {
             ['you', 'cpu'].forEach(team => {
                 const near = allPlayers
                     .filter(p => p.team === team)
                     .sort((a, b) => dist(a, ball) - dist(b, ball))[0];
-                if (near && !near.dest) moveToward(near, ball.x, ball.y, PLAYER_SPEED, dt);
+                if (!near || near.dest) return;
+                const chaseY = team === def ? ownHalf(team, ball.y) : ball.y;
+                moveToward(near, ball.x, chaseY, PLAYER_SPEED, dt);
             });
         }
 
@@ -1379,6 +1536,22 @@ import {
        `shotOutcome` tells its keeper which way to go.
        ========================================================================== */
     function cpuAssignDuties() {
+        const dfs = teamOutfield('cpu').slice().sort((a, b) => dist(a, ball) - dist(b, ball));
+        dfs.forEach((p, i) => { p.duty = i === 0 ? 'interceptor' : (i === 1 ? 'marker' : null); });
+    }
+
+    /**
+     * The same thing for the mirror case, and the second half of "they should
+     * defend their post". cpuAssignDuties() only ever ran out of cpuThink(),
+     * which returns immediately unless the CPU is holding the ball — so the
+     * instant the human won possession every CPU outfielder was stripped of its
+     * duty and the whole team just posed in a shape with nobody actually
+     * defending it. Now, while the human attacks, the CPU's two closest
+     * outfielders press and mark, and those targets are clamped to the CPU's own
+     * half in simPlayers(), so it defends its own goal without ever walking into
+     * the human's.
+     */
+    function cpuDefendDuties() {
         const dfs = teamOutfield('cpu').slice().sort((a, b) => dist(a, ball) - dist(b, ball));
         dfs.forEach((p, i) => { p.duty = i === 0 ? 'interceptor' : (i === 1 ? 'marker' : null); });
     }
@@ -1791,7 +1964,16 @@ import {
                 y: (1 - (p.y - view.panY + view.hh) / (2 * view.hh)) * pt.rect.height
             };
             const d = Math.hypot(a.x - pt.px, a.y - pt.py);
-            if (d <= r && d < bd) { bd = d; best = p; }
+            if (d > r) return;
+            /* Never let an opponent standing on top of one of your players
+               swallow the gesture: while the human is on the ball, a tap on a
+               stack resolves to the human's player, not to the defender pressed
+               against them (the CPU player is not draggable, so picking it makes
+               the touch look dead). */
+            const own = p.team === 'you';
+            const bestOwn = best && best.team === 'you';
+            if (bestOwn && !own) return;
+            if (d < bd || (!bestOwn && own)) { bd = d; best = p; }
         });
         return best;
     }
@@ -2009,6 +2191,7 @@ import {
         if (e.key === 'm' || e.key === 'M') toggleMute();
         if (e.key === 'r' || e.key === 'R') { if (state.phase !== 'idle') beginMatch(); }
         if (e.key === 'h' || e.key === 'H') pushScreen('tutorial', { focus: '#btn-tut-close' });
+        if (e.key === 's' || e.key === 'S') shootFromButton();
     });
 
     /* ==========================================================================
@@ -2044,6 +2227,12 @@ import {
             ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
         }
 
+        /* No two bodies may occupy the same point — resolve any overlap once per
+           frame, after everyone has moved and before they are drawn. Skipped in
+           the shootout, whose kicker and keeper are placed deliberately and must
+           not be nudged off their marks. */
+        if (!SO.active) separatePlayers(dt);
+
         allPlayers.forEach(p => { animatePlayer(p, dt); syncToMesh(p); });
         updateCursor();
         updateOverlayVisibility();
@@ -2072,7 +2261,44 @@ import {
         }
     }
 
+    /* --- the shoot button ---------------------------------------------------
+       Enabled exactly when a shot is legal: the human is on the ball, the ball
+       is live at their feet, play is running, and the carrier is inside
+       SHOT_RANGE of the goal it attacks. While the human is defending, or out of
+       range, it is dimmed and inert — so the icon also tells the player why a
+       shot is not on. */
+    let lastShootOn = null;
+    function canShootNow() {
+        if (SO.active || state.paused) return false;
+        if (state.phase !== 'play' && state.phase !== 'restart') return false;
+        if (!topScreen() && PLAY && PLAY.atk === 'you' && PLAY.carrier) {
+            return ball.mode === 'held' && ball.holder === PLAY.carrier
+                && dist(PLAY.carrier, PLAY.goal) <= SHOT_RANGE;
+        }
+        return false;
+    }
+
+    function refreshShootButton() {
+        if (!ui.shoot) return;
+        const on = canShootNow();
+        if (on === lastShootOn) return;
+        lastShootOn = on;
+        ui.shoot.disabled = !on;
+        ui.shoot.classList.toggle('ready', on);
+    }
+
+    /** §5 — the button is a straight shot at the middle of the goal the human
+        attacks, the same call the double-tap makes. */
+    function shootFromButton() {
+        if (!canShootNow()) return;
+        const c = PLAY.carrier;
+        const shot = shoot(c, { x: clamp(PLAY.goal.x, 0, 100), y: PLAY.goal.y });
+        if (!shot) log('Shooting only works inside ' + SHOT_RANGE + ' units of the goal.', '');
+        refreshShootButton();
+    }
+
     function updateHud() {
+        refreshShootButton();
         if (SO.active) return;
         const left = Math.max(0, HALF_LENGTH - state.halfT);
         const secs = Math.ceil(left - 1e-6);
@@ -2164,6 +2390,7 @@ import {
     el('btn-tutorial').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
     el('btn-tut-close').addEventListener('click', () => popScreen());
     el('btn-help').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
+    if (ui.shoot) ui.shoot.addEventListener('click', shootFromButton);
     el('btn-pause').addEventListener('click', () => pauseGame());
     el('btn-mute').addEventListener('click', toggleMute);
     el('btn-resume').addEventListener('click', resumeGame);
