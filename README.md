@@ -181,7 +181,7 @@ It exits non-zero on failure, so it can gate a deploy.
 
 ## ☁️ Deploy
 
-Cloudflare Pages, direct upload:
+Live at **https://guess-and-pass.pages.dev** — Cloudflare Pages, direct upload:
 
 ```bash
 npm run deploy
