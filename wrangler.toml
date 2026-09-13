@@ -1,0 +1,12 @@
+# Cloudflare Pages — config for direct-upload deploys.
+#
+#   npx wrangler pages deploy . --project-name guess-and-pass
+#
+# `assets.directory` = "." because this is a static site whose single entry
+# point is ./index.html at the repo root (no build step, no framework).
+# `.gitignore` is respected for the upload, so legacy-3d/ and node_modules/
+# are not shipped.
+name = "guess-and-pass"
+pages_build_output_dir = "."
+
+compatibility_date = "2026-09-13"
