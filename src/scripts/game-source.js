@@ -1736,6 +1736,8 @@ import {
     const SO_KICK_BEAT = 0.75;     // the keeper sets off before the strike
     const SO_DIVE_WINDOW = 4.5;    // the human's time to draw a dive
     const SO_RESULT_PAUSE = 1.2;   // the banner, before the next kicker
+    const SO_AIM_WINDOW = 10;      // the human's time to draw the aim
+    const SO_CPU_BEAT = 1.0;       // the CPU's routine before it strikes
 
     function setPenaltyView(on) {
         view.zoom = on ? SO_ZOOM : 1;
@@ -1798,12 +1800,14 @@ import {
 
         bus.emit('role');
         soHudState();
-        if (turn === 'cpu') {
-            SO.t = 1.0;   // the CPU's routine
-            log('CPU steps up…', '');
-        } else {
-            log('Your kick — drag from the spot and release.', '');
-        }
+        /* Every phase runs on the same countdown, so the kick gets one too. The
+           human's aim phase used to be started with no clock at all (SO.t was
+           left at 0 and only the CPU's branch tested the timeout), which meant a
+           tap that never became a drag had nothing to expire it: the shootout
+           stopped on the first kick and never resumed. */
+        SO.t = turn === 'cpu' ? SO_CPU_BEAT : SO_AIM_WINDOW;
+        if (turn === 'cpu') log('CPU steps up…', '');
+        else log('Your kick — drag from the spot and release.', '');
     }
     /* §10 — the keeper works from the goal line, KEEPER_LINE out from it. */
     function PENALTY_LINE() { return SO_KEEPER_LINE; }
@@ -1950,8 +1954,8 @@ import {
 
     function soUpdate(dt) {
         SO.t -= dt;
-        if (SO.phase === 'aim') {
-            if (SO.turn === 'cpu' && SO.t <= 0) {
+        if (SO.phase === 'aim' && SO.t <= 0) {
+            if (SO.turn === 'cpu') {
                 const rng = mulberry32(hashSeed(state.seed, 7, SO.takenYou + SO.takenCpu));
                 const spread = GOAL_HALF_WIDTH * (0.55 + 0.5 * state.difficulty);
                 /* miss the target occasionally, more often on the lower settings */
@@ -1960,6 +1964,11 @@ import {
                     ? clamp(soGoal().x + (rng() < .5 ? -1 : 1) * (GOAL_HALF_WIDTH + randRange(rng, 1, 9)), 2, 98)
                     : clamp(soGoal().x + randRange(rng, -spread, spread), 2, 98);
                 soSetAim({ x: aim, y: soGoal().y });
+                soCommitAim();
+            } else {
+                /* §7 — no aim given: take the percentage ball, straight down the
+                   middle, and let the keeper's read decide it. */
+                soSetAim({ x: soGoal().x, y: soGoal().y });
                 soCommitAim();
             }
         } else if (SO.phase === 'dive') {
