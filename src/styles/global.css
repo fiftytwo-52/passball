@@ -35,33 +35,33 @@ body {
 }
 
 /* ============================================================================
-   LAYOUT — phones cannot fit two HUD clusters side by side without the chips
-   colliding, so the top row becomes two stacked, independently scrollable
-   lines. This is the standard responsive HUD move: stack, then scroll within
-   the line, rather than wrap into a wall.
+   LAYOUT — phones cannot fit a dock's two clusters side by side without the
+   chips colliding, so each dock stacks its clusters and each cluster becomes
+   an independently scrollable line. This is the standard responsive HUD move:
+   stack, then scroll within the line, rather than wrap into a wall.
    ========================================================================= */
 
 @media (max-width: 720px) {
-    .row-top {
+    #hud-top .dock {
         flex-direction: column;
         align-items: stretch;
         gap: var(--s-xs);
     }
 
-    .row-top .cluster {
+    #hud-top .cluster {
         flex-wrap: nowrap;
         overflow-x: auto;
         scrollbar-width: none;
         -webkit-overflow-scrolling: touch;
     }
 
-    .row-top .cluster::-webkit-scrollbar {
+    #hud-top .cluster::-webkit-scrollbar {
         display: none;
     }
 
-    /* the row scrolls as a whole for the last cluster, so give the inner
-       controls a little breathing room at the tail of the scroll */
-    .row-top .cluster::after {
+    /* the cluster scrolls as one line, so give the inner controls a little
+       breathing room at the tail of the scroll */
+    #hud-top .cluster::after {
         content: '';
         flex: 0 0 var(--s-xxs);
     }
@@ -100,15 +100,16 @@ body {
    white inner stop to stay legible.
    ========================================================================= */
 
-#hud :focus-visible,
+#hud-top :focus-visible,
+#hud-bottom :focus-visible,
 .screen :focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
 }
 
 /* ============================================================================
-   MOTION — the banner and flash are feedback, not decoration, so they keep a
-   reduced-motion fallback rather than disappearing entirely.
+   MOTION — the banner is feedback, not decoration, so it keeps a reduced-motion
+   fallback (an instant cut) rather than disappearing entirely.
    ========================================================================= */
 
 @media (prefers-reduced-motion: reduce) {

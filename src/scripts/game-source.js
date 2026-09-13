@@ -35,8 +35,7 @@ import * as THREE from 'three';
     const T = {
         /* --- §3 loop --- */
         window: 3.0,          // decision window, seconds
-        winScore: 3,          // first to 3 goals
-        maxPlays: 24,         // hard cap
+        winScore: 3,          // first to 3 goals — the only way a match ends
 
         /* --- §4 resolution (CANONICAL) --- */
         R_cover: 14,
@@ -306,6 +305,7 @@ import * as THREE from 'three';
         phase: 'idle',      // idle | setup | decision | resolve | result | over
         possession: 'you',  // 'you' | 'cpu'  (who attacks this play)
         progress: 0.05,     // how far the current possession has advanced, 0(own goal)…1
+        kickoff: false,     // true on the first play and after every goal: start at the centre spot
         humanScore: 0, cpuScore: 0,
         plays: 0,
         decisionEndsAt: 0,  // real-clock timestamp — drives the countdown
@@ -333,8 +333,36 @@ import * as THREE from 'three';
 
     /* ==========================================================================
        § 5. PITCH GEOMETRY  (game space is 100 × 100; goals at y = 0 and y = 100)
+
+       The *logic* grid stays the canonical normalized 100 × 100 square — every
+       clamp, formation offset and §4 constant is dimensioned on it and must not
+       move. The *artwork* is a real football pitch: 105 m along the playing
+       direction (game-y) and 68 m across it (game-x). Presenting one on the other
+       is purely a matter of scale:
+
+         KX   squashes game-x into world-x so 100 game-x units cover the same
+              68 m that 100 game-y units cover down the length. A pass that is
+              circular in game space therefore draws as a genuine football
+              ellipse — which is what the viewer expects to see.
+
+       nothing in § 4 may reference any of these.
        ========================================================================== */
-    const PITCH = { w: 100, h: 100, goalW: 7.32, boxW: 40.32, boxD: 16.5, sixW: 18.32, sixD: 5.5 };
+    const PITCH_M = { x: 68, y: 105 };              // metres across / along
+    const GROUND_M = { x: 76, y: 113 };             // playing area + 4 m run-off
+    const MX = 100 / PITCH_M.x;                     // game-x units per metre
+    const MY = 100 / PITCH_M.y;                     // game-y units per metre
+    const KX = PITCH_M.x / PITCH_M.y;               // world-x compression (~0.648)
+    const UPM = 100 / PITCH_M.y;                    // world units per metre (~0.952)
+    const PITCH = {
+        w: 100,
+        h: 100,
+        /* Markings in real metres, expressed back on the canonical grid. */
+        goalW: 7.32 * MX,
+        boxW: 40.32 * MX,
+        boxD: 16.5 * MY,
+        sixW: 18.32 * MX,
+        sixD: 5.5 * MY
+    };
     const GOAL = {
         you: { x: 50, y: 100 },  // the goal the human attacks (CPU's goal)
         cpu: { x: 50, y: 0 }     // the goal the CPU attacks (human's goal)
@@ -357,7 +385,13 @@ import * as THREE from 'three';
     const TILT = THREE.MathUtils.degToRad(34);      // camera tilt off vertical
     const ZSTRETCH = 1 / Math.cos(TILT);            // stretches the ground plane's depth so
     // the top-view artwork lands on screen undistorted
-    const view = { hw: 53, hh: 56 };
+    /* Visible half-extents in screen units. Screen-up is 1:1 with game-y, and
+       screen-right is game-x compressed by KX, so these are simply the ground's
+       half-metres: 113/2 along, 76/2 × KX across. Half a unit of slack keeps the
+       plane's own edge from ever landing exactly on the canvas edge. */
+    const reqHW = GROUND_M.x * KX / 2 + 0.5;        // ≈ 36.5
+    const reqHH = GROUND_M.y / 2 + 0.5;             // ≈ 57.0
+    const view = { hw: reqHW, hh: reqHH };
 
     let renderer;
     try {
@@ -387,31 +421,47 @@ import * as THREE from 'three';
     rim.position.set(50, 30, 60);
     scene.add(rim);
 
-    /* --- coordinate helpers ------------------------------------------------- */
-    const worldX = gx => gx - 50;
+    /* --- coordinate helpers -------------------------------------------------
+       The camera is tilted 34° off vertical and the plane is pre-stretched by
+       exactly 1/cos(34°), so the two factors cancel and screen-up equals game-y
+       one-for-one. Across the pitch they do not: X is squashed by KX so that a
+       100 × 100 logic grid paints as a 105 × 68 m pitch. */
+    const worldX = gx => (gx - 50) * KX;
     const worldZ = gy => (50 - gy) * ZSTRETCH;     // gameY 100 → screen-up
-    const gameFromWorldX = x => x + 50;
+    const gameFromWorldX = x => x / KX + 50;
     const gameFromWorldZ = z => 50 - z / ZSTRETCH;
 
-    /* --- the 2D top-view pitch, drawn with Canvas2D and used as a plane texture --- */
+    /* --- the 2D top-view pitch, drawn with Canvas2D and used as a plane texture ---
+       Authored in real metres. The canvas is rectangular — 113 m along the playing
+       direction by 76 m across it — and matches the ground plane's screen aspect
+       exactly, so one canvas pixel is the same distance on both axes and every
+       radius drawn below comes out circular. m = 0 is the halfway line; +m points
+       at the goal the human attacks, which is the top of the image. */
     function makePitchTexture(px) {
-        const S = px / 100;                       // pixels per game unit
-        const X = gx => gx * S;
-        const Y = gy => (100 - gy) * S;           // canvas y is flipped: gameY 100 at image top
+        const M = px / GROUND_M.y;                // pixels per metre
+        const cw = Math.round(GROUND_M.x * M);    // 76 m across
+        const ch = px;                            // 113 m along
+        const X = m => cw / 2 + m * M;
+        const Y = m => ch / 2 - m * M;
+        const U = M * PITCH_M.y / 100;            // pixels per canonical game unit
         const c = document.createElement('canvas');
-        c.width = c.height = px;
+        c.width = cw; c.height = ch;
         const g = c.getContext('2d');
+
+        const W = PITCH_M.x / 2;                  // 34   — touchline
+        const GL = PITCH_M.y / 2;                 // 52.5 — goal line
 
         /* turf — a base green, then the mown cut in a lighter one. These values
            are deliberately darker than the finished pitch: the plane is shaded
            by the scene's hemisphere + key light, which add roughly a third more
            brightness on top of whatever is painted here. */
         g.fillStyle = '#1e4726';
-        g.fillRect(0, 0, px, px);
+        g.fillRect(0, 0, cw, ch);
         g.fillStyle = '#245229';
+        const band = GROUND_M.y / 10;             // ten cuts of 11.3 m
         for (let i = 0; i < 10; i++) {
             if (i % 2) continue;
-            g.fillRect(0, i * 10 * S, px, 10 * S);
+            g.fillRect(0, Y(GROUND_M.y / 2 - i * band), cw, band * M);
         }
 
         /* blades — thousands of short, jittered strokes. The mown bands on their
@@ -419,13 +469,13 @@ import * as THREE from 'three';
            surface look cut rather than printed. */
         g.save();
         g.globalAlpha = .16;
-        for (let i = 0; i < 4200; i++) {
-            const x = Math.random() * px, y = Math.random() * px;
+        for (let i = 0; i < 4600; i++) {
+            const x = Math.random() * cw, y = Math.random() * ch;
             g.strokeStyle = Math.random() < .52 ? '#2f6234' : '#173a1e';
             g.lineWidth = 1;
             g.beginPath();
             g.moveTo(x, y);
-            g.lineTo(x + (Math.random() - .5) * 1.8 * S, y - (1.2 + Math.random() * 3.4) * S);
+            g.lineTo(x + (Math.random() - .5) * 1.8 * U, y - (1.2 + Math.random() * 3.4) * U);
             g.stroke();
         }
         g.restore();
@@ -433,87 +483,88 @@ import * as THREE from 'three';
         /* daylight fall-off — shade gathering along the touchlines. Kept shallow:
            from a top-down camera a strong vignette reads as a spotlight. */
         [0, 1].forEach(axis => {
-            const edge = g.createLinearGradient(0, 0, axis ? px : 0, axis ? 0 : px);
+            const len = axis ? cw : ch;
+            const edge = g.createLinearGradient(0, 0, axis ? len : 0, axis ? 0 : len);
             edge.addColorStop(0, 'rgba(2,16,8,.30)');
             edge.addColorStop(.17, 'rgba(2,16,8,0)');
             edge.addColorStop(.83, 'rgba(2,16,8,0)');
             edge.addColorStop(1, 'rgba(2,16,8,.30)');
             g.fillStyle = edge;
-            g.fillRect(0, 0, px, px);
+            g.fillRect(0, 0, cw, ch);
         });
 
         /* worn goalmouths — a hint of scuffed, yellower grass where the play
            actually happens, which is what separates a pitch from a pattern. */
-        [4.5, 95.5].forEach(cy => {
-            const wear = g.createRadialGradient(X(50), Y(cy), 0, X(50), Y(cy), 20 * S);
+        [GL - 5.5, 5.5 - GL].forEach(cz => {
+            const wear = g.createRadialGradient(X(0), Y(cz), 0, X(0), Y(cz), 20 * M);
             wear.addColorStop(0, 'rgba(150,168,96,.12)');
             wear.addColorStop(.55, 'rgba(150,168,96,.05)');
             wear.addColorStop(1, 'rgba(150,168,96,0)');
             g.fillStyle = wear;
-            g.fillRect(0, 0, px, px);
+            g.fillRect(0, 0, cw, ch);
         });
 
         /* markings — paint on grass, so a hair off pure white rather than the
            hairline grey a dark board called for */
         g.strokeStyle = 'rgba(255,255,255,.75)';
         g.fillStyle = 'rgba(255,255,255,.75)';
-        g.lineWidth = Math.max(2, 0.26 * S);
+        g.lineWidth = Math.max(2, 0.26 * M);
         g.lineCap = 'round';
         const rect = (x0, y0, x1, y1) => {
             g.beginPath();
-            g.rect(X(x0), Y(y1), (x1 - x0) * S, (y1 - y0) * S);
+            g.rect(X(x0), Y(y1), (x1 - x0) * M, (y1 - y0) * M);
             g.stroke();
         };
         const line = (x0, y0, x1, y1) => {
             g.beginPath(); g.moveTo(X(x0), Y(y0)); g.lineTo(X(x1), Y(y1)); g.stroke();
         };
+        const spot = (cx, cy) => {
+            g.beginPath(); g.arc(X(cx), Y(cy), 0.45 * M, 0, Math.PI * 2); g.fill();
+        };
         const circle = (cx, cy, r, a0, a1) => {
-            g.beginPath(); g.arc(X(cx), Y(cy), r * S, a0 === undefined ? 0 : a0, a1 === undefined ? Math.PI * 2 : a1);
+            g.beginPath(); g.arc(X(cx), Y(cy), r * M, a0 === undefined ? 0 : a0, a1 === undefined ? Math.PI * 2 : a1);
             g.stroke();
         };
 
-        rect(2, 2, 98, 98);                     // touchlines
-        line(2, 50, 98, 50);                    // halfway
-        circle(50, 50, 9);                      // centre circle
-        g.beginPath(); g.arc(X(50), Y(50), 0.7 * S, 0, Math.PI * 2); g.fill();
+        rect(-W, -GL, W, GL);                   // touchlines
+        line(-W, 0, W, 0);                      // halfway
+        circle(0, 0, 9.15);                     // centre circle
+        spot(0, 0);                             // centre spot
 
         /* both penalty areas + six-yard boxes */
-        rect(31, 2, 69, 18); rect(32.5, 2, 67.5, 7.5);
-        rect(31, 82, 69, 98); rect(32.5, 92.5, 67.5, 98);
+        rect(-20.16, GL - 16.5, 20.16, GL); rect(-9.16, GL - 5.5, 9.16, GL);
+        rect(-20.16, -GL, 20.16, -(GL - 16.5)); rect(-9.16, -GL, 9.16, -(GL - 5.5));
 
-        /* penalty spots + arcs (arc bulges toward the centre of the pitch) */
-        [13, 87].forEach(spotY => {
-            g.beginPath(); g.arc(X(50), Y(spotY), 0.7 * S, 0, Math.PI * 2); g.fill();
-            const toEdge = Math.abs(18 - spotY);              // 5
-            const dx = Math.sqrt(Math.max(0, 9 * 9 - toEdge * toEdge));
-            const a1 = Math.atan2(Y(18) - Y(spotY) < 0 ? -toEdge * S : toEdge * S, dx * S);
-            // arc through the centre side
-            if (spotY < 50) circle(50, spotY, 9, -Math.PI + Math.abs(a1), -Math.abs(a1));
-            else circle(50, spotY, 9, Math.abs(a1), Math.PI - Math.abs(a1));
-        });
+        /* penalty spots + the "D" — the arc bulges back toward halfway, and only
+           the part outside the penalty area is drawn */
+        const SPOT = GL - 11, a = Math.acos(5.5 / 9.15);
+        spot(0, SPOT); spot(0, -SPOT);
+        circle(0, SPOT, 9.15, a - Math.PI / 2, Math.PI * 1.5 - a);
+        circle(0, -SPOT, 9.15, a - Math.PI * 1.5, Math.PI / 2 - a);
 
-        /* corner arcs */
-        [[2, 2, 0, Math.PI / 2], [98, 2, Math.PI / 2, Math.PI],
-        [98, 98, Math.PI, Math.PI * 1.5], [2, 98, Math.PI * 1.5, Math.PI * 2]]
+        /* corner arcs — canvas angles run clockwise from +x, and canvas +y is
+           toward halfway, so each quarter opens inward */
+        [[W, GL, Math.PI / 2, Math.PI], [W, -GL, Math.PI, Math.PI * 1.5],
+        [-W, -GL, Math.PI * 1.5, Math.PI * 2], [-W, GL, 0, Math.PI / 2]]
             .forEach(([cx, cy, a0, a1]) => circle(cx, cy, 1, a0, a1));
 
         /* goal nets (behind the goal lines, outside the pitch) */
-        function net(cx, side) {
-            const gw = PITCH.goalW, depth = 2.6;
-            const x0 = cx - gw / 2, x1 = cx + gw / 2;
-            const yA = side < 0 ? 2 - depth : 98, yB = side < 0 ? 2 : 98 + depth;
+        function net(side) {
+            const gw = 7.32, depth = 2;                 // metres
+            const x0 = -gw / 2, x1 = gw / 2;
+            const yIn = side < 0 ? -GL : GL, yOut = side < 0 ? -GL - depth : GL + depth;
             g.save();
             g.strokeStyle = 'rgba(255,255,255,.30)';
-            g.lineWidth = Math.max(1, 0.07 * S);
-            for (let i = 0; i <= 12; i++) line(x0 + (x1 - x0) * i / 12, yA, x0 + (x1 - x0) * i / 12, yB);
-            for (let i = 0; i <= 6; i++) line(x0, yA + (yB - yA) * i / 6, x1, yA + (yB - yA) * i / 6);
+            g.lineWidth = Math.max(1, 0.06 * M);
+            for (let i = 0; i <= 12; i++) line(x0 + (x1 - x0) * i / 12, yIn, x0 + (x1 - x0) * i / 12, yOut);
+            for (let i = 0; i <= 5; i++) line(x0, yIn + (yOut - yIn) * i / 5, x1, yIn + (yOut - yIn) * i / 5);
             g.restore();
             g.strokeStyle = 'rgba(255,255,255,.85)';
-            g.lineWidth = Math.max(3, 0.4 * S);
-            line(x0, side < 0 ? 2 : 98, x1, side < 0 ? 2 : 98);
+            g.lineWidth = Math.max(3, 0.35 * M);
+            line(x0, yIn, x1, yIn);
         }
-        net(50, +1);   // human's goal (gameY 0, image bottom)
-        net(50, -1);   // CPU's goal (gameY 100, image top)
+        net(+1);   // CPU's goal (gameY 100, image top)
+        net(-1);   // human's goal (gameY 0, image bottom)
 
         /* No ownership tint and no painted end labels. The half the player
            defends is already unambiguous — they attack up the screen, the kits
@@ -526,19 +577,22 @@ import * as THREE from 'three';
         return tex;
     }
 
-    /* the ground: a plane carrying the 2D top-view artwork */
+    /* the ground: a plane carrying the 2D top-view artwork. Its dimensions are
+       the run-off figure in metres converted to world units, so the plane and the
+       texture share one scale and the pitch is a true 105 × 68 m. */
     const pitchPlane = new THREE.Mesh(
-        new THREE.PlaneGeometry(100, 100 * ZSTRETCH),
-        new THREE.MeshLambertMaterial({ map: makePitchTexture(1280) })
+        new THREE.PlaneGeometry(GROUND_M.x * UPM, GROUND_M.y * UPM * ZSTRETCH),
+        new THREE.MeshLambertMaterial({ map: makePitchTexture(1695) })
     );
     pitchPlane.rotation.x = -Math.PI / 2;
     pitchPlane.position.y = 0;
     scene.add(pitchPlane);
 
-    /* a darker apron so the plane's edge never shows a hard seam */
+    /* the surround, painted in the renderer's own clear colour so the plane's
+       edge cannot show a seam — the ground simply fades into the void */
     const apron = new THREE.Mesh(
-        new THREE.PlaneGeometry(400, 400 * ZSTRETCH),
-        new THREE.MeshBasicMaterial({ color: 0x0a1a16 })
+        new THREE.PlaneGeometry(1200, 1200 * ZSTRETCH),
+        new THREE.MeshBasicMaterial({ color: 0x0e2413 })
     );
     apron.rotation.x = -Math.PI / 2;
     apron.position.y = -0.06;
@@ -548,7 +602,10 @@ import * as THREE from 'three';
     function makeGoal(gy) {
         const grp = new THREE.Group();
         const white = new THREE.MeshLambertMaterial({ color: 0xf2f7f4 });
-        const half = PITCH.goalW / 2, H = 3.0, depth = 2.6;
+        /* PITCH.goalW is on the canonical grid; KX converts it to world-x, where
+           it comes out at exactly 7.32 m. */
+        const gw = PITCH.goalW * KX;
+        const half = gw / 2, H = 3.0, depth = 2.2;
         const post = (x, z) => {
             const m = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, H, 10), white);
             m.position.set(x, H / 2, z);
@@ -563,8 +620,8 @@ import * as THREE from 'three';
         };
         const zLine = worldZ(gy), zBack = worldZ(gy + (gy >= 50 ? depth : -depth));
         post(-half, zLine); post(half, zLine); post(-half, zBack); post(half, zBack);
-        bar(0, H, zLine, PITCH.goalW + 0.5);
-        bar(0, H * .62, zBack, PITCH.goalW + 0.5);
+        bar(0, H, zLine, gw + 0.34);
+        bar(0, H * .62, zBack, gw + 0.34);
         /* side struts */
         [-1, 1].forEach(s => {
             const m = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, Math.hypot(depth * ZSTRETCH, H * .38), 6), white);
@@ -931,12 +988,9 @@ import * as THREE from 'three';
     })();
 
     function shake(amount) { state.trauma = clamp(state.trauma + amount, 0, 1); }
-    const flashEl = document.getElementById('flash');
-    function flash(color, strength) {
-        flashEl.style.background = color;
-        flashEl.style.opacity = String(strength * (state.reduceMotion ? 0.4 : 1));
-        setTimeout(() => { flashEl.style.opacity = '0'; }, 90);
-    }
+    /* Every piece of transient feedback lives in the HUD docks or on the renderer
+       itself. Nothing is drawn over the ground: the turf carries the ball and the
+       players and nothing else. */
     const bannerEl = document.getElementById('banner');
     function banner(text, color) {
         bannerEl.textContent = text;
@@ -951,7 +1005,8 @@ import * as THREE from 'three';
        ========================================================================== */
     const el = id => document.getElementById(id);
     const ui = {
-        hud: el('hud'), role: el('role-badge'), poss: el('possession-chip'),
+        hudTop: el('hud-top'), hudBottom: el('hud-bottom'),
+        role: el('role-badge'), poss: el('possession-chip'),
         scoreYou: el('score-you').querySelector('strong'),
         scoreCpu: el('score-cpu').querySelector('strong'),
         plays: el('plays'), timerNum: el('timer-num'), timerWrap: el('timer-wrap'), timerBar: el('timer-bar'),
@@ -975,7 +1030,7 @@ import * as THREE from 'three';
         ui.scoreCpu.textContent = state.cpuScore;
     });
     bus.on('plays', () => {
-        ui.plays.textContent = 'PLAY ' + Math.min(state.plays + 1, T.maxPlays) + ' / ' + T.maxPlays;
+        ui.plays.textContent = 'PLAY ' + (state.plays + 1);
     });
     bus.on('role', () => {
         const attacking = state.possession === 'you';
@@ -1022,7 +1077,9 @@ import * as THREE from 'three';
         return name;
     }
     bus.on('screen', name => {
-        ui.hud.hidden = !(name === null || name === 'pause');
+        const show = name === null || name === 'pause';
+        ui.hudTop.hidden = !show;
+        ui.hudBottom.hidden = !show;
         if (name === null) ui.pause.textContent = '❙❙';
     });
 
@@ -1031,7 +1088,7 @@ import * as THREE from 'three';
        ========================================================================== */
     function beginMatch() {
         state.humanScore = 0; state.cpuScore = 0; state.plays = 0;
-        state.possession = 'you'; state.progress = 0.05;
+        state.possession = 'you'; state.progress = 0.05; state.kickoff = true;
         state.seed = (Math.random() * 1e9) | 0;
         state.outcome = null; state.phase = 'over';
         state.trauma = 0; state.timeScale = 1;
@@ -1055,10 +1112,18 @@ import * as THREE from 'three';
         const goal = goalFor(atk);
         const rng = mulberry32(hashSeed(state.seed, state.plays, 11));
 
-        /* carrier */
+        /* carrier — a kick-off places it on the centre spot; every other play
+           resumes wherever the previous one left possession */
         const carrier = teamOutfield(atk)[0];
-        const cx = clamp(50 + randRange(rng, -6, 6), 12, 88);
-        const cy = carrierY(atk, state.progress);
+        let cx, cy;
+        if (state.kickoff) {
+            state.kickoff = false;
+            state.progress = 0.5;
+            cx = 50; cy = 50;
+        } else {
+            cx = clamp(50 + randRange(rng, -6, 6), 12, 88);
+            cy = carrierY(atk, state.progress);
+        }
         setPos(carrier, cx, cy);
         teamOutfield(atk).forEach(p => { p.hasBall = false; p.guess = null; });
         carrier.hasBall = true;
@@ -1222,20 +1287,17 @@ import * as THREE from 'three';
             d.dest = { x: res.at.x, y: res.at.y };
             d.speed = T.playerSpeed;
             Sfx.bad(); shake(.32);
-            if (!state.reduceMotion) flash(CSS.bad, .18);
             banner('INTERCEPTED', CSS.bad);
             bus.emit('log', { text: 'Intercepted by ' + d.label + '!', cls: 'bad' });
         } else if (res.type === 'GOAL') {
             ball.to = { x: Tp.x, y: Tp.y };
             Sfx.goal(); shake(.75);
-            if (!state.reduceMotion) flash(CSS.goal, .34);
             banner('GOAL!', CSS.goal);
             bus.emit('log', { text: 'GOAL for ' + (PLAY.attacker === 'you' ? 'you' : 'CPU') + '!', cls: PLAY.attacker === 'you' ? 'good' : 'bad' });
         } else if (res.type === 'SAVE') {
             ball.to = { x: PLAY.keeper.x, y: PLAY.keeper.y };
             PLAY.keeper.dest = { x: Tp.x, y: Tp.y };
             Sfx.save(); shake(.22);
-            if (!state.reduceMotion) flash(CSS.cpu, .12);
             banner('SAVED', CSS.warn);
             bus.emit('log', { text: 'Keeper saves it!', cls: PLAY.attacker === 'you' ? 'bad' : 'good' });
         } else {
@@ -1264,6 +1326,7 @@ import * as THREE from 'three';
             bus.emit('score');
             state.possession = other(atk);      // kickoff to the conceding side
             state.progress = 0.05;
+            state.kickoff = true;               // …from the centre spot
             Sfx.whistle();
         } else if (res.type === 'SAVE') {
             state.possession = other(atk);
@@ -1274,7 +1337,7 @@ import * as THREE from 'three';
     function endOfPlay() {
         state.plays++;
         bus.emit('plays');
-        const done = state.humanScore >= T.winScore || state.cpuScore >= T.winScore || state.plays >= T.maxPlays;
+        const done = state.humanScore >= T.winScore || state.cpuScore >= T.winScore;
         if (done) return endMatch();
         beginSetup();
     }
@@ -1285,8 +1348,7 @@ import * as THREE from 'three';
         const draw = state.humanScore === state.cpuScore;
         el('over-title').textContent = draw ? 'DRAW ' + state.humanScore + '–' + state.cpuScore
             : (won ? 'YOU WIN ' : 'CPU WINS ') + state.humanScore + '–' + state.cpuScore;
-        el('over-detail').textContent = state.plays + ' of ' + T.maxPlays + ' plays used · ' +
-            (state.humanScore >= T.winScore || state.cpuScore >= T.winScore ? 'decided by the 3-goal rule' : 'decided by the play cap');
+        el('over-detail').textContent = state.plays + ' plays · first to ' + T.winScore + ' goals.';
         bus.emit('log', { text: draw ? 'Full time: draw.' : (won ? 'Full time: you win!' : 'Full time: CPU wins.'), cls: won ? 'good' : 'bad' });
         pushScreen('over', { focus: '#btn-again' });
     }
@@ -1305,7 +1367,9 @@ import * as THREE from 'three';
     function canvasPoint(e) {
         const r = canvas.getBoundingClientRect();
         const px = e.clientX - r.left, py = e.clientY - r.top;
-        const gx = 50 + ((px / r.width) * 2 - 1) * view.hw;
+        /* view.hw is in screen units, where x is already compressed by KX —
+           divide it back out to land on the canonical 0…100 grid */
+        const gx = 50 + ((px / r.width) * 2 - 1) * view.hw / KX;
         const gy = 50 + (1 - (py / r.height) * 2) * view.hh;
         return { x: gx, y: gy, px, py, rect: r };
     }
@@ -1313,7 +1377,7 @@ import * as THREE from 'three';
 
     function hitTest(p, pt, rect) {
         const r = screenRadius(rect);
-        const a = { x: (p.x - 50 + view.hw) / (2 * view.hw) * rect.width, y: (1 - (p.y - 50 + view.hh) / (2 * view.hh)) * rect.height };
+        const a = { x: ((p.x - 50) * KX + view.hw) / (2 * view.hw) * rect.width, y: (1 - (p.y - 50 + view.hh) / (2 * view.hh)) * rect.height };
         return Math.hypot(a.x - pt.px, a.y - pt.py) <= r;
     }
     function pickPlayer(pt) {
@@ -1321,7 +1385,7 @@ import * as THREE from 'three';
         const r = screenRadius(pt.rect);
         allPlayers.forEach(p => {
             const a = {
-                x: (p.x - 50 + view.hw) / (2 * view.hw) * pt.rect.width,
+                x: ((p.x - 50) * KX + view.hw) / (2 * view.hw) * pt.rect.width,
                 y: (1 - (p.y - 50 + view.hh) / (2 * view.hh)) * pt.rect.height
             };
             const d = Math.hypot(a.x - pt.px, a.y - pt.py);
@@ -1634,10 +1698,13 @@ import * as THREE from 'three';
     }
 
     function resize() {
+        /* The canvas fills the stage, so its box decides the fit. reqHW/reqHH are
+           the ground's own half-extents in screen units; the branch below is a
+           contain policy, so the whole 105 × 68 m pitch — goals included — is
+           visible at every aspect ratio, with slack on whichever axis is spare. */
         const w = canvas.clientWidth || window.innerWidth;
         const h = canvas.clientHeight || window.innerHeight;
         const aspect = w / h;
-        const reqHW = 53, reqHH = 56;
         let hw, hh;
         if (aspect >= reqHW / reqHH) { hh = reqHH; hw = reqHH * aspect; }
         else { hw = reqHW; hh = reqHW / aspect; }

@@ -42,73 +42,79 @@ import '../styles/global.css';
         </div>
     </noscript>
 
-    <!-- ========================= THE PITCH =========================
-         One WebGL canvas: 3D characters standing on a 2D top-view board. -->
-    <canvas id="scene" aria-label="Football pitch, top-down view with 3D players"></canvas>
+    <!--  ======================= APP SHELL =======================
+          A column of three stacked bands: a top dock, the stage, a bottom dock.
+          The docks are flow siblings of the stage rather than overlays, so at any
+          viewport size they can only ever push the pitch smaller — never cover
+          it. Nothing in the game is ever drawn on top of the ground.  -->
+    <div id="app">
+        <!-- ============================== HUD (TOP) ============================== -->
+        <header id="hud-top" hidden>
+            <div class="dock">
+                <div class="cluster">
+                    <!-- NOTE: the engine assigns #role-badge.className outright, so it
+                         carries no other class. Same for #possession-chip. -->
+                    <span id="role-badge" class="attack">ATTACK</span>
+                    <span id="possession-chip" class="chip you"><i class="dot"></i>YOU · BALL</span>
 
-    <!-- ============================== HUD ============================== -->
-    <div id="hud" hidden>
-        <div class="row row-top">
-            <div class="cluster">
-                <!-- NOTE: the engine assigns #role-badge.className outright, so it
-                     carries no other class. Same for #possession-chip. -->
-                <span id="role-badge" class="attack">ATTACK</span>
-                <span id="possession-chip" class="chip you"><i class="dot"></i>YOU · BALL</span>
-
-                <span class="panel scoreboard" aria-label="Score">
-                    <span class="score" id="score-you"><strong>0</strong><span class="hud-label">You</span></span>
-                    <span class="vs">VS</span>
-                    <span class="score" id="score-cpu"><strong>0</strong><span class="hud-label">Cpu</span></span>
-                </span>
-            </div>
-
-            <div class="cluster">
-                <span class="panel panel-flush">
-                    <span class="hud-label" id="plays">PLAY 1 / 24</span>
-                    <span id="timer-num" class="tnum">3.0</span>
-                </span>
-
-                <div class="segmented" id="difficulty" role="group" aria-label="CPU difficulty">
-                    <button type="button" data-diff="0.15" aria-pressed="false">COIN-FLIP</button>
-                    <button type="button" data-diff="0.6" aria-pressed="true">SHARP</button>
-                    <button type="button" data-diff="1" aria-pressed="false">RUTHLESS</button>
+                    <span class="panel scoreboard" aria-label="Score">
+                        <span class="score" id="score-you"><strong>0</strong><span class="hud-label">You</span></span>
+                        <span class="vs">VS</span>
+                        <span class="score" id="score-cpu"><strong>0</strong><span class="hud-label">Cpu</span></span>
+                    </span>
                 </div>
 
-                <button type="button" class="btn-icon" id="btn-mute" aria-pressed="false" title="Mute (M)"
-                    aria-label="Mute sound">♪</button>
-                <button type="button" class="btn-icon" id="btn-pause" title="Pause (Esc)" aria-label="Pause">❙❙</button>
-            </div>
-        </div>
+                <div class="cluster">
+                    <span class="panel panel-flush">
+                        <span class="hud-label" id="plays">PLAY 1</span>
+                        <span id="timer-num" class="tnum">3.0</span>
+                    </span>
 
-        <!-- The decision window rides directly under the top row. It used to sit
-             on a vertically-centred row, which put the bar across the middle of
-             the pitch; anchored here it stays off the play area entirely. -->
-        <div class="row row-timer">
-            <div class="panel panel-timer">
-                <span class="hud-label">Decision window</span>
-                <div id="timer-wrap"><span id="timer-bar"></span></div>
-            </div>
-        </div>
+                    <div class="segmented" id="difficulty" role="group" aria-label="CPU difficulty">
+                        <button type="button" data-diff="0.15" aria-pressed="false">COIN-FLIP</button>
+                        <button type="button" data-diff="0.6" aria-pressed="true">SHARP</button>
+                        <button type="button" data-diff="1" aria-pressed="false">RUTHLESS</button>
+                    </div>
 
-        <div class="row row-bottom">
-            <div class="cluster">
-                <div class="panel" id="log-panel">
-                    <span class="hud-label">Match log</span>
-                    <ul id="log"></ul>
+                    <button type="button" class="btn-icon" id="btn-mute" aria-pressed="false" title="Mute (M)"
+                        aria-label="Mute sound">♪</button>
+                    <button type="button" class="btn-icon" id="btn-pause" title="Pause (Esc)" aria-label="Pause">❙❙</button>
                 </div>
-                <p id="instruction">Swipe from the carrier to a teammate to pass.</p>
             </div>
+        </header>
 
-            <div class="cluster">
-                <button type="button" class="btn-ghost-sm" id="btn-help">HOW TO PLAY</button>
-                <button type="button" class="btn-primary-sm" id="btn-lock">LOCK IN ⏎</button>
+        <!-- ========================= THE PITCH =========================
+             One WebGL canvas: 3D characters standing on a 2D top-view board.
+             The stage holds the canvas and nothing else. -->
+        <section id="stage">
+            <canvas id="scene" aria-label="Football pitch, top-down view with 3D players"></canvas>
+        </section>
+
+        <!-- ============================== HUD (BOTTOM) ============================== -->
+        <footer id="hud-bottom" hidden>
+            <div class="dock">
+                <div class="cluster">
+                    <div class="panel" id="log-panel">
+                        <span class="hud-label">Match log</span>
+                        <ul id="log"></ul>
+                    </div>
+                    <p id="instruction">Swipe from the carrier to a teammate to pass.</p>
+                </div>
+
+                <div class="cluster">
+                    <span class="panel panel-timer">
+                        <span class="hud-label">Decision window</span>
+                        <div id="timer-wrap"><span id="timer-bar"></span></div>
+                    </span>
+
+                    <div id="banner" aria-live="polite"></div>
+
+                    <button type="button" class="btn-ghost-sm" id="btn-help">HOW TO PLAY</button>
+                    <button type="button" class="btn-primary-sm" id="btn-lock">LOCK IN ⏎</button>
+                </div>
             </div>
-        </div>
+        </footer>
     </div>
-
-    <!-- ====================== FEEDBACK LAYERS ====================== -->
-    <div id="banner" aria-live="polite"></div>
-    <div id="flash"></div>
 
     <!-- ============================== SCREENS ============================== -->
     <div class="screen" id="screen-menu">
@@ -122,7 +128,7 @@ import '../styles/global.css';
 
             <ul class="spec-list">
                 <li>Low-poly <strong>3D players</strong> standing on a <strong>2D top-view pitch</strong>.</li>
-                <li>First to <strong>3 goals</strong> wins · hard cap of <strong>24 plays</strong>.</li>
+                <li>First to <strong>3 goals</strong> wins. Play as long as it takes.</li>
                 <li>Every pass resolved by the canonical <strong>geometric + guess-bonus</strong> algorithm (§4).</li>
             </ul>
 

@@ -17,9 +17,9 @@ Each play runs the same four-state machine (canonical **§3**):
    The window is keyed off a real-clock timestamp, so slow-motion never steals your time.
 3. **RESOLVE** — the ball travels and the canonical **§4** resolution decides
    `COMPLETE` / `INTERCEPTION` / `GOAL` / `SAVE`.
-4. **RESULT** (1.05 s) — outcome flash, banner, log entry, then the next play.
+4. **RESULT** (1.05 s) — outcome banner, log entry, then the next play.
 
-First to **3 goals** wins. Hard cap of **24 plays**. You always attack the bottom goal; the CPU always attacks the top goal.
+First to **3 goals** wins — there is no play cap, so a match runs as long as it takes. You always attack the bottom goal; the CPU always attacks the top goal.
 
 ---
 
@@ -38,11 +38,14 @@ First to **3 goals** wins. Hard cap of **24 plays**. You always attack the botto
   (defender guess / carrier aim / teammate reposition / empty-pitch reposition) and a tap fallback.
 - **Deterministic.** Every random draw routes through a seeded `mulberry32` PRNG.
 - **Weighted CPU.** Difficulty is a 0–1 blend against the naive coin-flip baseline: COIN-FLIP / SHARP / RUTHLESS.
-- **Feel.** Camera-trauma shake, outcome flash, banner, slow-motion applied to presentation only,
+- **Feel.** Camera-trauma shake, an outcome banner, slow-motion applied to presentation only,
   and a Web Audio synth for kick / pass / good / bad / goal / save / whistle.
 - **Accessible HUD.** Anchors-and-containers layout, `clamp()` type, ≥44 px tap targets,
   `env(safe-area-inset-*)`, a screen stack with initial focus per screen and `Escape` to go back,
   and event-driven DOM updates instead of per-frame polling.
+- **Nothing is ever drawn on the ground.** The top and bottom docks are flow siblings of the stage,
+  not overlays on it, so at every viewport size the chrome can only ever push the pitch smaller.
+  The turf carries the players and the ball and nothing else.
 - **One design system.** Every surface — HUD, screens, buttons, the pitch palette — reads from the tokens in
   [`DESIGN.md`](DESIGN.md) (Vercel / Geist): a black-and-white duet on a near-white canvas, 1px hairlines,
   6 px app squares versus 100 px marketing pills, and colour permitted only as small accent marks and the

@@ -22,10 +22,10 @@
     --x-cpu: #eb367f;
     --x-aim: #f5a623;
 
-    /* The turf the 3D players stand on. Mirrors the engine's ground texture and
-       the renderer's clear colour, so neither the first frame nor a resize gap
-       ever flashes a different green. */
-    --pitch-turf: #16301a;
+    /* The apron around the pitch. This must equal the engine's renderer clear
+       colour AND its apron colour exactly (0x0e2413), so neither the first frame
+       nor a resize gap ever flashes a different green. */
+    --pitch-turf: #0e2413;
 
     --sa-t: env(safe-area-inset-top, 0px);
     --sa-r: env(safe-area-inset-right, 0px);
@@ -48,11 +48,47 @@ body {
 }
 
 /* ============================================================================
-   THE PITCH — a single WebGL canvas: 3D characters on a 2D top-view board
+   THE APP SHELL — a column of three bands: top dock / stage / bottom dock
+   ----------------------------------------------------------------------------
+   The docks are *flow siblings* of the stage, never overlays on it. The stage
+   therefore takes whatever height the docks leave, so at any viewport size the
+   chrome can only push the pitch smaller — it can never cover any part of the
+   ground. The turf carries the players and the ball and nothing else.
    ========================================================================= */
 
-#scene {
+#app {
     position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    /* NOTE: the shell must stay hit-testable — it contains the canvas, which owns
+       every drag gesture. Only the docks are made inert, below. */
+}
+
+/* The docks are inert so a stray tap on a panel does not reach the pitch (or the
+   ground's drag handler); their controls opt back in individually. */
+#hud-top,
+#hud-bottom {
+    pointer-events: none;
+}
+
+#app button,
+#app .segmented {
+    pointer-events: auto;
+}
+
+/* The stage: the only band that grows, and the only thing in it is the canvas */
+#stage {
+    position: relative;
+    flex: 1 1 auto;
+    /* a flex item will not shrink below its content height without this, which
+       would let the canvas push the bottom dock off the bottom of the screen */
+    min-height: 0;
+}
+
+#scene {
+    position: absolute;
     inset: 0;
     display: block;
     width: 100%;
@@ -67,58 +103,41 @@ body {
     cursor: grabbing;
 }
 
-/* ============================================================================
-   HUD — overlay; inert by default, interactive children opt back in
-   ========================================================================= */
+/* --- the two docks ------------------------------------------------------ */
 
-#hud {
-    position: fixed;
-    inset: 0;
-    z-index: 10;
-    display: flex;
-    flex-direction: column;
-    /* Top-anchored. Everything stacks down from the top edge and the bottom row
-       is pushed to the foot with `margin-top: auto`, so the centre of the screen
-       — which is the centre of the pitch — is never covered by chrome. */
-    justify-content: flex-start;
-    gap: var(--s-xs);
-    padding: calc(var(--hud-pad) + var(--sa-t)) calc(var(--hud-pad) + var(--sa-r)) calc(var(--hud-pad) + var(--sa-b)) calc(var(--hud-pad) + var(--sa-l));
-    pointer-events: none;
+#hud-top,
+#hud-bottom {
+    flex: 0 0 auto;
+    /* horizontal safe-area only; the vertical insets belong to the outermost
+       edge of each dock, so they are applied separately below */
+    padding-left: calc(var(--hud-pad) + var(--sa-l));
+    padding-right: calc(var(--hud-pad) + var(--sa-r));
 }
 
-#hud[hidden] {
+#hud-top {
+    padding-top: calc(var(--hud-pad) + var(--sa-t));
+}
+
+#hud-bottom {
+    padding-bottom: calc(var(--hud-pad) + var(--sa-b));
+}
+
+#hud-top[hidden],
+#hud-bottom[hidden] {
     display: none;
 }
 
-#hud button,
-#hud .segmented {
-    pointer-events: auto;
-}
-
-.row {
+/* One row of clusters per dock: identity on the left, controls on the right */
+.dock {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
     gap: var(--s-xs);
 }
 
-.row-top {
-    justify-content: space-between;
-    align-items: flex-start;
-    flex-wrap: wrap;
-}
-
-.row-bottom {
-    justify-content: space-between;
+#hud-bottom .dock {
     align-items: flex-end;
-    gap: var(--s-sm);
-    /* #hud is top-anchored now, so the foot has to claim its own space */
-    margin-top: auto;
-}
-
-/* The decision-window strip: a centred line directly under the top row, so the
-   timer always sits in the same place and never crosses the pitch's midline. */
-.row-timer {
-    justify-content: center;
 }
 
 .cluster {
@@ -404,42 +423,46 @@ button:disabled:active {
 }
 
 /* ============================================================================
-   OUTCOME BANNER + FLASH — feedback only, kept monochrome and typographic
+   OUTCOME BANNER
+   ----------------------------------------------------------------------------
+   It used to sit in the middle of the screen, which meant it sat in the middle
+   of the pitch. It is now one more chip in the bottom dock: it can only push the
+   ground smaller, never cover it. It is deliberately an *ink* chip — the engine
+   writes an accent colour into it per outcome, and those accents (mint, pink,
+   amber) are illegible on the light panel language but read well on ink.
    ========================================================================= */
 
 #banner {
-    position: fixed;
-    left: 50%;
-    top: 32%;
-    z-index: 20;
-    transform: translate(-50%, -50%) scale(0.94);
-    opacity: 0;
-    pointer-events: none;
-    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 14px;
+    border-radius: var(--r-pill-category);
+    background: var(--c-ink);
+    border: 1px solid var(--c-ink);
+    box-shadow: var(--e-1);
     font-family: var(--f-sans);
     font-weight: 600;
-    font-size: clamp(1.5rem, 6.4vmin, 3.5rem);
-    letter-spacing: -0.035em;
-    line-height: 1.02;
-    color: var(--c-canvas);
-    text-shadow: 0 2px 24px rgba(0, 0, 0, 0.55);
+    font-size: var(--t-body-sm-size);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    /* the engine sets `style.color` per outcome; this is only the fallback */
+    color: var(--c-on-primary);
+    opacity: 0;
+    transform: translateY(4px);
     transition: opacity 0.14s ease, transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 #banner.show {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translateY(0);
 }
 
-#flash {
-    position: fixed;
-    inset: 0;
-    z-index: 15;
-    pointer-events: none;
-    opacity: 0;
-    background: var(--c-canvas);
-    mix-blend-mode: overlay;
-    transition: opacity 0.1s linear;
+/* The chip is empty most of the time. With no text it must have no box at all,
+   or it would reserve a dark slab in the dock the whole match. */
+#banner:empty {
+    display: none;
 }
 
 /* ============================================================================
@@ -604,9 +627,9 @@ button:disabled:active {
         max-width: 58vw;
     }
 
-    .row-bottom {
+    #hud-bottom .dock {
         align-items: stretch;
-        flex-direction: column;
+        flex-direction: column-reverse;
         gap: var(--s-xs);
     }
 
@@ -618,7 +641,21 @@ button:disabled:active {
 @media (max-width: 480px) {
     #log-panel {
         display: none;
-        /* the log is a luxury at this width; the banner carries it */
+        /* the log is a luxury at this width; the pitch matters more */
+    }
+
+    /* one cluster per line, and the dock is already column-reversed, so the
+       controls end up as the bottom-most band — closest to the thumb */
+    #hud-bottom .cluster,
+    #hud-top .cluster {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    #hud-bottom .cluster::-webkit-scrollbar,
+    #hud-top .cluster::-webkit-scrollbar {
+        display: none;
     }
 }
 
