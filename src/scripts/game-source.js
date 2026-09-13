@@ -53,13 +53,19 @@ import {
     } = RULES;
 
     /* --- presentation / feel: safe to tune, changes no mechanic --- */
-    const SETUP_TIME = 0.85;      // kick-off / restart rearrange, seconds
+    const SETUP_TIME = 1.15;      // kick-off / restart rearrange, seconds
+    const ASSEMBLE_SPEED = 15;    // how fast the shape walks out for a restart.
+    // A jog, not a sprint: "everyone explodes into position" was a large part of
+    // why the board read as too fast.
     const ARC_PASS = 1.0, ARC_SHOT = 0.5;
     const LANE_OFFSET = [-30, -14, 14, 30];
     const LANE_DEPTH = [0.55, 0.82, 0.62, 0.34];
     const TAP_SLOP = 6;           // game units a pointer must travel to be a drag
     const DOUBLE_TAP_MS = 340;    // §5 — double-tap to shoot
     const SO_ZOOM = 2.6, SO_PAN_Y = 92;   // §10 penalty view: one end, magnified
+    /* --- §11.b the coached opening --------------------------------------- */
+    const TUTOR_DELAY = 1.6;      // seconds of open play before step 1 speaks
+    const TUTOR_STEP_MS = 20000;  // a step may never hold the match up for longer
 
     /* ==========================================================================
        § 0.b PALETTE — re-skinned to the DESIGN.md (Vercel / Geist) accent family.
@@ -126,10 +132,16 @@ import {
         pendingHalf: false,   // clock expired; wait for the ball to die
         difficulty: 0.6,      // CPU reading of the game, 0 silly … 1 ruthless
         seed: 0,
-        trauma: 0,
         paused: false,
         phaseT: 0,            // seconds in the current dead-ball beat
-        reduceMotion: !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+        /* §11.b — the coached opening. `tutor` is the step the player is being
+           asked for (1–4), `tutorTargets` the players that step refers to,
+           `tutorClock` the watchdog, and `tutorDone` latches the walkthrough so
+           it can never arm twice in a match. */
+        tutor: 0,
+        tutorTargets: null,
+        tutorClock: 0,
+        tutorDone: false
     };
 
     /* Tiny event bus so the HUD is event-driven, not polled. */
@@ -161,17 +173,30 @@ import {
     const MY = 100 / PITCH_M.y;                     // game-y units per metre
     const KX = PITCH_M.x / PITCH_M.y;               // world-x compression (~0.648)
     const UPM = 100 / PITCH_M.y;                    // world units per metre (~0.952)
+    /* Real metres per canonical unit. This pitch is anamorphic: the logic grid
+       is a 100 × 100 square stretched onto 68 × 105 m, so one x unit is 0.68 m
+       while one y unit is 1.05 m. Every width along the goal line therefore has
+       to be multiplied by these, never treated as if a unit were a metre. */
+    /* metres per canonical unit — the grid is 100 units over each axis */
+    const M_X = PITCH_M.x / 100;                    // 0.68 m per game-x unit
+    const M_Y = PITCH_M.y / 100;                    // 1.05 m per game-y unit
+    /* The mouth, in real metres. §2 puts it at 2 × GOAL_HALF_WIDTH on the
+       canonical grid and one canonical x unit is M_X metres, so the mouth is
+       25 × 0.68 = 17 m — NOT 25 m. Reading a canonical unit as a metre is what
+       made the frames (and the area beside them) far too big. */
+    const GOAL_HALF_M = GOAL_HALF_WIDTH * M_X;      // 8.5 m
     const PITCH = {
         w: 100,
         h: 100,
-        /* The mouth the 3D frames must span. §2 puts it at 2 × GOAL_HALF_WIDTH
-           on the canonical grid, so the rulebook — not a metre conversion —
-           decides how wide a goal is. */
-        goalW: GOAL_HALF_WIDTH * 2,
-        boxW: 40.32 * MX,
-        boxD: 16.5 * MY,
-        sixW: 18.32 * MX,
-        sixD: 5.5 * MY
+        goalW: GOAL_HALF_WIDTH * 2,                 // 25 canonical units
+        /* Everything below is authored in real metres, so the painted artwork
+           and the 3D furniture finally agree with each other and the rulebook. */
+        boxW: 40.32, boxD: 16.5,                    // penalty area
+        /* The goal area — the "small D" — is *exactly* the mouth wide: the posts
+           stand on the area's side lines. That is what "the size of the post
+           should be the same as the small D area" asks for. */
+        sixW: GOAL_HALF_M * 2,                      // 17 m — the mouth itself
+        sixD: 5.5
     };
     const GOAL = {
         you: { x: 50, y: 100 },  // the goal the human attacks (CPU's goal)
@@ -337,9 +362,12 @@ import {
         circle(0, 0, 9.15);                     // centre circle
         spot(0, 0);                             // centre spot
 
-        /* both penalty areas + six-yard boxes */
-        rect(-20.16, GL - 16.5, 20.16, GL); rect(-9.16, GL - 5.5, 9.16, GL);
-        rect(-20.16, -GL, 20.16, -(GL - 16.5)); rect(-9.16, -GL, 9.16, -(GL - 5.5));
+        /* both penalty areas + goal areas. The small box is exactly as wide as
+           the goal mouth — 2 × GOAL_HALF_M metres, centred on x = 50 — so the
+           3D frame standing on it is precisely as wide as the area it sits in. */
+        const sw = GOAL_HALF_M, bw = PITCH.boxW / 2, bd = PITCH.boxD, sd = PITCH.sixD;
+        rect(-bw, GL - bd, bw, GL); rect(-sw, GL - sd, sw, GL);
+        rect(-bw, -GL, bw, -(GL - bd)); rect(-sw, -GL, sw, -(GL - sd));
 
         /* penalty spots + the "D" — the arc bulges back toward halfway, and only
            the part outside the penalty area is drawn */
@@ -355,9 +383,10 @@ import {
             .forEach(([cx, cy, a0, a1]) => circle(cx, cy, 1, a0, a1));
 
         /* goal nets (behind the goal lines, outside the pitch). Painted at the
-           rulebook's mouth width so the 2D net and the 3D frame agree. */
+           goal's true width — the same 17 m the 3D frame spans and the same
+           17 m the goal area beside it is drawn at, so all three agree. */
         function net(side) {
-            const gw = PITCH.goalW * MX, depth = 2;     // metres
+            const gw = GOAL_HALF_M * 2, depth = 2;      // metres — the mouth itself
             const x0 = -gw / 2, x1 = gw / 2;
             const yIn = side < 0 ? -GL : GL, yOut = side < 0 ? -GL - depth : GL + depth;
             g.save();
@@ -409,10 +438,11 @@ import {
     function makeGoal(gy) {
         const grp = new THREE.Group();
         const white = new THREE.MeshLambertMaterial({ color: 0xf2f7f4 });
-        /* PITCH.goalW is the rulebook's mouth on the canonical grid; MX converts
-           it to metres and KX back to world-x, so the frame spans exactly the
-           width the geometry tests use. */
-        const gw = PITCH.goalW * MX * KX;
+        /* PITCH.goalW is the rulebook's mouth on the canonical grid (x axis);
+           KX is the world-x compression, so worldZ/worldX-space gets exactly
+           the width the geometry tests use — 25 × 0.648 ≈ 16.2 world units, the
+           same span as the goal area painted at its foot. */
+        const gw = PITCH.goalW * KX;
         const half = gw / 2, H = 3.0, depth = 2.2;
         const post = (x, z) => {
             const m = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, H, 10), white);
@@ -836,7 +866,13 @@ import {
         };
     })();
 
-    function shake(amount) { state.trauma = clamp(state.trauma + amount, 0, 1); }
+    /* The camera is fixed. It used to take a fresh random offset every frame
+       whenever an event kicked it, which from a directly-overhead board read as
+       the whole pitch trembling — besides being the exact "shake driving the
+       follow target" trap the camera guidance warns about. Nothing moves the
+       ground now; feedback lives in the banner, the log and the audio. This
+       stays as a named no-op so the call sites still read as intent. */
+    function shake(_amount) { /* deliberately does nothing */ }
     /* Every piece of transient feedback lives in the HUD docks or on the
        renderer itself. Nothing is drawn over the ground: the turf carries the
        ball and the players and nothing else. */
@@ -891,8 +927,8 @@ import {
         ui.poss.className = 'chip ' + state.possession;
         ui.poss.innerHTML = '<i class="dot"></i>' + (state.possession === 'you' ? 'YOU · BALL' : 'CPU · BALL');
         ui.instruction.textContent = attacking
-            ? 'Drag from the ball-carrier toward a teammate and release to pass · double-tap the goal mouth to shoot.'
-            : 'Drag your interceptor and marker to close the lane · drag your keeper to set the dive.';
+            ? 'You attack the TOP goal — drag from the ball-carrier into space and release · double-tap the goal mouth to shoot.'
+            : 'You defend the BOTTOM goal — drag your interceptor and marker to close the lane · drag your keeper to set the dive.';
     });
     bus.on('log', d => pushLog(d.text, d.cls));
     bus.on('half', () => {
@@ -943,32 +979,90 @@ import {
        interception never resets — possession flips where the ball was cut out.
        ========================================================================== */
 
+    /* --- §11.b THE COACHED OPENING -------------------------------------------
+       The first kick-off is the only place the game stops to teach, and it
+       teaches by doing: each step below is checked against what actually
+       happened on the pitch, never against a button press. The old restart put
+       *both* teams in the half being attacked, which left the human's own half
+       empty — that is precisely why the board felt like "the wrong way round". */
+    const TUTOR_STEPS = [
+        'Draw a line from the ball-carrier into space — release to pass.',
+        'Now drag the player who goes for the ball, so they run onto it.',
+        'Now drag the passer to move after passing.',
+        'Choose one player and drag them towards the goal to make a move.'
+    ];
+
+    /* four slots behind the ball, spread across the width — a shape you can read */
+    const RESTART_SHAPE = [
+        { dx: -14, dy: 9 }, { dx: 14, dy: 9 },
+        { dx: -8, dy: 22 }, { dx: 12, dy: 25 }
+    ];
+
+    /** Where the coached slots go for a restart at `pos`. All four sit behind
+        the ball, between it and the goal the side is attacking *from*, so the
+        human's own half is populated and both ends of the pitch are in use. */
+    function tutorPlan(team, pos) {
+        const back = -attackSide(team);
+        const of = (dx, dy) => ({
+            x: clamp(pos.x + dx, 10, 90),
+            y: clamp(pos.y + back * dy, 8, 92)
+        });
+        return {
+            striker: of(RESTART_SHAPE[0].dx, RESTART_SHAPE[0].dy),
+            runner: of(RESTART_SHAPE[1].dx, RESTART_SHAPE[1].dy),
+            passer: of(RESTART_SHAPE[2].dx, RESTART_SHAPE[2].dy),
+            mover: of(RESTART_SHAPE[3].dx, RESTART_SHAPE[3].dy),
+            goal: goalFor(team)
+        };
+    }
+
     /** Put both teams back in shape around a restart for `team` with the ball. */
     function arrangeRestart(team, pos) {
-        const atk = team, def = other(atk), goal = goalFor(atk), own = ownGoal(def);
-        const carrier = teamOutfield(atk)[0];
+        const atk = team, def = other(atk), home = ownGoal(atk);
+        const outfield = teamOutfield(atk);
+        const carrier = outfield[0];
         const rng = mulberry32(hashSeed(state.seed, state.half, Math.floor(state.halfT)));
+        const centred = Math.abs(pos.y - 50) < 2;
 
-        const place = (p, spot, dropBack) => {
+        const place = (p, spot, jitter) => {
             p.ax = spot.x; p.ay = spot.y;
             p.dest = null; p.selected = false; p.held = false;
-            const back = unit(own.y - spot.y, 0);
-            p.x = clamp(spot.x + (dropBack ? randRange(rng, -6, 6) : 0), 6, 94);
-            p.y = clamp(spot.y + back.y * (dropBack ? 11 : 0) + (dropBack ? randRange(rng, -4, 4) : 0), 5, 95);
+            p.x = clamp(spot.x + (jitter ? randRange(rng, -2.5, 2.5) : 0), 6, 94);
+            p.y = clamp(spot.y + (jitter ? randRange(rng, -2.5, 2.5) : 0), 5, 95);
             p.px = p.x; p.py = p.y;
         };
 
-        place(carrier, pos, true);
-        teamOutfield(atk).filter(p => p !== carrier).forEach((p, i) => {
-            place(p, attackingSpot(pos, goal, i), true);
-        });
+        if (centred && !state.tutorDone) {
+            /* the coached kick-off: the carrier stands on the spot and the other
+               four take the walkthrough's fixed slots */
+            const plan = tutorPlan(atk, pos);
+            place(carrier, pos, false);
+            const rest = outfield.filter(p => p !== carrier);
+            place(rest[0], plan.striker, false);
+            place(rest[1], plan.passer, false);
+            place(rest[2], plan.mover, false);
+            place(rest[3], plan.runner, false);
+            state.tutorTargets = { passer: null, goal: plan.goal };
+            state.tutor = 1;
+            state.tutorClock = 0;
+        } else {
+            /* Generic restart. The kicking side lines up behind the ball, in its
+               own half, so neither end is ever left empty. */
+            place(carrier, pos, false);
+            outfield.filter(p => p !== carrier).forEach((p, i) => {
+                place(p, attackingSpot(pos, home, i), true);
+            });
+        }
+
+        /* the defending side fills the half between the ball and their own goal */
         teamOutfield(def).forEach((p, i) => {
-            place(p, defendingSpot(pos, own, i), true);
+            place(p, defendingSpot(pos, ownGoal(def), i), true);
         });
+
         [keeperOf('you'), keeperOf('cpu')].forEach(k => {
-            const home = keeperHome(k.team);
-            k.ax = home.x; k.ay = home.y;
-            k.x = home.x; k.y = home.y; k.px = k.x; k.py = k.y;
+            const line = keeperHome(k.team);
+            k.ax = line.x; k.ay = line.y;
+            k.x = line.x; k.y = line.y; k.px = k.x; k.py = k.y;
             k.dest = null; k.held = false; k.dive = null;
         });
 
@@ -976,6 +1070,52 @@ import {
         state.phase = 'restart';
         state.phaseT = 0;
         hideOverlays();
+    }
+
+    /* --- the walkthrough machine -------------------------------------------- */
+    /** Done, for good, for this match. Step 4 or the watchdog calls it. */
+    function finishTutor() {
+        state.tutorTargets = null;
+        state.tutor = 0;
+        state.tutorDone = true;
+        bus.emit('role');
+    }
+
+    /** Step 1 completes the instant the human releases a pass. */
+    function tutorOnPass(from) {
+        const t = state.tutorTargets;
+        if (!t || state.tutor !== 1) return;
+        if (from.team !== 'you' || from !== PLAY.carrier) return;
+        t.passer = from;
+        state.tutor = 2;
+        state.tutorClock = 0;
+    }
+
+    /** Steps 2–4 are all "the human dragged somebody"; which somebody differs. */
+    function tutorOnSend(player, dest) {
+        const t = state.tutorTargets;
+        if (!t || player.team !== 'you') return;
+        if (state.tutor === 2) { state.tutor = 3; state.tutorClock = 0; return; }
+        if (state.tutor === 3) {
+            if (player === t.passer) { state.tutor = 4; state.tutorClock = 0; }
+            return;
+        }
+        if (state.tutor === 4) {
+            const d = dest || player;
+            if (dist(d, t.goal) < SHOT_RANGE || dist(player, t.goal) < SHOT_RANGE) finishTutor();
+        }
+    }
+
+    /** Runs every live frame: says the current step, and never lets it stick. */
+    function tutorTick(dt) {
+        const t = state.tutorTargets;
+        if (!t) return;
+        if (state.phase !== 'play') return;         // the shape is still walking out
+        state.tutorClock += dt;
+        if (state.tutorClock < TUTOR_DELAY) return;
+        const step = TUTOR_STEPS[state.tutor - 1];
+        if (step && ui.instruction.textContent !== step) ui.instruction.textContent = step;
+        if (state.tutorClock > TUTOR_DELAY + TUTOR_STEP_MS / 1000) finishTutor();
     }
 
     /** §3 — centre kick-off, to the conceding side. */
@@ -996,15 +1136,18 @@ import {
         state.humanScore = 0; state.cpuScore = 0;
         state.half = 1; state.halfT = 0; state.pendingHalf = false;
         state.seed = (Math.random() * 1e9) | 0;
-        state.trauma = 0;
         state.phase = 'play';
+        /* a fresh match always opens with the coached kick-off */
+        state.tutor = 0; state.tutorTargets = null; state.tutorClock = 0;
+        state.tutorDone = false;
         endShootout(true);
         ui.log.innerHTML = '';
         bus.emit('score'); bus.emit('half');
         Sfx.unlock(); Sfx.whistle();
         hideOverlays();
-        kickoff(Math.random() < 0.5 ? 'you' : 'cpu');
-        log('Two 2:00 halves — ' + formatClock(HALF_LENGTH) + ' each. You attack the top goal.', '');
+        kickoff('you');
+        log('You defend the bottom goal and attack the top one — two ' +
+            formatClock(HALF_LENGTH) + ' halves.', '');
     }
 
     /** §3 — half and full time. The ball is always dead before the whistle. */
@@ -1118,6 +1261,7 @@ import {
             Sfx.good();
             return;
         }
+        /* (a pass into space is resolved by the loose-ball race below) */
         /* Nobody claimed it: the ball is simply loose, and the nearest player
            in either kit wins the race for it. */
         ball.mode = 'loose';
@@ -1162,13 +1306,12 @@ import {
        § 13. PLAYER MOVEMENT — human-controlled players hold, everyone else holds
        shape. There is no turn, so all of this runs every frame.
        ========================================================================== */
-    function moveCarrier(dt) {
-        const c = PLAY.carrier;
-        if (c.dest) return;                       // never while it is being passed
-        if (dist(c, PLAY.goal) > SHOT_RANGE * 0.94) {
-            const d = unit(PLAY.goal.x - c.x, PLAY.goal.y - c.y);
-            moveToward(c, c.x + d.x * 3, c.y + d.y * 3, DRILL_SPEED, dt);
-        }
+    function moveCarrier(_dt) {
+        /* The carrier does NOT walk itself towards goal. It used to, and from
+           above it read as the ball dribbling away on its own — the board moving
+           a player nobody had told to move, and usually in the one direction
+           that made the goals feel swapped. Possession now only advances by a
+           pass, by the human dragging the carrier, or by the CPU's own choice. */
     }
 
     function updateKeeper(k, dt) {
@@ -1189,40 +1332,34 @@ import {
             if (p.dest && moveToward(p, p.dest.x, p.dest.y, p.speed, dt)) p.dest = null;
         });
 
-        /* 2. attacking shape — the receiver and runners push into the final third */
-        teamOutfield(atk).forEach((p, i) => {
-            if (p === PLAY.carrier || p.dest) return;
-            if (p.team === 'you' && p.controlled) return;   // the human's runners hold
-            const s = attackingSpot(PLAY.carrier, PLAY.goal, i);
+        /* 2. the CPU holds its shape. The human's outfielders never move by
+              themselves: every step they take is a step the player asked for.
+              That is both what the walkthrough teaches — "then drag a player" —
+              and what stops the board looking like it is playing itself. */
+        teamOutfield('cpu').forEach((p, i) => {
+            if (p.dest) return;
+            if (atk === 'cpu' && p === PLAY.carrier) return;
+            if (p.team === def && p.duty === 'interceptor') {
+                const to = PLAY.threat || PLAY.carrier;
+                const s = interceptTarget(p, PLAY.carrier, to);
+                moveToward(p, s.x, s.y, PLAYER_SPEED * 0.9, dt);
+                return;
+            }
+            if (p.team === def && p.duty === 'marker') {
+                const c = PLAY.carrier;
+                const s = { x: clamp(c.x - (PLAY.goal.x - c.x) * 0.12, 6, 94), y: clamp(lerp(c.y, PLAY.goal.y, 0.12), 6, 94) };
+                moveToward(p, s.x, s.y, PLAYER_SPEED * 0.88, dt);
+                return;
+            }
+            const s = atk === 'cpu'
+                ? attackingSpot(PLAY.carrier, PLAY.goal, i)
+                : defendingSpot(PLAY.carrier, PLAY.own, i);
             moveToward(p, s.x, s.y, DRILL_SPEED, dt);
         });
+
         moveCarrier(dt);
 
-        /* 3. defending shape — the human's two hold, the rest drop between the
-              ball and their own goal */
-        teamOutfield(def).forEach((p, i) => {
-            if (p.dest) return;
-            if (p.team === 'you' && p.controlled) return;
-            if (p.team === 'cpu') {
-                const role = p.duty;
-                if (role === 'interceptor') {
-                    const to = PLAY.threat || PLAY.carrier;
-                    const s = interceptTarget(p, PLAY.carrier, to);
-                    moveToward(p, s.x, s.y, PLAYER_SPEED * 0.94, dt);
-                    return;
-                }
-                if (role === 'marker') {
-                    const c = PLAY.carrier;
-                    const s = { x: clamp(c.x - (PLAY.goal.x - c.x) * 0.12, 6, 94), y: clamp(lerp(c.y, PLAY.goal.y, 0.12), 6, 94) };
-                    moveToward(p, s.x, s.y, PLAYER_SPEED * 0.92, dt);
-                    return;
-                }
-            }
-            const s = defendingSpot(PLAY.carrier, PLAY.own, i);
-            moveToward(p, s.x, s.y, DRILL_SPEED, dt);
-        });
-
-        /* 4. a loose ball is a race for the nearest player in each kit */
+        /* 3. a loose ball is a race for the nearest player in each kit */
         if (ball.mode === 'loose') {
             ['you', 'cpu'].forEach(team => {
                 const near = allPlayers
@@ -1303,6 +1440,7 @@ import {
         launchBall({ x: from.x, y: from.y }, { x: to.x, y: to.y },
             speed || BALL_SPEED, { mode: 'pass', passTarget: to, arc: ARC_PASS });
         if (PLAY) PLAY.receiver = to;
+        tutorOnPass(from);
         Sfx.kick();
     }
 
@@ -1813,6 +1951,7 @@ import {
                 player.dest = dest;
                 player.speed = PLAYER_SPEED;
                 log(player.label + ' sent wide.', '');
+                tutorOnSend(player, dest);
             }
             player.selected = false;
             runnerMarker.visible = false;
@@ -1878,7 +2017,9 @@ import {
     function update(dt) {
         if (state.phase === 'restart') {
             state.phaseT += dt;
-            allPlayers.forEach(p => moveToward(p, p.ax, p.ay, 46, dt));
+            /* walk into shape at a jog, and leave anyone the human has already
+               sent somewhere alone */
+            allPlayers.forEach(p => { if (!p.dest) moveToward(p, p.ax, p.ay, ASSEMBLE_SPEED, dt); });
             stepBall(dt);
             if (state.phaseT >= SETUP_TIME) { state.phase = 'play'; state.phaseT = 0; }
         } else if (state.phase === 'play') {
@@ -1906,6 +2047,7 @@ import {
         allPlayers.forEach(p => { animatePlayer(p, dt); syncToMesh(p); });
         updateCursor();
         updateOverlayVisibility();
+        tutorTick(dt);
     }
 
     /** Keep the guides honest without redrawing them every frame. */
@@ -1966,18 +2108,23 @@ import {
     }
     window.addEventListener('resize', fitView);
     window.addEventListener('orientationchange', () => setTimeout(fitView, 120));
-    if (window.visualViewport) window.visualViewport.addEventListener('resize', fitView);
+    /* A mobile URL bar sliding in and out fires resize several times a second,
+       and each one rebuilt the projection. Only act when the box changed. */
+    const viewBox = { w: 0, h: 0 };
+    function resizeIfChanged() {
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        if (w === viewBox.w && h === viewBox.h) return;
+        viewBox.w = w; viewBox.h = h;
+        fitView();
+    }
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resizeIfChanged);
 
-    /** Where the camera sits this frame: the pan, plus the shake. */
+    /** Where the camera sits this frame. Fixed: the ground never moves. */
     function placeCamera() {
-        const t2 = state.trauma * state.trauma;
-        const amp = state.reduceMotion ? 0 : 2.4 * t2;
-        const sx = (Math.random() * 2 - 1) * amp;
-        const sy = (Math.random() * 2 - 1) * amp;
         const pz = worldZ(view.panY);
-        camera.position.set(sx, 130 * Math.cos(TILT) + sy * Math.sin(TILT), pz + 130 * Math.sin(TILT) - sy * Math.cos(TILT));
+        camera.position.set(0, 130 * Math.cos(TILT), pz + 130 * Math.sin(TILT));
         camera.rotation.z = 0;
-        camera.lookAt(sx, sy * Math.sin(TILT), pz - sy * Math.cos(TILT));
+        camera.lookAt(0, 0, pz);
     }
 
     /* --- pause handling --- */
@@ -1998,7 +2145,6 @@ import {
         const dt = Math.min(0.05, (now - last) / 1000);
         last = now;
         if (!state.paused && !topScreen() && state.phase !== 'idle') update(dt);
-        state.trauma = Math.max(0, state.trauma - dt * 1.5);
         updateHud();
         placeCamera();
         renderer.render(scene, camera);

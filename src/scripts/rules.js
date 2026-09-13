@@ -16,11 +16,21 @@
 
 export const RULES = {
     /* --- §2 movement ---------------------------------------------------- */
-    PLAYER_SPEED: 26,          // outfield run speed, units / s
-    DIVE_SPEED: 30,            // keeper dive speed — a shade above PLAYER_SPEED
-    BALL_SPEED: 34,            // ground pass speed — MUST beat PLAYER_SPEED
-    SHOT_SPEED: 40,            // shot speed — a shade above BALL_SPEED
-    DRILL_SPEED: 22,           // off-ball drift / shape speed
+    /* A uniform ×0.7 on all five speeds: the board was crossing end to end
+       faster than a player could read it and respond, which made the whole game
+       feel like it was on fast-forward. Every §7 race (interception, save,
+       penalty, shootout) is decided by RATIOS between these numbers and the
+       unscaled radii, so scaling all five by the same factor reproduces
+       identical time-fractions, identical SAVED/GOAL/INTERCEPTION outcomes and
+       therefore the same verdict for all 28 rulebook properties — including the
+       two threshold tests that halve / quadruple a value themselves. Only the
+       absolute pace changes; the rules do not. */
+    SPEED_SCALE: 0.7,          // single dial for the five speeds below
+    PLAYER_SPEED: 26 * 0.7,    // 18.2 — outfield run speed, units / s
+    DIVE_SPEED: 30 * 0.7,      // 21.0 — keeper dive; still above PLAYER_SPEED
+    BALL_SPEED: 34 * 0.7,      // 23.8 — ground pass; MUST still beat PLAYER_SPEED
+    SHOT_SPEED: 40 * 0.7,      // 28.0 — shot; a shade above BALL_SPEED
+    DRILL_SPEED: 22 * 0.7,     // 15.4 — off-ball drift / shape speed
 
     /* --- §7 race radii -------------------------------------------------- */
     CATCH_RADIUS: 3,           // interception / control radius
@@ -29,7 +39,10 @@ export const RULES = {
 
     /* --- §2 pitch and match --------------------------------------------- */
     GOAL_X: 50,                // both goals are centred on this column
-    GOAL_HALF_WIDTH: 12.5,     // half the mouth → mouth ≈ 25 units (feel-tuned)
+    /* 12.5 canonical = 8.5 m per side, i.e. a 17 m mouth. That is exactly the
+       width of the goal area (the "small D"), so the posts stand on the small
+       box's side lines — frame and painting are one and the same rectangle. */
+    GOAL_HALF_WIDTH: 12.5,     // half the mouth → 25 units = 17 m wide
     SHOT_RANGE: 30,            // max distance from goal to attempt a shot
     HALVES: 2,
     HALF_LENGTH: 120,          // seconds per half (2:00)
