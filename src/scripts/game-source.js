@@ -87,7 +87,7 @@ import {
        geometry, and they are the only numbers that decide a cut.
        ---------------------------------------------------------------------- */
     const TOUCH_R = 0.95;
-    const KEEPER_TOUCH_R = 1.6;
+    const KEEPER_TOUCH_R = 1.0;
 
     /* ----------------------------------------------------------------------
        THE KEEPER'S SWEEP — the one time he leaves his line for a dead ball.
@@ -97,16 +97,16 @@ import {
        he lived on his line and nothing else, so a ball rolled into his own half
        with nobody near it sat there until an outfielder walked back for it.
        ---------------------------------------------------------------------- */
-    const KEEPER_CHASE_DIST = 38;   // a loose ball nearer than this to his home line
-    const KEEPER_SWEEP_R = 9;       // ...with no team-mate within this of it...
+    const KEEPER_CHASE_DIST = 18;   // a loose ball nearer than this to his home line
+    const KEEPER_SWEEP_R = 8;       // ...with no team-mate within this of it...
     /* §12.h — ...and this far off his line, and never further. Was 26, which is
        most of the way to the penalty spot: on top of a 12-unit "a ball this close
        to him is his regardless", the keeper spent whole possessions standing in
        the middle of his own box collecting everything that came near it, which is
        half of "the goalkeeper is still too good". A keeper comes off his line for
        a ball he can actually reach and then goes back. */
-    const KEEPER_SWEEP_MAX = 17;    // ...is his to come and collect, this far off his line
-    const KEEPER_CLEAR_R = 9;       // a ball this close to him is his regardless
+    const KEEPER_SWEEP_MAX = 8;     // ...is his to come and collect, this far off his line
+    const KEEPER_CLEAR_R = 3.5;     // a ball this close to him is his regardless
 
     /* ----------------------------------------------------------------------
        § 0.d THE KEEPER'S READ — the engine's own model of a save.
@@ -135,8 +135,8 @@ import {
        rules.js alone, so RULES.KEEPER_REACH, defaultDiveTarget() and the penalty
        shootout — where the human DRAWS the dive — are all untouched.
        ---------------------------------------------------------------------- */
-    const KEEPER_READ_CHANCE = 0.5;  // chance he dives the way the shot is going
-    const KEEPER_STEP = 3.0;         // ground he commits to, one way, off his line
+    const KEEPER_READ_CHANCE = 0.35; // base chance he dives the way the shot is going
+    const KEEPER_STEP = 2.2;         // ground he commits to, one way, off his line
 
     /* --- §0.d the dive is a LUNGE, not a slide across the mouth --------------
        "Decrease the keeper's diving length." Two numbers carried it, and both
@@ -151,7 +151,7 @@ import {
 
        KEEPER_SAVE_REACH is the other half: the arms. `shotOutcome()` wraps this
        around the point he dives to, so the ground he covers is the dive plus the
-       reach either side of it — 3.0 + 4.4 from his line for the uncommanded
+       reach either side of it — 2.2 + 2.6 from his line for the uncommanded
        read, against a mouth that is 12.5 wide from the centre to each post. The
        far post is genuinely open, which is what a save being a read means.
 
@@ -159,8 +159,8 @@ import {
        KEEPER_REACH = 6 and `verify-4.mjs` still reads the rulebook, because the
        property tests call shotOutcome() without a `reach` and get the rulebook's
        own number. Only the match passes these. */
-    const KEEPER_DIVE_MAX = 6.0;     // furthest a dive may travel, from his feet
-    const KEEPER_SAVE_REACH = 4.4;   // his arms around the point he dives to
+    const KEEPER_DIVE_MAX = 4.0;     // furthest a dive may travel, from his feet
+    const KEEPER_SAVE_REACH = 2.6;   // his arms around the point he dives to
 
     /* ----------------------------------------------------------------------
        § 0.c THE PACE DIAL — one number, under every body on the board.
@@ -318,7 +318,7 @@ import {
        race; and a keeper only ever races for a ball at his own end, because he is
        the one body on the pitch that must not be caught out of position. */
     const CHASE_SECOND = 26;      // the second man joins the race inside this
-    const KEEPER_RACE_DIST = 34;  // and a keeper races only this far from his goal
+    const KEEPER_RACE_DIST = 14;  // and a keeper races only this far from his goal
     /* The mean speed of a rolled pass, taken from the same two numbers the roll
        itself is built from. It is what turns a distance into a flight time, and
        it is read by the roll in launchBall() and by the lead pass in leadSpot() —
@@ -2498,7 +2498,7 @@ import {
                 const r = shotOutcome({
                     from: { x: ball.from.x, y: ball.from.y },
                     target: ball.target,
-                    keeper: { x: k.x, y: k.y },
+                    keeper: ball.keeperFrom || { x: k.x, y: k.y },
                     keeperTarget: k.dive || { x: k.x, y: k.y },
                     goalX: PLAY.goal.x,
                     goalHalfWidth: GOAL_HALF_WIDTH,
@@ -2516,7 +2516,7 @@ import {
                     diveSpeed: DIVE_SPEED * RUN_SCALE * KEEPER_SCALE
                 });
                 if (r.outcome === 'SAVED' && ball.t >= r.t - 1e-6) return caughtByKeeper(k, atk);
-            } else if (ballPathDist(k, fromX, fromY) <= KEEPER_TOUCH_R) {
+            } else if (!ball.air && (ball.mode !== 'pass' || ball.travel >= TOUCH_R) && ballPathDist(k, fromX, fromY) <= KEEPER_TOUCH_R) {
                 return caughtByKeeper(k, atk);
             }
         }
@@ -2849,6 +2849,19 @@ import {
                about height and nothing else; at 0 — every rolled ball — the ball
                never leaves the deck. */
             ball.h = 0.42 + frac * ball.arc;
+
+            /* Check boundary bounce during flight: if a pass or wide shot crosses the pitch line,
+               it immediately rebounds back into the pitch instead of flying into run-off. */
+            const goal = PLAY ? PLAY.goal : (state.possession === 'you' ? GOAL.cpu : GOAL.you);
+            const inMouth = Math.abs(ball.x - goal.x) <= GOAL_HALF_WIDTH + POST_R;
+            const atGoalLine = (ball.y <= 0 && ball.dir && ball.dir.y < 0) || (ball.y >= 100 && ball.dir && ball.dir.y > 0);
+            const isGoalMouthEntry = ball.mode === 'shot' && inMouth && atGoalLine;
+
+            if (!isGoalMouthEntry && (ball.x <= 0 || ball.x >= 100 || ball.y <= 0 || ball.y >= 100)) {
+                bounceOffBoards();
+                spillLoose();
+                return;
+            }
 
             contestFlight(fromX, fromY);
             if (ball.t >= ball.total && ball.mode !== 'held') resolveArrival();
@@ -3313,29 +3326,33 @@ import {
            the whole point of the defending phase — the player picked the side,
            and the shot either goes where his keeper is or it does not. */
         const k = keeperOf(other(state.possession));
-        if (k && !k.held && !k.dive) {
-            /* §0.d — the uncommanded keeper dives on a GUESS, and both teams get
-               the same guess.
+        if (k) {
+            ball.keeperFrom = { x: k.x, y: k.y };
+            if (!k.held && !k.dive) {
+                /* §0.d — the uncommanded keeper dives on a GUESS, and both teams get
+                   the same guess.
 
-               Everything that made him unbeatable ran through this branch. He
-               was handed the shot's true side (defaultDiveTarget) and then
-               `shotOutcome()` wrapped the rulebook's full KEEPER_REACH around
-               the spot he dove to, from a seat on x = 50 that is already only
-               12.5 from either post. That is a wall, not a save model, and it is
-               also why the computer's keeper read as better than the player's:
-               the human's own dive is a point he DRAWS, so it is only ever as
-               good as his read, while this one was always as good as the truth.
+                   Everything that made him unbeatable ran through this branch. He
+                   was handed the shot's true side (defaultDiveTarget) and then
+                   `shotOutcome()` wrapped the rulebook's full KEEPER_REACH around
+                   the spot he dove to, from a seat on x = 50 that is already only
+                   12.5 from either post. That is a wall, not a save model, and it is
+                   also why the computer's keeper read as better than the player's:
+                   the human's own dive is a point he DRAWS, so it is only ever as
+                   good as his read, while this one was always as good as the truth.
 
-               Now the side is a coin flip (KEEPER_READ_CHANCE) and the ground is
-               short (KEEPER_STEP), so a keeper who guessed wrong is beaten —
-               including by the ball passing him on the far side — and a keeper
-               who guessed right still has to be beaten at the far post. A dive
-               the human drew during the window is never overwritten (`!k.dive`),
-               which keeps his read the one that decides his own keeper. */
-            const gx = PLAY.goal.x;
-            const trueSide = target.x === gx ? 1 : Math.sign(target.x - gx);
-            const readSide = Math.random() < KEEPER_READ_CHANCE ? trueSide : -trueSide;
-            applyAutoDive(k, { x: gx + readSide * KEEPER_STEP, y: k.y });
+                   Now the side is a coin flip (KEEPER_READ_CHANCE) and the ground is
+                   short (KEEPER_STEP), so a keeper who guessed wrong is beaten —
+                   including by the ball passing him on the far side — and a keeper
+                   who guessed right still has to be beaten at the far post. A dive
+                   the human drew during the window is never overwritten (`!k.dive`),
+                   which keeps his read the one that decides his own keeper. */
+                const gx = PLAY.goal.x;
+                const trueSide = target.x === gx ? 1 : Math.sign(target.x - gx);
+                const diveChance = 0.2 + 0.35 * state.difficulty;
+                const readSide = Math.random() < diveChance ? trueSide : -trueSide;
+                applyAutoDive(k, { x: gx + readSide * KEEPER_STEP, y: k.y });
+            }
         }
         Sfx.kick(); shake(.12);
         log((from.team === 'you' ? 'You shoot' : 'CPU shoots') + '!', '');
