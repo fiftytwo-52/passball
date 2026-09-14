@@ -43,136 +43,158 @@ import '../styles/global.css';
     </noscript>
 
     <!--  ======================= APP SHELL =======================
-          A column of stacked bands: top dock / stage / shootout strip / bottom dock.
-          The docks are flow siblings of the stage rather than overlays, so at any
-          viewport size they can only ever push the pitch smaller — never cover
-          it. The turf carries the players and the ball and nothing else.  -->
+          The pitch is the whole screen. Everything else is an anchored,
+          pointer-events:none overlay floating above the turf, so the chrome can
+          never push the ground around — at any viewport it either sits in a
+          corner or it is scrolled/hidden (game-ui-ux: anchors + containers).
+
+          Four anchors carry the live match state:
+            · top-left   — the scoreline, on its own;
+            · top-right  — the match clock, and the floating menu under it;
+            · top-centre — the role + possession read-out, hung on the band
+                           behind the far (computer's) goal; the shootout strip
+                           shares the band while penalties are live;
+            · bottom     — the two actions in the corners, the transient banner,
+                           the short instruction line, which reads from the
+                           strip behind the near goal, and the decision-window
+                           ring, centred on the pitch centre circle and sized
+                           from the camera fit. -->
     <div id="app">
-        <!-- ============================== HUD (TOP) ==============================
-             Identity on the left, clock and controls on the right. The clock is
-             written only when the displayed second changes — the HUD is never
-             polled per frame. -->
-        <header id="hud-top" hidden>
-            <div class="dock">
-                <div class="cluster">
-                    <!-- NOTE: the engine assigns #role-badge.className outright, so it
-                         carries no other class. Same for #possession-chip. -->
-                    <span id="role-badge" class="attack">ATTACK</span>
-                    <span id="possession-chip" class="chip you"><i class="dot"></i>YOU · BALL</span>
-
-                    <span class="panel scoreboard" aria-label="Score">
-                        <span class="score" id="score-you"><strong>0</strong><span class="hud-label">You</span></span>
-                        <span class="vs">VS</span>
-                        <span class="score" id="score-cpu"><strong>0</strong><span class="hud-label">Cpu</span></span>
-                    </span>
-
-                    <span class="panel panel-clock" aria-label="Match clock">
-                        <span class="clock-line">
-                            <span class="hud-label" id="half-label">HALF 1</span>
-                            <!-- role=timer implies aria-live=off: the countdown ticks every
-                                 second and must not be announced each tick. -->
-                            <span id="clock" role="timer" class="clock-num">2:00</span>
-                        </span>
-                        <span class="clock-track"><span id="clock-bar"></span></span>
-                    </span>
-                </div>
-
-                <div class="cluster">
-                    <div class="segmented" id="difficulty" role="group" aria-label="CPU difficulty">
-                        <button type="button" class="btn" data-diff="0.15" aria-pressed="false">COIN-FLIP</button>
-                        <button type="button" class="btn" data-diff="0.6" aria-pressed="true">SHARP</button>
-                        <button type="button" class="btn" data-diff="1" aria-pressed="false">RUTHLESS</button>
-                    </div>
-
-                    <button type="button" class="btn btn-ghost-sm" id="btn-help">HOW TO PLAY</button>
-                    <button type="button" class="btn btn-icon" id="btn-mute" aria-pressed="false" title="Mute (M)"
-                        aria-label="Mute sound">♪</button>
-                    <button type="button" class="btn btn-icon" id="btn-pause" title="Pause (Esc)"
-                        aria-label="Pause">❙❙</button>
-                </div>
-            </div>
-        </header>
-
-        <!-- ========================= THE PITCH =========================
-             One WebGL canvas: 3D characters standing on a 2D top-view board.
-             The stage holds the canvas and nothing else. -->
         <section id="stage">
+            <!-- One WebGL canvas: 3D characters standing on a 2D top-view board.
+                 The pitch sits directly behind the camera centre, which is what
+                 lets the decision ring be positioned with one transform. -->
             <canvas id="scene" aria-label="Football pitch, top-down view with 3D players"></canvas>
-        </section>
 
-        <!-- ===================== HUD (SHOOTOUT STRIP) =====================
-             §8/§10 — the HUD swaps into a shootout view for the duration of the
-             shootout: kicker order, a separate shootout score, and whose turn it
-             is. It is a flow band like the docks, so it also cannot cover the
-             ground. The engine reveals it only while a shootout is live. -->
-        <section id="hud-pens" hidden aria-label="Penalty shootout">
-            <div class="dock">
-                <div class="cluster">
-                    <span class="panel panel-pens">
-                        <span class="hud-label" id="so-title">PENALTIES</span>
-                        <span class="pens-score" id="so-score" aria-live="polite">0 – 0</span>
-                    </span>
-
-                    <span class="panel pens-order">
-                        <span class="hud-label">You</span>
-                        <span class="pens-dots" id="so-you"></span>
-                    </span>
-
-                    <span class="panel pens-order">
-                        <span class="hud-label">Cpu</span>
-                        <span class="pens-dots" id="so-cpu"></span>
-                    </span>
+            <!-- ============================== HUD (TOP) ==============================
+                 Two corners, plus the role strip pinned to the top centre. Nothing
+                 here is ever polled per frame: the score is written on the `score`
+                 event, the clock only when the displayed second changes. -->
+            <header id="hud-top" hidden>
+                <div class="hud-corner hud-tl">
+                    <!-- NOTE: the engine assigns `.textContent` on #score-you and
+                         #score-cpu outright, so neither may wrap a <strong>. The
+                         team colour is carried by the span itself instead. -->
+                    <div class="score-mini" aria-label="Score">
+                        <span class="sc sc-you" id="score-you">0</span>
+                        <span class="sc-dash" aria-hidden="true">–</span>
+                        <span class="sc sc-cpu" id="score-cpu">0</span>
+                    </div>
                 </div>
 
-                <div class="cluster">
-                    <span class="panel panel-pens" id="so-turn">YOUR KICK</span>
+                <div class="hud-corner hud-tr">
+                    <div class="clock-wrap" id="clock-wrap">
+                        <span class="clock-half" id="half-label">HALF 1</span>
+                        <!-- role=timer implies aria-live=off: the countdown ticks every
+                             second and must not be announced each tick. -->
+                        <span id="clock" role="timer" class="clock-num">2:00</span>
+                        <span class="clock-line"><span id="clock-bar"></span></span>
+                    </div>
+
+                    <!-- The floating menu. Everything the match does not need on
+                         screen lives in here so a phone shows the pitch and
+                         almost nothing else. -->
+                    <button type="button" class="hud-icon-btn" id="btn-menu-open" aria-expanded="false"
+                        aria-controls="menu-sheet" title="Menu" aria-label="Open menu">☰</button>
+                </div>
+            </header>
+
+            <!-- ========================= HUD (ROLE STRIP) =========================
+                 Which end you are playing toward, and whose ball it is. Those two
+                 facts are what decide the next prompt, so the pair hangs on the
+                 band behind the far goal — the mirror of the guide line, which
+                 reads from the strip behind the near goal. It is positioned
+                 against #stage rather than parked in a corner, so it stays on
+                 that band at every viewport.
+
+                 NOTE: the engine assigns #role-badge.className and
+                 #possession-chip.className outright, so neither carries any
+                 other class — `.attack`/`.defend` and `.chip you`/`.chip cpu`
+                 are the only states they can be in. -->
+            <div id="role-strip" hidden>
+                <div class="status-row">
+                    <span id="role-badge" class="attack">ATTACK</span>
+                    <span id="possession-chip" class="chip you"><i class="dot"></i>YOU</span>
                 </div>
             </div>
-        </section>
 
-        <!-- ============================== HUD (BOTTOM) ==============================
-             The rolling log and the instruction line on the left; the decision
-             window on the right — its countdown, MOVES DONE, and the SHOOT button.
-             All of it is a flow band under the pitch, so none of it is ever drawn
-             over the turf. -->
-        <footer id="hud-bottom" hidden>
-            <div class="dock">
-                <div class="cluster">
-                    <div class="panel" id="log-panel">
-                        <span class="hud-label">Match log</span>
-                        <ul id="log"></ul>
-                    </div>
-                    <p id="instruction">Your ball — drag the carrier to stack a pass or a shot, drag your runners,
-                        then press MOVES DONE.</p>
-                </div>
+            <!-- ===================== HUD (SHOOTOUT STRIP) =====================
+                 §8/§10 — while a shootout is live the HUD swaps into this view:
+                 kicker order, a separate shootout score, and whose turn it is.
+                 It is pure read-out, so it stays a strip across the top centre. -->
+            <section id="hud-pens" hidden aria-label="Penalty shootout">
+                <span class="panel panel-pens">
+                    <span class="hud-label" id="so-title">PENALTIES</span>
+                    <span class="pens-score" id="so-score" aria-live="polite">0 – 0</span>
+                </span>
 
-                <div class="cluster dock-actions">
-                    <!-- §17.b — the decision window. Revealed only while a plan is
-                         open, so the dock is a two-item row in open play and a
-                         four-item row while the board is frozen. role=timer implies
-                         aria-live=off, so the countdown is not announced each tick. -->
-                    <span class="panel panel-clock panel-plan" id="plan-panel" hidden aria-label="Decision window">
-                        <span class="clock-line">
-                            <span class="hud-label" id="plan-state">PLANNING</span>
-                            <span id="plan-clock" role="timer" class="clock-num">10</span>
-                        </span>
-                        <span class="clock-track"><span id="plan-bar"></span></span>
-                    </span>
+                <span class="panel pens-order">
+                    <span class="hud-label">You</span>
+                    <span class="pens-dots" id="so-you"></span>
+                </span>
 
+                <span class="panel pens-order">
+                    <span class="hud-label">Cpu</span>
+                    <span class="pens-dots" id="so-cpu"></span>
+                </span>
+
+                <span class="panel panel-pens" id="so-turn">YOUR KICK</span>
+            </section>
+
+            <!-- ============================== DECISION RING ==============================
+                 §17.b — the decision window, drawn ON the painted centre circle. No
+                 numerals on screen: the arc draining is the whole read-out. The label
+                 and the countdown stay in the DOM for screen readers, which is also
+                 what the engine writes to.
+
+                 This is a DIRECT CHILD OF #stage, not a child of #hud-bottom. The
+                 stage is the full-viewport box, so `left:50%;top:50%` resolves to the
+                 canvas centre — which is exactly where the camera puts game (50,50),
+                 the centre circle. Nested inside the bottom bar instead, the same
+                 50%/50% would resolve against that bar and the ring would sit under
+                 the pitch. Its diameter is written to --ring-d by fitView(). -->
+            <div class="panel-plan" id="plan-panel" hidden aria-label="Decision window">
+                <span class="sr-only" id="plan-state">PLANNING</span>
+                <span class="sr-only" id="plan-clock" role="timer">10</span>
+                <svg class="ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+                    <circle class="ring-track" cx="50" cy="50" r="46"></circle>
+                    <circle class="ring-fill" id="plan-bar" cx="50" cy="50" r="46" pathLength="1"></circle>
+                </svg>
+            </div>
+
+            <!-- ============================== HUD (BOTTOM) ==============================
+                 The two controls in the CORNERS, the transient banner, and — last
+                 in the bar, so it lands on the bottom-centre band behind the near
+                 goal — the short instruction line.
+
+                 The controls deliberately do NOT sit in the bottom centre. Both
+                 goals are painted on the board's vertical centre line, so a
+                 bottom-centre *row of controls* lands straight on the near goal
+                 mouth — which is exactly where MOVES DONE and SHOOT used to sit.
+                 MOVES DONE takes the left corner and SHOOT the right; `game.css`
+                 pins them with a two-track grid so each keeps its corner even when
+                 the other is hidden.
+
+                 Only the guide line takes the centre, and only because it is the
+                 one layer that should read as painted on the goal rather than laid
+                 over the play. Being the final flex item, it self-centres at any
+                 width without a single pixel being pinned. -->
+            <footer id="hud-bottom" hidden>
+                <div class="hud-actions">
                     <!-- Closes the window for the human. The CPU also has to be
                          ready: if it has stacked its moves and you have not, the
                          board stays frozen until you do. -->
                     <button type="button" class="btn btn-done" id="btn-done" title="Lock in your moves (Enter)"
                         hidden>MOVES DONE</button>
 
-                    <!-- The one action worth a button, and it lives down here beside
-                         the plan clock rather than in the top cluster: it only ever
-                         means anything while the window is open, and a thumb-rest
-                         position beats a corner. Disabled and dimmed until the human
-                         is on the ball and inside range, so it doubles as the range
-                         indicator. Space and S fire it from the keyboard. -->
-                    <button type="button" class="btn btn-shoot" id="btn-shoot" title="Shoot (S or Space)"
-                        aria-label="Shoot at goal" disabled>
+                    <!-- The one action worth a button, and it sits in the RIGHT
+                         corner, clear of the goal mouth. Disabled and dimmed until
+                         the human is on the ball and inside range, so it doubles as
+                         the range indicator. Space and S fire it from the
+                         keyboard. -->
+                    <button type="button" class="btn btn-shoot" id="btn-shoot"
+                        title="Shoot along the drawn angle (S or Space)"
+                        aria-label="Shoot along the drawn angle" disabled>
                         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                             <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.7" />
                             <circle cx="12" cy="12" r="3.9" fill="currentColor" />
@@ -181,38 +203,100 @@ import '../styles/global.css';
                         </svg>
                         <span class="ico-label">SHOOT</span>
                     </button>
+                </div>
 
-                    <div id="banner" aria-live="polite"></div>
+                <div id="banner" aria-live="polite"></div>
+
+                <!-- The guide line closes the bar so its own centre is the stage's
+                     bottom-centre: the strip behind the near goal, clear of both
+                     corner controls and of the play. -->
+                <p id="instruction">Stack your moves, then press MOVES DONE.</p>
+            </footer>
+
+            <!-- the goal celebration: a word bursting off the turf, over the pitch -->
+            <div id="goal-fx" aria-hidden="true"><span id="goal-fx-word">GOAL</span></div>
+
+            <!-- The floating menu sheet. Buttons only — the match keeps running
+                 underneath, so this is a dropdown and not a screen. -->
+            <div class="sheet-scrim" id="sheet-scrim" hidden></div>
+            <div class="hud-sheet" id="menu-sheet" hidden role="dialog" aria-label="Menu">
+                <div class="sheet-head">
+                    <span class="hud-label">Menu</span>
+                    <button type="button" class="btn btn-icon-xs" id="btn-menu-close" aria-label="Close menu">✕</button>
+                </div>
+
+                <div class="sheet-rows">
+                    <button type="button" class="btn sheet-row" id="btn-help">HOW TO PLAY</button>
+                    <button type="button" class="btn sheet-row" id="btn-mute" aria-pressed="false" title="Mute (M)"
+                        aria-label="Mute sound"><span>Sound</span><span class="sheet-val">ON</span></button>
+                    <button type="button" class="btn sheet-row" id="btn-pause" title="Pause (Esc)"
+                        aria-label="Pause match"><span>Pause</span><span class="sheet-val">❙❙</span></button>
+                    <button type="button" class="btn sheet-row" id="btn-menu-restart"><span>Restart match</span><span
+                            class="sheet-val">↻</span></button>
+                    <button type="button" class="btn sheet-row sheet-row-danger"
+                        id="btn-menu-quit"><span>Quit to menu</span><span class="sheet-val">⏻</span></button>
                 </div>
             </div>
-        </footer>
+        </section>
     </div>
 
-    <!-- ============================== SCREENS ============================== -->
+    <!-- ============================== START SCREEN ============================== -->
     <div class="screen" id="screen-menu">
-        <div class="card" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+        <div class="card card-start" role="dialog" aria-modal="true" aria-labelledby="menu-title">
             <div class="mesh mesh-wash" aria-hidden="true"></div>
 
-            <div class="eyebrow">Phase 1 · Versus CPU</div>
-            <h1 id="menu-title">Guess & Pass</h1>
-            <p class="body-lg">Simultaneous-move football. Six a side, two two-minute halves. Every change of
-                possession freezes the board and hands you ten seconds to stack every move at once — pass, runs,
-                keeper, shot — then both sides play them out together.</p>
-
-            <ul class="spec-list">
-                <li>Low-poly <strong>3D players</strong> standing on a <strong>2D top-view pitch</strong>.</li>
-                <li>A <strong>ten-second decision window</strong> on every possession — the match clock stops while
-                    the board is frozen, so thinking never costs you time.</li>
-                <li>When the window closes <strong>both sides move at once</strong>. Every pass and shot is resolved
-                    by <strong>pure geometry</strong> — proximity races, never dice.</li>
-            </ul>
-
-            <div class="actions">
-                <button type="button" class="btn btn-primary" id="btn-start">KICK OFF</button>
-                <button type="button" class="btn btn-secondary" id="btn-tutorial">TUTORIAL</button>
-                <button type="button" class="btn btn-ghost-sm" id="btn-verify">RUN RULEBOOK TESTS</button>
+            <div class="start-mark" aria-hidden="true">
+                <svg viewBox="0 0 64 64" focusable="false">
+                    <circle cx="32" cy="32" r="29" fill="none" stroke="currentColor" stroke-width="2" />
+                    <circle cx="32" cy="32" r="9" fill="currentColor" />
+                    <path d="M32 3v13M32 48v13M3 32h13M48 32h13" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" />
+                </svg>
             </div>
 
+            <div class="eyebrow">Versus CPU · 6-a-side</div>
+            <h1 id="menu-title">Guess & Pass</h1>
+            <p class="body-lg">Two halves of continuous football. Every change of possession freezes the board —
+                stack your moves, then watch both sides play them out together.</p>
+
+            <!-- The three match settings, on the card where the match begins.
+                 The same controls live in the in-game menu sheet, and the two
+                 surfaces stay in step: the engine syncs every pill from the
+                 value, never from the click. -->
+            <div class="start-settings">
+                <div class="sheet-group">
+                    <span class="hud-label">Difficulty</span>
+                    <div class="segmented" id="difficulty-start" role="group" aria-label="Difficulty">
+                        <button type="button" class="btn" data-diff="0.15" aria-pressed="false">BEGINNER</button>
+                        <button type="button" class="btn" data-diff="0.6" aria-pressed="true">MEDIUM</button>
+                        <button type="button" class="btn" data-diff="1" aria-pressed="false">HARD</button>
+                    </div>
+                </div>
+                <div class="sheet-group">
+                    <span class="hud-label">Move timer</span>
+                    <div class="segmented segmented-num" id="plan-window-start" role="group" aria-label="Move timer seconds">
+                        <button type="button" class="btn" data-lock="3" aria-pressed="false">3s</button>
+                        <button type="button" class="btn" data-lock="5" aria-pressed="false">5s</button>
+                        <button type="button" class="btn" data-lock="10" aria-pressed="true">10s</button>
+                        <button type="button" class="btn" data-lock="20" aria-pressed="false">20s</button>
+                    </div>
+                </div>
+                <div class="sheet-group">
+                    <span class="hud-label">Match length</span>
+                    <div class="segmented segmented-num" id="half-length-start" role="group" aria-label="Half length">
+                        <button type="button" class="btn" data-half="60" aria-pressed="false">1:00</button>
+                        <button type="button" class="btn" data-half="120" aria-pressed="true">2:00</button>
+                        <button type="button" class="btn" data-half="180" aria-pressed="false">3:00</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="actions">
+                <button type="button" class="btn btn-primary btn-xl" id="btn-start">KICK OFF</button>
+                <button type="button" class="btn btn-secondary" id="btn-tutorial">TUTORIAL</button>
+            </div>
+
+            <button type="button" class="btn btn-ghost-sm verify-link" id="btn-verify">RUN RULEBOOK TESTS</button>
             <div class="test-result" id="verify-out" aria-live="polite" hidden></div>
         </div>
     </div>
@@ -226,8 +310,8 @@ import '../styles/global.css';
                 <li><strong>Your end</strong> — <strong>you defend the BOTTOM goal and attack the TOP one.</strong>
                     Six a side: your keeper and five outfielders all start in your own half, so you always play
                     away from yourself.</li>
-                <li><strong>The decision window</strong> — the moment either side wins the ball, the board freezes
-                    and the plan clock starts at <strong>10</strong>. Nothing moves until the window closes. You
+                <li><strong>The decision window</strong> — the moment either side wins the ball, the board freezes and
+                    the ring in the centre circle starts draining. Nothing moves until it empties. You
                     stack <em>as many moves as you like</em> in that time; they all resolve together.</li>
                 <li><strong>The pass</strong> — <em>drag from the ball-carrier onto a team-mate</em> to pass to them,
                     or <em>into empty space</em> to play it there. Anyone can receive, keeper included. The ball is
@@ -235,8 +319,9 @@ import '../styles/global.css';
                 <li><strong>The runs</strong> — <em>drag any of your players</em> to drop a ring where they should be
                     when the ball is played. Stack as many runners as you have players.</li>
                 <li><strong>The shot</strong> — inside 30 units of goal, press <strong>SHOOT</strong> (or
-                    <span class="keyhint">Space</span>, or double-tap the goal mouth) to stack a shot. Outside that
-                    range it does nothing.</li>
+                    <span class="keyhint">Space</span>, or double-tap the goal mouth) to stack a shot. The keeper
+                    commits to a side, so <strong>aim across him</strong> — the far post is open. Outside that
+                    range the button does nothing.</li>
                 <li><strong>The save</strong> — defending, <em>drag your keeper to the dive point</em> to stack the
                     save. Leave it and the keeper dives on their own read.</li>
                 <li><strong>Closing the window</strong> — press <strong>MOVES DONE</strong> (or

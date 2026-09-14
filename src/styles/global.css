@@ -35,44 +35,26 @@ body {
 }
 
 /* ============================================================================
-   LAYOUT — phones cannot fit a dock's two clusters side by side without the
-   chips colliding, so each dock stacks its clusters and each cluster becomes
-   an independently scrollable line. This is the standard responsive HUD move:
-   stack, then scroll within the line, rather than wrap into a wall.
+   LAYOUT — the top HUD is now two corner groups (score left, clock right) that
+   never need to scroll or wrap: each corner is a fixed-width column of short
+   read-outs, so on a phone they simply sit closer together. The old
+   `#hud-top .dock` / `.cluster` stack-and-scroll rules went with the dock they
+   described. The bottom bar's only responsive move left is spacing, and
+   `game.css` already owns that in its own media queries.
    ========================================================================= */
 
-@media (max-width: 720px) {
-    #hud-top .dock {
-        flex-direction: column;
-        align-items: stretch;
-        gap: var(--s-xs);
-    }
-
-    #hud-top .cluster {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        scrollbar-width: none;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    #hud-top .cluster::-webkit-scrollbar {
-        display: none;
-    }
-
-    /* the cluster scrolls as one line, so give the inner controls a little
-       breathing room at the tail of the scroll */
-    #hud-top .cluster::after {
-        content: '';
-        flex: 0 0 var(--s-xxs);
-    }
+/* The app is a full-viewport surface, so nothing about it should rubber-band.
+   Without this, a drag on the turf on iOS can pull the whole page and shift the
+   HUD away from the canvas. */
+html,
+body {
+    height: 100%;
+    overscroll-behavior: none;
 }
 
-/* Narrower still: the decision-window well can shrink with the viewport */
 @media (max-width: 480px) {
-    #timer-wrap {
-        min-width: 120px;
-    }
 
+    /* the action row can carry a little more room once it owns the full width */
     .card .actions {
         margin-top: var(--s-md);
     }
@@ -102,6 +84,8 @@ body {
 
 #hud-top :focus-visible,
 #hud-bottom :focus-visible,
+#menu-sheet :focus-visible,
+#hud-pens :focus-visible,
 .screen :focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);

@@ -10,9 +10,9 @@ no longer the game.
 
 ## 0. Assumptions made — confirm or correct
 
-1. **6 players per team = 1 GK + 5 outfield.** Attacking uses carrier + receiver + 2 runners
-   (4 controlled), leaving exactly 1 auto. Defending uses interceptor + marker (2 controlled),
-   leaving 3 auto.
+1. **7 players per team = 1 GK + 6 outfield.** Attacking uses carrier + receiver + 2 runners
+   (4 controlled), leaving 3 auto. Defending uses interceptor + marker (2 controlled),
+   leaving 5 auto.
 2. **The conceding team kicks off** after a goal.
 3. **The marker** (2nd controlled defender) repositions freely; it only contests if the ball
    reaches its spot.
@@ -30,7 +30,7 @@ no longer the game.
 
 ## 1. Concept
 
-Continuous **real-time 6-a-side top-down football**. No turns, no hidden decision windows.
+Continuous **real-time seven-a-side top-down football**. No turns, no hidden decision windows.
 `BALL_SPEED > PLAYER_SPEED` always — that single inequality is what makes interception and
 shot-save genuine "beat it there" races. Two **2-minute halves**. A draw is settled by a
 **penalty shootout** with its own turn-based flow.
@@ -51,7 +51,8 @@ shot-save genuine "beat it there" races. Two **2-minute halves**. A draw is sett
 | `DIVE_SPEED` | 30 | keeper dive speed (slightly above `PLAYER_SPEED`) |
 | `BALL_SPEED` | 34 | ground pass speed — must beat `PLAYER_SPEED` |
 | `SHOT_SPEED` | 40 | shot speed |
-| `CATCH_RADIUS` | 3.0 | interception / control radius |
+| `CATCH_RADIUS` | 3.0 | collection / control radius (claiming a pass or a loose ball) |
+| `TOUCH_R` (engine) | 0.95 | **interception** contact radius — the ball must actually reach the defender |
 | `SHOT_RANGE` | 30 | max distance from goal to attempt a shot |
 | `KEEPER_REACH` | 6.0 | open-play save reach |
 | `PENALTY_KEEPER_REACH` | 12.0 | shootout save reach (tolerance) |
@@ -91,15 +92,17 @@ shot-save genuine "beat it there" races. Two **2-minute halves**. A draw is sett
 - **Interceptor** — drag live toward the guessed pass line.
 - **Marker** — free reposition.
 - **Goalkeeper** — drag / tap the dive point when the opponent shoots.
-- **3 auto-drift outfielders** holding shape.
+- **5 auto-drift outfielders** holding shape — and the same shape logic runs for the human's side, so nobody
+  stands still while the other team plays around them.
 
 ## 7. Resolution — real-time race, no dice
 
 - Ball: `B(t) = C + dir · BALL_SPEED · t`.
 - Interceptor: `Pd(t)` moves at `PLAYER_SPEED`.
-- **Interception fires the instant `|Pd(t) − B(t)| ≤ CATCH_RADIUS` while the ball is in
-  flight.** The pass completes if the ball reaches its target without ever coming within
-  `CATCH_RADIUS`.
+- **A cut is a TOUCH, not proximity.** The engine fires an interception the instant the path the ball travelled
+  during a frame comes within `TOUCH_R` of a defender — a genuine contact radius, about a body's width, and much
+  smaller than the rulebook's `CATCH_RADIUS` collection radius. A ball that merely passes *near* a man runs on.
+  The pass completes if the ball reaches its target without anybody ever touching it.
 - **Save:** the keeper moves toward the dragged / tapped dive target at `DIVE_SPEED`; the
   shot is **saved if the keeper comes within `KEEPER_REACH` of the ball before it crosses the
   goal line**, else **GOAL**. No input during the window → **default dive toward the shot's

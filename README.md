@@ -1,6 +1,6 @@
 # ⚽ Guess & Pass
 
-A real-time football duel: **3D low-poly players on a 2D top-view pitch**, six a side, no dice.
+A real-time football duel: **3D low-poly players on a 2D top-view pitch**, seven a side, no dice.
 You drag a pass and it travels; the defender you aimed past either gets there in time or does not.
 The ball tells the truth because the ball is the truth.
 
@@ -18,9 +18,10 @@ Regulation is **one continuous simulation**, not a sequence of turns ([`REALTIME
    pauses to ask permission; possession is whatever the last resolution left it as.
 2. **You attack by dragging.** Drag from the ball-carrier toward a teammate and release to fire the ball at
    `BALL_SPEED`. The ball is a live object in flight — not a probability roll.
-3. **The race resolves it.** §7 compares the ball's position against every defender's reach *every frame*.
-   Inside [`CATCH_RADIUS`](src/scripts/rules.js:26) the ball is cut out **mid-flight at that exact point** —
-   possession flips in place, with no whistle and no reset. If nobody gets there, the pass completes.
+3. **The race resolves it.** Every frame, the path the ball travelled is tested against every defender — not a
+   proximity aura, an actual **touch** (`TOUCH_R`, a body's width). The ball is cut out **mid-flight at that
+   exact point**, possession flips in place, with no whistle and no reset. A ball that merely passes close to a
+   defender runs on; if nobody ever reaches it, the pass completes.
 4. **Two halves of 2:00.** The match clock counts each half down. The current play always finishes; half-time
    swaps ends, and full time ends regulation.
 5. **Sent off level? Go to penalties.** A manual **Go to Penalties** button appears at full time when the
@@ -41,15 +42,16 @@ There is no play cap and no "first to N" — a match runs its two halves, and a 
 - **`BALL_SPEED > PLAYER_SPEED`, always.** That single inequality ([`RULES`](src/scripts/rules.js:21)),
   asserted by the suite, is what makes interception and shot-saving genuine **races** rather than coin flips:
   a defender cuts a pass out only by arriving on the ball's path in time.
-- **Closed-form interception, live proximity resolution.** The suite reasons about the race analytically — a
-  quadratic in `t` solved by [`interceptionTime()`](src/scripts/rules.js:122) — while the running match resolves
-  it by per-frame distance checks. Both read the same constants, so they agree.
+- **Closed-form race model, live contact rule.** The suite reasons about the race analytically — a quadratic in
+  `t` solved by [`interceptionTime()`](src/scripts/rules.js:122) — and the CPU scores its pass options with the
+  same function. The running match then asks its own contact question every frame: the segment the ball travelled
+  is tested against each defender for a genuine touch, so a ball that only whistles past a man runs on.
 - **Property verification, in the page and in Node.** [`runVerification()`](src/scripts/rules.js:342) asserts the
   28 properties of the rulebook — the speed inequalities, the squad shape, goal-mouth geometry, the race
   monotonicities, keeper reach, the shootout clinch maths — plus a 4000-play validity corpus. It runs headlessly
   via `npm run verify` and reports into the menu card in the page.
 - **A real shootout.** Triggered only by the manual button, on a dedicated zoomed penalty view, with its own
-  `AIM → CHECK_ON_TARGET → DIVE → RESOLVE → NEXT_KICKER` state machine. Five outfield players each, alternating,
+  `AIM → CHECK_ON_TARGET → DIVE → RESOLVE → NEXT_KICKER` state machine. Six outfield players each, alternating,
   then sudden death. Off target is an automatic miss; on target it is a **reach test** — inside
   `PENALTY_KEEPER_REACH` of the aim point is a save, outside is a goal.
 - **Pointer Events only.** One code path for mouse, touch and pen, with gesture disambiguation
@@ -77,12 +79,18 @@ There is no play cap and no "first to N" — a match runs its two halves, and a 
 Attack and defence swap automatically with possession — you always control **the ball-carrier, the intended
 receiver, two runners** (4), and when defending the **interceptor and the marker** (2), plus your goalkeeper.
 
+Every gesture on the ball is a **freehand stroke**: the line drawn on the turf is kept point for point and
+shown back while you draw. **Line length is power**, and a **long, bent line goes in the air** — over the
+defenders' heads, where nothing outfield can cut it out.
+
 | Action | Pointer | Keyboard |
 | --- | --- | --- |
-| **Pass** | Drag from the ball-carrier toward a teammate, **release to fire** | — |
+| **Pass** | Drag a line from the ball-carrier; **release** to commit. The ball travels to the point the line ends on, at the power the line earned | — |
+| **Set the shot angle** | Drag a line towards the goal — where it crosses the byline is where it will go. Then press **SHOOT** | <kbd>S</kbd> / <kbd>Space</kbd> |
+| **Carrier's own run** | Drag a **second** line from the carrier: once the ball has gone, he follows it | — |
+| **Redraw** | Drag a **third** line — it clears both the pass and the run and starts again | — |
 | **Nominate the receiver** | Tap the teammate | — |
-| **Send a runner** | Tap a teammate (up to two) | — |
-| **Shoot** | **Double-tap** a point along the goal mouth (only inside the shot range) | — |
+| **Send a runner** | Drag a line from a teammate (up to two) | — |
 | **Intercept** (defending) | Drag the interceptor along the line you expect the pass to take | — |
 | **Mark** (defending) | Drag the marker anywhere | — |
 | **Dive** (keeper) | Drag or tap the dive point as the shot leaves | — |
@@ -154,12 +162,13 @@ the sim and its guarantees fall out of step.
 
 | Constant | Value | Meaning |
 | --- | --- | --- |
-| `PLAYER_SPEED` | `26` | Outfield run speed, units / s |
-| `DIVE_SPEED` | `30` | Keeper dive speed — a shade above `PLAYER_SPEED` |
-| `BALL_SPEED` | `34` | Ground pass speed — **must** beat `PLAYER_SPEED` |
-| `SHOT_SPEED` | `40` | Shot speed — a shade above `BALL_SPEED` |
-| `DRILL_SPEED` | `22` | Off-ball drift / shape speed |
-| `CATCH_RADIUS` | `3` | Interception / control radius |
+| `SPEED_SCALE` | `0.7` | One dial over the five speeds below — ratios, and so every race verdict, are untouched |
+| `PLAYER_SPEED` | `26 × 0.7 = 18.2` | Outfield run speed, units / s |
+| `DIVE_SPEED` | `30 × 0.7 = 21` | Keeper dive speed — a shade above `PLAYER_SPEED` |
+| `BALL_SPEED` | `34 × 0.7 = 23.8` | Ground pass speed — **must** beat `PLAYER_SPEED` |
+| `SHOT_SPEED` | `40 × 0.7 = 28` | Shot speed — a shade above `BALL_SPEED` |
+| `DRILL_SPEED` | `22 × 0.7 = 15.4` | Off-ball drift / shape speed |
+| `CATCH_RADIUS` | `3` | Collection / control radius (claiming a pass or a loose ball) |
 | `KEEPER_REACH` | `6` | Open-play save reach |
 | `PENALTY_KEEPER_REACH` | `12` | Shootout save reach (the reach / tolerance test) |
 | `GOAL_HALF_WIDTH` | `12.5` | Half the mouth → mouth ≈ 25 units, centred on x = 50 |
@@ -168,6 +177,22 @@ the sim and its guarantees fall out of step.
 | `PENALTY_SPOT` | `10.5` | Penalty spot, units off the goal line |
 | `KEEPER_LINE` | `4` | How far off their line a keeper stands |
 | `SHOOTOUT_KICKS` | `5` | Per side, then sudden death |
+
+Two engine-side dials in [`game-source.js`](src/scripts/game-source.js) are deliberately **not** in the rulebook,
+because neither is something a property test can be written against:
+
+- `RUN_SCALE` (`0.92`) — a single multiplier applied at the one place a body is actually stepped
+  ([`moveToward()`](src/scripts/game-source.js:862)). It scales every mover on the board together, so the
+  rulebook's speed *ratios* — and therefore every race verdict — are untouched. The ball is intentionally left
+  alone: a slower ball would start losing races the rulebook says it wins, which is a rule change, not a feel one.
+- `TOUCH_R` (`0.95`) and `KEEPER_TOUCH_R` (`1.6`) — contact geometry. This decides whether a defender's feet
+  actually reached the ball, and no property test should be written against how wide a player looks. Turn it up
+  and defenders start intercepting from further away again.
+
+The stroke that drives power and height also lives in the engine
+([`§12.d`](src/scripts/game-source.js:100)): `STROKE_MAX` (`96`, the cap on points a gesture keeps), `STROKE_MIN`
+(`10`) and `POWER_LEN` (`46`) set the **length → power** ramp, while `AIR_LEN` (`34`) and `AIR_CURVE` (`1.22`) set
+the **length *and* bend → air ball** test. A stroke that is merely long, or merely bent, stays on the deck.
 
 Presentation-only values (camera zoom and pan, shake decay, banner timing, the synth's voices) are free to
 change. The 3D palette is the `COL` object ([`COL`](src/scripts/game-source.js:72)); the matching CSS colours

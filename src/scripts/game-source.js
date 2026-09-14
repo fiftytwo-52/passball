@@ -1,10 +1,10 @@
 /**
- * Guess & Pass — the engine.  Real-time 6-a-side football.
+ * Guess & Pass — the engine.  Real-time seven-a-side football.
  *
  * There are no turns and no dice. The pitch is one continuous simulation: a
  * `requestAnimationFrame` loop moves every player and the ball, and every
- * single frame asks the §7 questions — "is a defender inside CATCH_RADIUS of
- * the ball yet?", "has the keeper got a hand to it before the line?". What
+ * single frame asks the §7 questions — "has a defender actually got to the
+ * ball yet?", "has the keeper got a hand to it before the line?". What
  * happens is whatever the geometry says happens.
  *
  * The *rulebook* — speeds, radii, the interception race, the save reach, the
@@ -24,7 +24,7 @@
 import * as THREE from 'three';
 import {
     RULES, MATCH_LENGTH,
-    clamp, flightTime,
+    clamp, flightTime, projectOnSegment,
     resolvePassRace, interceptionTime,
     isOnTarget, shotOutcome, defaultDiveTarget,
     penaltyKickOutcome, shootoutDecided, formatClock,
@@ -49,8 +49,163 @@ import {
     const {
         PLAYER_SPEED, BALL_SPEED, SHOT_SPEED, DIVE_SPEED, DRILL_SPEED,
         CATCH_RADIUS, KEEPER_REACH,
-        GOAL_HALF_WIDTH, SHOT_RANGE, HALF_LENGTH, PENALTY_SPOT, KEEPER_LINE
+        /* HALF_LENGTH is deliberately NOT aliased here: the half length is a
+           player setting now, and the engine reads the runtime `halfLength`
+           (see the HALF_LENGTH_STEPS block in §17.b). rules.js keeps its own
+           constant for the property tests. */
+        GOAL_HALF_WIDTH, SHOT_RANGE, PENALTY_SPOT, KEEPER_LINE
     } = RULES;
+
+    /* ----------------------------------------------------------------------
+       § 0.b THE CONTACT RULE — a ball in flight is interrupted by a TOUCH, and
+       "touch" is a distance you can see.
+
+       The rulebook's CATCH_RADIUS (3) is a *collection* radius: how far a man's
+       control reaches when he is going to collect a ball — the receiver
+       claiming a pass that arrives, the nearest body claiming a loose ball, and
+       the model the CPU uses to score its own pass options. It was never a
+       tackle, and it was being used as one: an interception also fired on it,
+       so any ball that merely *passed* within three units of a defender — a
+       full body-width clear on either side of him — was taken off the passer.
+       The ball the player drew never arrived, and the defender who "read" it
+       never had to go anywhere near it.
+
+       Interruption is now a different and much smaller question, and it is
+       asked geometrically: the ball has to actually reach the defender's feet.
+       TOUCH_R is that contact radius. A player's drawn body is ~1.4 units wide
+       and the ball ~0.45 across, so a man who is genuinely on the ball's line
+       is comfortably inside it and a man who is merely in the neighbourhood is
+       not. The keepers get a little more of it, because they have hands.
+       Against a SHOT the reach is the keeper's arms, and the engine now passes
+       its own KEEPER_SAVE_REACH (§0.d) into `shotOutcome()` rather than letting
+       it default to the rulebook's KEEPER_REACH. rules.js is untouched, so the
+       property test that pins the rulebook's number still reads the rulebook.
+
+       These live here rather than in ./rules.js for one reason: everything in
+       the rulebook is pinned by a property test, and no test should be written
+       against how wide a defender looks. They are the engine's own contact
+       geometry, and they are the only numbers that decide a cut.
+       ---------------------------------------------------------------------- */
+    const TOUCH_R = 0.95;
+    const KEEPER_TOUCH_R = 1.6;
+
+    /* ----------------------------------------------------------------------
+       THE KEEPER'S SWEEP — the one time he leaves his line for a dead ball.
+
+       Presentation-plus: these decide WHERE a keeper stands, never a verdict,
+       so no property test reads them (exactly like TOUCH_R above). Before this
+       he lived on his line and nothing else, so a ball rolled into his own half
+       with nobody near it sat there until an outfielder walked back for it.
+       ---------------------------------------------------------------------- */
+    const KEEPER_CHASE_DIST = 38;   // a loose ball nearer than this to his home line
+    const KEEPER_SWEEP_R = 9;       // ...with no team-mate within this of it...
+    /* §12.h — ...and this far off his line, and never further. Was 26, which is
+       most of the way to the penalty spot: on top of a 12-unit "a ball this close
+       to him is his regardless", the keeper spent whole possessions standing in
+       the middle of his own box collecting everything that came near it, which is
+       half of "the goalkeeper is still too good". A keeper comes off his line for
+       a ball he can actually reach and then goes back. */
+    const KEEPER_SWEEP_MAX = 17;    // ...is his to come and collect, this far off his line
+    const KEEPER_CLEAR_R = 9;       // a ball this close to him is his regardless
+
+    /* ----------------------------------------------------------------------
+       § 0.d THE KEEPER'S READ — the engine's own model of a save.
+
+       "The goalkeeper is still too good" was not a save-race problem, it was a
+       coverage one, and it is worth the arithmetic because it is not obvious.
+       `shotOutcome()` (rules.js) wraps the rulebook's KEEPER_REACH (6) of arms
+       around the spot the keeper DIVES TO, and he then travels up to another
+       reach to get there — about two reaches of ground in total. The keeper
+       stands on x = 50 (keeperHome) and the mouth is GOAL_HALF_WIDTH = 12.5 to
+       either side of him, so from his own line he already covers a 12.5-wide
+       mouth almost to both posts. He was then handed the shot's TRUE side to
+       dive to (defaultDiveTarget), which is the one thing a keeper never knows,
+       and between the two there was no shot on the pitch he could not reach.
+
+       So the read is a coin flip instead of a solve, and the ground he commits
+       to is short. A read that goes the right way still saves everything from
+       the middle of the goal out to the post he moved for; a read that goes the
+       wrong way is beaten, which is what "if the attacker shoots the opposite
+       way to the dive, that should go in" has always asked for. The shot that
+       beats him on the correct side too is the far post — he has committed
+       inside it, and it is open behind him.
+
+       These are presentation tunables of exactly the kind §0.b describes: they
+       move a body and set his arms, never a verdict. `verify-4.mjs` imports
+       rules.js alone, so RULES.KEEPER_REACH, defaultDiveTarget() and the penalty
+       shootout — where the human DRAWS the dive — are all untouched.
+       ---------------------------------------------------------------------- */
+    const KEEPER_READ_CHANCE = 0.5;  // chance he dives the way the shot is going
+    const KEEPER_STEP = 3.0;         // ground he commits to, one way, off his line
+
+    /* --- §0.d the dive is a LUNGE, not a slide across the mouth --------------
+       "Decrease the keeper's diving length." Two numbers carried it, and both
+       were long enough that the mouth had no corner left in it.
+
+       KEEPER_DIVE_MAX caps how far from his standing position ANY dive may go —
+       the engine's own read above, and the point the human DRAWS for his own
+       keeper, which until now was clamped only by the width of the pitch: a
+       drag could send him 40 units sideways and he would arrive, because the
+       dive is the one motion §8 exempts from the shape rules. It is a body
+       throwing itself at a ball now, and a body has a length.
+
+       KEEPER_SAVE_REACH is the other half: the arms. `shotOutcome()` wraps this
+       around the point he dives to, so the ground he covers is the dive plus the
+       reach either side of it — 3.0 + 4.4 from his line for the uncommanded
+       read, against a mouth that is 12.5 wide from the centre to each post. The
+       far post is genuinely open, which is what a save being a read means.
+
+       Presentation-plus, exactly as §0.b describes: rules.js still owns
+       KEEPER_REACH = 6 and `verify-4.mjs` still reads the rulebook, because the
+       property tests call shotOutcome() without a `reach` and get the rulebook's
+       own number. Only the match passes these. */
+    const KEEPER_DIVE_MAX = 6.0;     // furthest a dive may travel, from his feet
+    const KEEPER_SAVE_REACH = 4.4;   // his arms around the point he dives to
+
+    /* ----------------------------------------------------------------------
+       § 0.c THE PACE DIAL — one number, under every body on the board.
+
+       "Decrease the speed of players slightly." Nothing in ./rules.js may be
+       touched: PLAYER_SPEED (18.2), BALL_SPEED (23.8) and the whole §7 race
+       table are pinned by the 28 property tests, and every one of those tests
+       decides a verdict from a RATIO between a speed and an unscaled radius.
+       Scaling PLAYER_SPEED alone would move those ratios and could flip a
+       threshold test; scaling a number the tests never see cannot.
+
+       So the dial is applied at the ONE place a body is actually stepped —
+       moveToward(), below — and nowhere else. Every caller is slowed together
+       and identically: a stacked run, a shape jog, a chase for a loose ball,
+       a keeper sliding across his line, a dive, the assemble walk. The ball is
+       NOT slowed, because the ball is not a player and the complaint was never
+       about the ball: passes and shots still race the runners at exactly the
+       speeds the rulebook describes, so a pass is now a fraction SLOWER to be
+       overtaken and a shot is unchanged.
+
+       Because the scale divides BOTH sides of every player-versus-player race
+       and neither side of a player-versus-ball race, what changes is only the
+       absolute pace of the bodies — which is precisely what was asked for.
+
+       It has now been wound down twice: 1 → 0.92, and 0.92 → 0.85. Both times
+       the asking was the same "slightly", and both times what the eye was
+       really missing was the CONTRAST with the ball — a contrast is a ratio,
+       so it has been answered from the body's side and from the ball's side at
+       once (see the stroke pace span below). At 0.85 a man runs at 15.47
+       against a rulebook 18.2, while the slowest pass in the game still
+       arrives at 16.31 — so the §12.b guarantee that the ball is quicker than a
+       running man for the whole of its flight is now kept with margin instead
+       of by a hair, which it was at the unscaled pace. Nothing in ./rules.js
+       has moved, so all 28 property tests still read the rulebook the engine is
+       actually playing by. */
+    const RUN_SCALE = 0.85;
+
+    /* --- §0.c keeper dial — the keeper runs on his own scale on top of the
+       pace dial. At 0.8 his dive reads ≈14.3 against an outfielder's 15.47:
+       a step slower than the men he races, which is what "the keeper is too
+       fast" asked for. It multiplies every keeper-only speed (dive, sweep,
+       slide, shootout dive), and the §7 save race gets RUN_SCALE ×
+       KEEPER_SCALE so the race he is judged by is the race he runs. The
+       rulebook is untouched: DIVE_SPEED stays 21.0 in rules.js. --- */
+    const KEEPER_SCALE = 0.8;
 
     /* --- presentation / feel: safe to tune, changes no mechanic --- */
     const SETUP_TIME = 1.15;      // kick-off / restart rearrange, seconds
@@ -74,9 +229,9 @@ import {
        ball", which is exactly what it was.
 
        So the ball is now kicked harder than it needs to be and dies into the
-       receiver instead of crawling to him: v0 = PASS_PACE·BALL_SPEED = 26.7, and
-       still PASS_SLOW·v0 = 19.2 when it arrives — faster than a 18.2 run all the
-       way down, and only just beatable in the final stride. `dec` is solved
+       receiver instead of crawling to him: v0 = PASS_PACE·BALL_SPEED = 30.0, and
+       still PASS_SLOW·v0 = 21.6 when it arrives — faster than a 18.2 run all the
+       way down, and only beatable in the final stride. `dec` is solved
        backwards from that single requirement, so the arrival fraction is exactly
        PASS_SLOW at every distance.
 
@@ -91,10 +246,153 @@ import {
        distance 0 and no defender can be nearer than that. */
     const BALL_CARRY = 1.15;      // how far ahead of the boot the ball is carried
     const PASS_SLOW = 0.72;       // speed at resolution, as a fraction of the kick
-    const PASS_PACE = 1.12;       // kick speed, as a multiple of BALL_SPEED
+    /* §12.b — "increase ball speed." The rulebook's BALL_SPEED (23.8) is pinned by
+       the 28 property tests and may not move, so the whole of the increase lives
+       here, in the one number that turns it into a kick: v0 = PASS_PACE·BALL_SPEED.
+       1.12 → 1.26 is a quarter of a chord more on every ball that leaves a boot,
+       and the arrival fraction is a RATIO of that kick (PASS_SLOW, below), so the
+       ball is quicker than a running man by a wider margin than before — the §12.b
+       guarantee gets stronger, never weaker. Nothing in ./rules.js has moved. */
+    const PASS_PACE = 1.26;       // kick speed, as a multiple of BALL_SPEED
     const PASS_REACH = 1.0;       // and it has covered this much ground by then
-    const BALL_ROLL_STOP = 14.0;  // turf friction for a loose ball, u/s²
+    /* §12.d — the two ends of the stroke's power dial. `pace` maps the drawn
+       length across this span (see launchBall), so a nudge into feet and a
+       line drawn the full length of the pitch are the same roll profile struck
+       at two different paces — and this span is what "the ball moves faster the
+       longer the line" actually means. Both ends have now been lifted: the floor
+       from 0.85 to 0.92, so even a nudge into feet is a struck ball rather than a
+       rolled one, and the ceiling from 1.45 to 1.60, so a full-length line is a
+       genuine clearance. PASS_SLOW still scales the whole span, so the floor is
+       still the slowest ball in the game and the profile still protects the
+       "quicker than a runner" rule at every power level. */
+    const PACE_MIN = 0.92;        // a flick into feet
+    const PACE_MAX = 1.60;        // a full-length line, struck as hard as he can
+    const BALL_ROLL_STOP = 11.5;  // turf friction for a loose ball, u/s²
     const BALL_ROLL_ARC = 0.06;   // a rolled ball is on the deck, not in the air
+
+    /* ----------------------------------------------------------------------
+       § 12.j THE REBOUND — a shot that does not go in is still a live ball.
+
+       Everything that was not a goal used to end with the ball in a keeper's
+       hands. `resolveArrival()` sent a shot that missed straight to
+       `goalKick(other(possession))`, which hands the ball to the defending
+       keeper WHEREVER HE HAPPENS TO BE STANDING — so a shot that flew a metre
+       wide, a shot that cannoned back off the post and a shot that ran out of
+       play were all the same event, and in all three the keeper collected a ball
+       he had never gone anywhere near. It is the one moment in a football match
+       where everybody sprints, and it was being resolved by an award.
+
+       So nothing collects a ball it has not reached. A shot that misses spills,
+       and from that instant it is an ordinary loose ball under the §12.b rules:
+       it rolls, it decelerates, the nearest body of each kit races for it (and
+       the keeper is a body — he has to come and get it), and whoever arrives
+       inside CATCH_RADIUS wins it. What is added here is only the geometry of
+       what the ball hits on the way.
+
+       Four surfaces, and every one of them is presentation-plus of the §0.b
+       kind: they decide WHERE the ball goes, never who wins it.
+
+         · the posts        — solved as a real circle, so the ball comes off the
+                              woodwork along the normal it struck it at;
+         · the netting      — the mouth is closed behind the line, so a loose
+                              ball cannot trickle through the back of the goal;
+         · the hoardings    — a few units past each byline, in the run-off;
+         · the touchlines   — the same, down the two sides.
+
+       Every one of them keeps a fraction of the pace and the rest is left in the
+       bounce, so a rebound dies out instead of pinballing. OUT_PAD is how far
+       into the run-off both the ball and the men chasing it may go: it is the
+       same number for both, so a ball that leaves the pitch is always a ball
+       somebody can be standing on.
+       ---------------------------------------------------------------------- */
+    const POST_R = 0.62;          // the post, as a radius on the canonical grid
+    const OUT_PAD = 3.0;          // how far past a line the ball (and a man) may go
+    const BOUNCE_POST = 0.52;     // pace kept off the woodwork
+    const BOUNCE_NET = 0.28;      // pace kept off the back of the net
+    const BOUNCE_BOARD = 0.40;    // pace kept off the hoardings and the touchlines
+    const REBOUND_FLOOR = 7.0;    // and a rebound always comes back with THIS much
+    const SPILL_DAMP = 0.62;      // pace a missed shot keeps as it spills into play
+    /* §12.j — and the scramble. One man per kit used to go for a loose ball, which
+       on a rebound reads as two players jogging at it while twelve stand and
+       watch. The SECOND man of each kit goes too, provided he is genuinely in the
+       race; and a keeper only ever races for a ball at his own end, because he is
+       the one body on the pitch that must not be caught out of position. */
+    const CHASE_SECOND = 26;      // the second man joins the race inside this
+    const KEEPER_RACE_DIST = 34;  // and a keeper races only this far from his goal
+    /* The mean speed of a rolled pass, taken from the same two numbers the roll
+       itself is built from. It is what turns a distance into a flight time, and
+       it is read by the roll in launchBall() and by the lead pass in leadSpot() —
+       two places that have to agree, because a lead worked out from one average
+       and a ball flown at another is a lead that is wrong by the difference. */
+    const PASS_AVG = BALL_SPEED * PASS_PACE * (1 + PASS_SLOW) * 0.5;
+    /* --- §12.d THE STROKE — the freehand line is the input, and its own two
+       properties are the mechanic. Nothing else sets power, and nothing else
+       decides whether the ball clears an outstretched leg:
+
+         LENGTH is power.  A long stroke is a full-blooded kick, a short one is a
+         nudge into feet. `pace` only rescales the SAME roll profile — v0 and the
+         flight time are both multiplied by it — so a hard stroke is still the
+         same shape of pass, just arriving sooner, and the "faster than a running
+         man" guarantee that the whole profile exists to protect is preserved at
+         every power level.
+
+         LENGTH *and* CURVE is lift.  A long stroke that is also bent — path
+         length ÷ straight-line chord — is a chip, and an outfielder CANNOT cut a
+         ball in the air: `contestFlight` skips the outfield cut entirely for
+         `ball.air`. The keeper is deliberately NOT exempt — pulling a chip out
+         of the air inside his own reach is a catch, not a disruption. */
+    const STROKE_MAX = 96;        // points kept per freehand stroke
+    const STROKE_MIN = 10;        // shorter than this is a flick, and a flick is not a strike
+    const POWER_LEN = 46;         // stroke length (canonical units) that reads as a full kick
+    const AIR_LEN = 34;           // length at which a long stroke goes over the top
+    const AIR_CURVE = 1.22;       // path ÷ chord that counts as a deliberate curve
+    /* §12.d — and the SHOT rides the same dial. A shot used to be struck at
+       exactly SHOT_SPEED whatever the gesture, so the one action where power
+       reads most clearly was the one action the length of the line could not
+       touch: a flick and a full-blooded swing left the boot at the same pace.
+       `power` now travels on the plan beside the aim point, and a full-length
+       line is struck SHOT_POWER_GAIN harder. A bare press — the SHOOT button,
+       Space, S, a double-tap with no line — carries no power at all and is
+       struck at exactly the rulebook speed, so nothing that was balanced
+       against SHOT_SPEED has moved. Speed is also the ONLY thing this touches:
+       launchBall() runs a shot down its drawn direction whatever speed it is
+       given, so the line stays the line and the strike only decides how long
+       the ball takes to travel it. */
+    const SHOT_POWER_GAIN = 0.22;
+    /* §12.h — AND A SHOT IS STRUCK HARDER THAN THE RULEBOOK, TOO. A bare press
+       leaves the boot at SHOT_SPEED × STRIKE_GAIN = 44.8, and a full-length drawn
+       line at 44.8 × 1.22 = 54.66 — about one and a half times the fastest pass in
+       the game (30.0), which is what "extremely fast" has to mean on a board this
+       size. Nothing in ./rules.js moves: SHOT_SPEED stays the rulebook number the
+       28 property tests pin (`shot 28`), and stays the number the engine falls
+       back on wherever a shot has no pace of its own. This is a strike multiplier
+       applied at the boot, in shoot(), and nowhere else. */
+    const STRIKE_GAIN = 1.6;
+    /* --- §12.f THE BALL TRAVELS THE LINE THAT WAS DRAWN ---------------------
+       A drawn pass goes straight down the drawn line, and two separate things
+       used to pull it off that line.
+
+         1. THE ANCHOR. The stroke was drawn from wherever the finger came down —
+            the carrier's chest, usually — while the ball is struck from
+            `ball.from`, which is wherever the BALL was sitting. Those are two
+            different points a BALL_CARRY (1.15 units) apart, and the ball left
+            along the line through the second one. So the line drawn on the grass
+            and the line the ball took were parallel rather than the same line,
+            which is exactly the "the ball did not follow my line" report.
+            `ballPoint()` hands the gesture the ball's OWN position, so the stroke
+            is anchored to the ball and the two cannot disagree.
+
+         2. THE LIFT. A chip is a lie about height, not a trajectory. It used to
+            be given a real arc of 2.1 units on a sine across the flight, and a
+            sine is a BOW: the ball rose away from the drawn line and came back to
+            it, so the line was only true at its two ends. The lift is now a flat
+            hop of AIR_ARC with the flight time interpolated linearly, which keeps
+            the ball on the drawn line on every frame in between. A chip is also
+            struck from the SAME rolled profile as a ground pass — only 8% harder,
+            via CHIP_GAIN — because the roll is what makes the ball, the flight
+            time and the strike point all read the same distance. */
+    const AIR_ARC = 0.30;         // the chip's whole lift: a visual "over the top"
+    const CHIP_GAIN = 1.08;       // a chip is struck this much harder than a ground pass
     /* --- and how it is *drawn*, which is the half nobody could see ------------
        The ball is a 0.42-unit sphere on a board 100 units wide, and it was also
        rendered pure white with emissive blown to full, so every pixel of it was
@@ -105,8 +403,13 @@ import {
        All three are light-independent on purpose — see the material's comment. */
     const BALL_VIS = 1.16;        // drawn this much larger than it is, to be findable
     const BALL_PING = 1.25;       // seconds per beacon ring
-    const LANE_OFFSET = [-30, -14, 14, 30];
-    const LANE_DEPTH = [0.55, 0.82, 0.62, 0.34];
+    /* Six attacking lanes, one per outfielder. Slot `i` sits LANE_OFFSETS[i]
+       across the pitch, LANE_DEPTHS[i] of the way back towards the side's own
+       goal. Both tuples were four long, so with a fifth and sixth attacker the
+       index wrapped and two men were sent to the same station — the same stacking
+       bug the defender table below had. */
+    const LANE_OFFSET = [-30, -14, 14, 30, -22, 22];
+    const LANE_DEPTH = [0.55, 0.82, 0.62, 0.34, 0.40, 0.74];
     const TAP_SLOP = 6;           // game units a pointer must travel to be a drag
     const DOUBLE_TAP_MS = 340;    // §5 — double-tap to shoot
     const SO_ZOOM = 2.6, SO_PAN_Y = 92;   // §10 penalty view: one end, magnified
@@ -221,7 +524,11 @@ import {
        nothing in the rulebook may reference any of these.
        ========================================================================== */
     const PITCH_M = { x: 68, y: 105 };              // metres across / along
-    const GROUND_M = { x: 76, y: 113 };             // playing area + 4 m run-off
+    /* the ground grew +10 m per side (76 × 113 → 96 × 133) so a phone in
+       portrait keeps the whole touchline on screen with room to breathe.
+       Every marking below is authored against PITCH_M, so the pitch stays
+       dead centre of the bigger plane — only the run-off grows. */
+    const GROUND_M = { x: 96, y: 133 };             // playing area + run-off
     const MX = 100 / PITCH_M.x;                     // game-x units per metre
     const MY = 100 / PITCH_M.y;                     // game-y units per metre
     const KX = PITCH_M.x / PITCH_M.y;               // world-x compression (~0.648)
@@ -281,11 +588,26 @@ import {
     const ZSTRETCH = 1 / Math.cos(TILT);            // stretches the ground plane's depth so
     // the top-view artwork lands on screen undistorted
     /* Visible half-extents in screen units. Screen-up is 1:1 with game-y, and
-       screen-right is game-x compressed by KX, so these are simply the ground's
-       half-metres: 113/2 along, 76/2 × KX across. Half a unit of slack keeps the
-       plane's own edge from ever landing exactly on the canvas edge. */
-    const reqHW = GROUND_M.x * KX / 2 + 0.5;        // ≈ 36.5
-    const reqHH = GROUND_M.y / 2 + 0.5;             // ≈ 57.0
+       screen-right is game-x compressed by KX — so a metre is UPM screen units
+       in BOTH directions (MX × KX = UPM across, MY = UPM along). The ground plane
+       is 96 m × 133 m, which is ±45.7 across and ±66.5 along once it is on
+       screen; half a unit of slack keeps the plane's own edge from ever landing
+       exactly on the canvas edge. (Reading the metres as game-x units and
+       compressing by KX alone — the old reqHW — asked for only ±25.1 across,
+       which is what let the touchlines run off the sides of a phone.) reqHH
+       keeps its slightly roomier value so the vertical framing the HUD bands
+       were tuned against does not move. */
+    /* §12.k — reqHW is the width the play itself needs: the touchlines plus
+       the run-off the ball can actually reach (OUT_PAD either side of the
+       grid), and no more. Containing the whole 96 m artwork instead spent a
+       quarter of a phone's screen width on run-off grass nobody can reach,
+       which is why the pitch read small in portrait. The reachable strip
+       fills the width instead, so the playable area is both wider and —
+       because the height is derived from it on a narrow screen — taller.
+       Landscape never reads reqHW except as the branch threshold below, so
+       the desktop framing does not move. */
+    const reqHW = (PITCH_M.x / 2 + OUT_PAD * M_X) * UPM + 2.5;   // ≈ 36.8
+    const reqHH = GROUND_M.y / 2 + 0.5;             // ≈ 67.0
     /* §10 — the shootout magnifies one end, so the view carries a zoom and a
        pan (in game-y units) on top of the contain fit. */
     const view = { hw: reqHW, hh: reqHH, zoom: 1, panY: 50 };
@@ -482,7 +804,8 @@ import {
        texture share one scale and the pitch is a true 105 × 68 m. */
     const pitchPlane = new THREE.Mesh(
         new THREE.PlaneGeometry(GROUND_M.x * UPM, GROUND_M.y * UPM * ZSTRETCH),
-        new THREE.MeshLambertMaterial({ map: makePitchTexture(1695) })
+        /* 15 px per metre of ground held constant: 15 × 133 = 1995 */
+        new THREE.MeshLambertMaterial({ map: makePitchTexture(1995) })
     );
     pitchPlane.rotation.x = -Math.PI / 2;
     pitchPlane.position.y = 0;
@@ -657,16 +980,19 @@ import {
         return p;
     }
 
-    /* §2 — 5 outfield + 1 keeper per team. The keeper is always num 6, so the
-       engine can reach both of them by id (`you6`, `cpu6`). */
-    for (let i = 1; i <= 5; i++) spawnPlayer('you', 'outfield', i);
-    spawnPlayer('you', 'keeper', 6);
-    for (let i = 1; i <= 5; i++) spawnPlayer('cpu', 'outfield', i);
-    spawnPlayer('cpu', 'keeper', 6);
+    /* §2 — 6 outfield + 1 keeper per team (seven a side). The keeper is always
+       the *last* number, so the engine can reach both of them by id (`you7`,
+       `cpu7`) without ever looking them up by role. Everything downstream —
+       teamOutfield(), the planners, the shootout rotation — is written over
+       arrays, so the squad size lives in exactly these five lines. */
+    for (let i = 1; i <= 6; i++) spawnPlayer('you', 'outfield', i);
+    spawnPlayer('you', 'keeper', 7);
+    for (let i = 1; i <= 6; i++) spawnPlayer('cpu', 'outfield', i);
+    spawnPlayer('cpu', 'keeper', 7);
 
     const teamPlayers = team => allPlayers.filter(p => p.team === team);
     const teamOutfield = team => allPlayers.filter(p => p.team === team && p.role === 'outfield');
-    const keeperOf = team => playersById[team + '6'];
+    const keeperOf = team => playersById[team + '7'];
 
     /* --- body separation ----------------------------------------------------
        Nothing in the engine used to stop two players occupying the exact same
@@ -696,14 +1022,17 @@ import {
                     /* dead centre: split along a fixed axis derived from the pair */
                     const ang = (i * 7 + j * 13) * 2.399963229728653;
                     const px = Math.cos(ang) * maxPush * 0.5, py = Math.sin(ang) * maxPush * 0.5;
-                    if (!a.dive) { a.x = clamp(a.x - px, 3, 97); a.y = clamp(a.y - py, 3, 97); }
-                    if (!b.dive) { b.x = clamp(b.x + px, 3, 97); b.y = clamp(b.y + py, 3, 97); }
+                    if (!a.dive) { a.x = clamp(a.x - px, -OUT_PAD, 100 + OUT_PAD); a.y = clamp(a.y - py, -OUT_PAD, 100 + OUT_PAD); }
+                    if (!b.dive) { b.x = clamp(b.x + px, -OUT_PAD, 100 + OUT_PAD); b.y = clamp(b.y + py, -OUT_PAD, 100 + OUT_PAD); }
                     continue;
                 }
                 const push = Math.min((SEPARATE_R - d) * 0.5, maxPush);
                 const ux = dx / d, uy = dy / d;
-                if (!a.dive) { a.x = clamp(a.x - ux * push, 3, 97); a.y = clamp(a.y - uy * push, 3, 97); }
-                if (!b.dive) { b.x = clamp(b.x + ux * push, 3, 97); b.y = clamp(b.y + uy * push, 3, 97); }
+                /* §12.j — the same bounds moveToward() allows: a man chasing a
+                   ball into the run-off must not be snapped back onto the pitch
+                   by a separation shove. */
+                if (!a.dive) { a.x = clamp(a.x - ux * push, -OUT_PAD, 100 + OUT_PAD); a.y = clamp(a.y - uy * push, -OUT_PAD, 100 + OUT_PAD); }
+                if (!b.dive) { b.x = clamp(b.x + ux * push, -OUT_PAD, 100 + OUT_PAD); b.y = clamp(b.y + uy * push, -OUT_PAD, 100 + OUT_PAD); }
             }
         }
     }
@@ -714,28 +1043,109 @@ import {
         p.shadow.position.set(worldX(p.x), 0.03, worldZ(p.y));
     }
 
-    /** Facing + run cycle (legs/arms swing, slight bob). */
+    /** Facing + run cycle (legs/arms swing, slight bob), and the keeper's dive.
+
+       The dive is a POSE, not a second animation system: it is lerped in and out
+       of exactly the run pose below, by one eased weight (`p.diveAmt`). It rides
+       the same `k.dive` target the keeper is already running at, so there is
+       nothing new to keep in sync — the body reaches for the ball it was told to
+       go and get, and the reach stays honest because the arms end up where the
+       ball is. A dive that has finished, or was never ordered, eases back to the
+       run pose and leaves no trace: juice returns to rest. */
     function animatePlayer(p, dt) {
         const dx = p.x - p.px, dy = p.y - p.py;
         p.px = p.x; p.py = p.y;
         const sp = Math.hypot(dx, dy) / Math.max(dt, 1e-3);
         const f = clamp(sp / PLAYER_SPEED, 0, 1);
+        /* The gait is EASED towards the current pace instead of being read
+           straight off it. Read straight off it, a hard start or a hard stop
+           snapped the limbs to full swing and back inside one frame, and a body
+           shoved by the separation pass flickered as its speed spiked. Ramping
+           the cycle in and out makes a player accelerate into a run and settle
+           out of one, which is most of what "smooth" means for a run. */
+        const g0 = p.gait || 0;
+        p.gait = g0 + (f - g0) * Math.min(1, dt * 10);
+        const g = p.gait;
         p.walk += sp * dt * 0.22;
-        const s = Math.sin(p.walk * 6) * .85 * f;
+        const s = Math.sin(p.walk * 6) * .85 * g;
         const L = p.mesh.userData.limbs;
-        L.legL.rotation.x = s; L.legR.rotation.x = -s;
-        L.armL.rotation.x = -s * .8; L.armR.rotation.x = s * .8;
-        L.sleeveL.rotation.x = -s * .8; L.sleeveR.rotation.x = s * .8;
-        p.mesh.position.y = Math.abs(Math.sin(p.walk * 6)) * .13 * f;
-        if (sp > .6) {
-            /* world facing: game +y is screen-up (= world −z), so yaw = atan2(dx, −dy) */
-            const target = Math.atan2(dx, -dy);
+
+        /* --- the dive weight, and the direction it was ORDERED in -----------
+           `k.dive` is re-writable for the whole flight, and once he has arrived
+           it is still set — so reading it fresh every frame would let a keeper
+           who is already there take a new heading off his own approach vector
+           and flicker mid-dive. The direction is captured once, when the dive
+           begins, and held for as long as the weight is up. */
+        const diveAmt0 = p.diveAmt || 0;
+        if (p.dive) {
+            if (p.diveRef !== p.dive) {
+                p.diveRef = p.dive;
+                const vx = p.dive.x - (p.x - dx);
+                const vy = p.dive.y - (p.y - dy);
+                const vl = Math.hypot(vx, vy);
+                if (vl > 1e-4) { p.diveDx = vx / vl; p.diveDy = vy / vl; }
+                else { p.diveDx = 0; p.diveDy = attackSide(p.team); }
+            }
+            p.diveAmt = diveAmt0 + (1 - diveAmt0) * Math.min(1, dt * 9);
+        } else {
+            p.diveRef = null;
+            p.diveAmt = diveAmt0 * Math.max(0, 1 - dt * 7);
+        }
+        const da = p.diveAmt;
+        const ddx = p.diveDx !== undefined ? p.diveDx : 0;
+        const ddy = p.diveDy !== undefined ? p.diveDy : attackSide(p.team);
+
+        /* and the facing follows the run from the first step, not from 0.6 u/s:
+           a player setting off used to walk sideways-on for several frames
+           before the yaw gate opened, then swivel late. A DIVING keeper is the
+           exception: he is squared back up to his own goal line while the dive
+           is up, because the roll below is applied about his local z and a body
+           turned side-on would somersault instead of dive. */
+        if (sp > .25 || da > .35) {
+            const target = da > .35 ? (p.team === 'you' ? Math.PI : 0) : Math.atan2(dx, -dy);
             let d = target - p.yaw;
             while (d > Math.PI) d -= Math.PI * 2;
             while (d < -Math.PI) d += Math.PI * 2;
             p.yaw += d * Math.min(1, dt * 9);
         }
         p.mesh.rotation.y = p.yaw;
+
+        /* --- blend the run pose into the dive pose --------------------------
+           Every channel is the run value plus `da` of the way to a dive value,
+           so the two poses cannot fight: at da = 0 this is byte-for-byte the old
+           run cycle, and at da = 1 it is a body laid out flat with both arms
+           reaching toward the ball it was sent for. */
+        const runY = Math.abs(Math.sin(p.walk * 6)) * .13 * g;
+        if (da <= 1e-4) {
+            L.legL.rotation.x = s; L.legR.rotation.x = -s;
+            L.armL.rotation.x = -s * .8; L.armR.rotation.x = s * .8;
+            L.sleeveL.rotation.x = -s * .8; L.sleeveR.rotation.x = s * .8;
+            p.mesh.position.y = runY;
+            p.mesh.rotation.z = 0;
+        } else {
+            /* How much of the dive is to the keeper's LEFT or RIGHT. The body
+               rolls only as far as the dive is actually lateral — a dive down
+               the middle stays upright and reaches straight down the pitch —
+               and `lat` is the honest ball-side component of the dive vector,
+               nothing invented and nothing random. */
+            const lat = clamp(ddx * attackSide(p.team), 0, 1);
+            const dir = ddx >= 0 ? 1 : -1;
+            const l = da;
+            L.legL.rotation.x = s * (1 - l) + (-.34 - .24 * lat) * l;
+            L.legR.rotation.x = -s * (1 - l) + (.58 + .24 * lat) * l;
+            L.armL.rotation.x = -s * .8 * (1 - l) + (-2.52 - .26 * lat) * l;
+            L.armR.rotation.x = s * .8 * (1 - l) + (-2.34 + .16 * lat) * l;
+            /* the forearms straighten as he reaches, and tuck back as the dive
+               is picked up again */
+            L.sleeveL.rotation.x = -s * .8 * (1 - l) + (-.5 * (1 - da)) * l;
+            L.sleeveR.rotation.x = s * .8 * (1 - l) + (-.5 * (1 - da)) * l;
+            /* up off the ground at the top of the dive, back down as it decays */
+            p.mesh.position.y = runY * (1 - l) + 0.62 * Math.sin(Math.PI * clamp(da, 0, 1)) * l;
+            /* the two kits are modelled facing opposite ways, so the same world
+               direction is the opposite sign of roll for each of them */
+            const rollSign = p.team === 'you' ? 1.15 : -1.15;
+            p.mesh.rotation.z = -dir * lat * rollSign * da;
+        }
     }
 
     function moveToward(p, tx, ty, speed, dt) {
@@ -748,9 +1158,20 @@ import {
             if (d > 1e-6) { p.x = tx; p.y = ty; }
             return true;
         }
-        const step = Math.min(speed * dt, d);
-        p.x = clamp(p.x + dx / d * step, 3, 97);
-        p.y = clamp(p.y + dy / d * step, 3, 97);
+        /* §0.c — the pace dial, applied at the single point where a body is
+           actually stepped. Every caller passes a speed the rulebook owns; this
+           is the one place allowed to shave it, so no two movers can drift
+           apart and no rulebook number has to be edited to slow the board. */
+        const step = Math.min(speed * RUN_SCALE * dt, d);
+        /* §12.j — the backstop is the RUN-OFF, not the painted pitch. It used to
+           be 3…97, which is inside the touchline: a ball that had run out of play
+           sat at a spot no body was allowed to stand on, so the only way it could
+           ever come back was for somebody to be awarded it. Every station this
+           engine computes is clamped well inside the lines by its own caller, so
+           the only movers this widening reaches are the two it is for — a man
+           chasing a loose ball, and a keeper coming out for one. */
+        p.x = clamp(p.x + dx / d * step, -OUT_PAD, 100 + OUT_PAD);
+        p.y = clamp(p.y + dy / d * step, -OUT_PAD, 100 + OUT_PAD);
         return false;
     }
 
@@ -826,8 +1247,13 @@ import {
         from: null, dir: null, target: null,
         speed: BALL_SPEED, t: 0, total: 0, travel: 0,
         s0: BALL_SPEED, s: 0, dec: 0, roll: false,  /* §12.b rolling-ball state */
-        arc: ARC_PASS, alive: false,
-        passTarget: null, lastTouch: null
+        arc: ARC_PASS, air: false, alive: false,   // §12.d `air` = uncuttable in flight
+        passTarget: null, lastTouch: null,
+        /* §12.b — the carry direction is EASED, never snapped (see stepBall).
+           A persistent unit vector, settled by the collapse guard on the first
+           frame the ball is held, so it is always a real direction by the time
+           anybody reads it. */
+        cdx: 0, cdy: 0
     };
 
     function launchBall(from, to, speed, opts) {
@@ -842,29 +1268,48 @@ import {
         ball.dir = dl > 1e-6 ? { x: dx / dl, y: dy / dl } : { x: 0, y: 1 };
         ball.speed = speed;
         ball.roll = o.roll === true;
+        /* §12.d — an air ball is a different thing in flight, not a different
+           kick: a man cannot get his feet to it, so nothing outfield can cut it. */
+        ball.air = o.air === true;
         ball.s0 = speed;
         ball.s = speed;
         ball.t = 0;
         ball.travel = 0;
         ball.target = { x: to.x, y: to.y };
-        /* A shot is a strike and keeps its constant speed — the keeper's dive is
-           modelled off that speed in shoot()/cpuKeeperDive(), so slowing shots
-           here would break the save, not just the look.
+        /* A shot is a strike and keeps its constant speed — and §12.h strikes it
+           at SHOT_SPEED × STRIKE_GAIN in shoot(), so it now leaves the boot well
+           clear of any pass in the game. It must stay constant through the flight:
+           shotOutcome() races the keeper against one straight line at one pace, so
+           a shot that slowed here would break the save, not just the look.
 
            A pass is rolled, and the roll is derived backwards from the single
            requirement that is about the rules rather than the look: THE BALL HAS
            TO BE FASTER THAN A RUNNING MAN UNTIL THE MOMENT IT RESOLVES. So the
-           KICK speed is fixed first — PASS_PACE·BALL_SPEED, 26.7, a shade under
-           SHOT_SPEED, which is what a firmly struck pass actually is — and `dec`
+           KICK speed is fixed first — PASS_PACE·BALL_SPEED, 30.0, a firmly struck
+           pass — and `dec`
            is then chosen so that the ball is still moving at PASS_SLOW of that
            kick when it reaches PASS_REACH of the aimed distance. Total time is
            the mean of the two speeds. Pass the `speed` argument in and it is
            ignored for a roll: the profile is the profile. */
         if (ball.roll) {
-            const v0 = BALL_SPEED * PASS_PACE;
-            const avg = v0 * (1 + PASS_SLOW) * 0.5;
+            /* §12.d — `pace` is the stroke's length, mapped across PACE_MIN…PACE_MAX
+               of a standard kick. It multiplies BOTH the launch speed and the mean
+               speed the flight time is solved from, which is the only way to add
+               power without changing the arrival fraction: the ball still dies
+               into PASS_SLOW of whatever it was struck at, so the rule about
+               being quicker than a runner holds at every power level. The span is
+               what makes the ball answer the drawn line: a short flick is the
+               floor, and a line drawn the full length of the pitch is the ceiling
+               — a good half again as quick.
+               §12.f — a chip rides this same profile, only CHIP_GAIN harder, so
+               a lofted ball is still a ball that arrives on the drawn point. */
+            const base = o.pace === undefined
+                ? 1
+                : PACE_MIN + (PACE_MAX - PACE_MIN) * clamp(o.pace, 0, 1);
+            const pace = base * (ball.air ? CHIP_GAIN : 1);
+            const v0 = BALL_SPEED * PASS_PACE * pace;
             ball.s0 = ball.s = ball.speed = v0;
-            ball.total = PASS_REACH * d / Math.max(1e-6, avg);
+            ball.total = PASS_REACH * d / Math.max(1e-6, PASS_AVG * pace);
             ball.dec = v0 * (1 - PASS_SLOW) / Math.max(1e-6, ball.total);
             ball.arc = BALL_ROLL_ARC;
         } else {
@@ -927,15 +1372,190 @@ import {
     const queueRings = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(() => mkRing(COL.aim, 0.55, 0.95));
     const queueLine = groundLine(COL.aim, 2);
 
+    /* --- §8.c the freehand stroke (§12.d) -----------------------------------
+       groundLine() can only ever draw two points, and a second point is exactly
+       what a curve is not. A stroke is an arbitrary polyline across the turf:
+       the gesture's own path, kept and shown back to the player point for point,
+       so the line on the grass IS the line under the finger. The buffer is
+       preallocated at STROKE_MAX — the cap on how many points a gesture keeps —
+       and only the used prefix is drawn, so nothing is allocated mid-drag.
+       frustumCulled is off because the bounds are rewritten while the line is
+       being drawn, and a stroke that blinked out for a frame because its cached
+       bounds were stale would be the most confusing thing on the screen. */
+    function freeLine(color) {
+        const n = STROKE_MAX;
+        const geo = new THREE.BufferGeometry();
+        const arr = new Float32Array(n * 3);
+        const attr = new THREE.BufferAttribute(arr, 3);
+        attr.setUsage(THREE.DynamicDrawUsage);
+        geo.setAttribute('position', attr);
+        geo.setDrawRange(0, 0);
+        const m = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: .95 }));
+        m.frustumCulled = false;
+        m.visible = false;
+        scene.add(m);
+        /* y is fixed: every one of these lines is painted on the turf, at the
+           same height the other guides use */
+        m.setPoints = pts => {
+            const used = Math.min(n, pts.length);
+            for (let i = 0; i < used; i++) {
+                arr[i * 3] = worldX(pts[i].x);
+                arr[i * 3 + 1] = .1;
+                arr[i * 3 + 2] = worldZ(pts[i].y);
+            }
+            geo.setDrawRange(0, used);
+            attr.needsUpdate = true;
+            geo.computeBoundingSphere();
+        };
+        return m;
+    }
+    /* the three strokes a window can show: the one under your finger, the pass
+       you have already drawn, and the carrier's own run */
+    const strokeLine = freeLine(COL.aim);
+    const passCurve = freeLine(COL.aim);
+    const moveCurve = freeLine(COL.ghost);
+
+    /* --- §8.d the drawn plan ------------------------------------------------
+       §12.d gives the man on the ball TWO lines, drawn one after the other: the
+       first is the ball (the point you are passing to, or the angle you will
+       shoot along), the second is his own run once the ball has gone. A third
+       line means he has changed his mind, so it wipes both and starts again.
+
+       `slot` is which line the NEXT stroke will be. All of this lives and dies
+       with the window: clearIntents() resets it, so a new possession, a spilled
+       pass and a closed window each start from a clean sheet. */
+    const AIM = { slot: 1, pass: null, move: null };
+
+    function aimReset() {
+        AIM.slot = 1; AIM.pass = null; AIM.move = null;
+        strokeLine.visible = false;
+        passCurve.visible = false;
+        moveCurve.visible = false;
+    }
+
+    /* --- the two properties of a stroke, and the two mechanics they drive --- */
+    function pathLength(pts) {
+        let l = 0;
+        for (let i = 1; i < pts.length; i++) l += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+        return l;
+    }
+    function pathChord(pts) {
+        if (pts.length < 2) return 0;
+        const a = pts[0], b = pts[pts.length - 1];
+        return Math.hypot(b.x - a.x, b.y - a.y);
+    }
+    /** §12.d — length is power: a nudge into feet at 0, a full kick at POWER_LEN. */
+    function strokePower(len) {
+        return clamp((len - STROKE_MIN) / Math.max(1, POWER_LEN - STROKE_MIN), 0, 1);
+    }
+    /** §12.d — air is length AND curve, because that is what was asked for: a
+        stroke that is merely long, or merely bent, stays on the deck. */
+    function strokeIsAir(len, chord) {
+        if (len < AIR_LEN) return false;
+        return chord < 1e-3 || len / chord >= AIR_CURVE;
+    }
+    /** Build the finished stroke that a gesture hands to the plan. */
+    function readStroke(pts) {
+        const len = pathLength(pts);
+        const chord = pathChord(pts);
+        return {
+            pts, len, chord,
+            end: pts[pts.length - 1],
+            power: strokePower(len),
+            air: strokeIsAir(len, chord)
+        };
+    }
+
+    /* --- §8.e SHOT LINE — where a drawn angle crosses the goal line --------
+       The angle the player draws is the angle the ball is struck along, so the
+       shot target is simply where that ray meets the byline the goal stands on.
+       That is what makes "fire along the drawn angle" mean something: draw at
+       the near post and it goes to the near post; draw across the face and it
+       misses the far side. A ray drawn the WRONG WAY, or one so square that it
+       would cross the byline off the pitch, has no goal-line answer and hands
+       back null — the caller then falls back to the middle of the goal. */
+    function shotTargetFor(from, end) {
+        const goal = PLAY ? PLAY.goal : null;
+        if (!goal || !from || !end) return null;
+        const dy = end.y - from.y;
+        if (Math.abs(dy) < 0.5) return null;      // drawn square across the pitch
+        const t = (goal.y - from.y) / dy;
+        if (!(t > 0)) return null;                // drawn away from the goal
+        const x = from.x + (end.x - from.x) * t;
+        if (!Number.isFinite(x) || x < -8 || x > 108) return null;
+        /* §12.f — the UNCLAMPED crossing. Clamping the byline point into the turf
+           used to pull a near-corner strike back off the ray the player drew; the
+           ball now meets the byline exactly where the line crosses it, and a line
+           that crosses outside the frame is honestly wide. */
+        return { x, y: goal.y };
+    }
+
+    /* The longest drawn line still read as an aim, and how many SHOT_RANGEs of
+       the drawn direction may be carried out to the byline. Both are deliberate:
+       a line the width of the board is a pass, not an aim, and a line that only
+       meets the byline two hundred units from the boot is a pass as well. */
+    const DRAWN_RAY_MAX = SHOT_RANGE * 4;
+    const SHOT_RAY_STRETCH = 2;
+
+    /** §12.f/§12.g — the shot the player has drawn, under EVERY condition. The
+        ray is taken from the BALL's own position, which is where shoot() strikes
+        it from, so the angle that was drawn and the angle the ball leaves along
+        are the same angle.
+
+        shotTargetFor() above is the STRICT reading: it hands back null the moment
+        the drawn angle has no answer on the goal line — square across the pitch,
+        drawn backwards, or crossing a byline off the frame. That null is
+        load-bearing in onUp(), where "no goal-line answer" is exactly what makes
+        a drag a PASS, so it must stay strict. But the explicit shot path must not
+        substitute a line the player never drew, and it used to: a null made
+        queueShot() fall back to a keeper-aware post — a line that appeared on the
+        grass by itself, and a ball that left along something nobody drew.
+
+        This is the other reading, used ONLY by queueShot() and beginExecution():
+        aim strictly when the line has a goal-line answer, and when it has none,
+        strike the drawn END POINT itself. Either way the ball flies down the
+        drawn ray — the fallback is the end of the line, never a point beside it.
+        Null is returned only when there is no line at all, which is the one case
+        the keeper-aware post is still allowed to answer. */
+    function drawnShotRay() {
+        if (!AIM.pass) return null;
+        const from = ballPoint(), end = AIM.pass.end;
+        const strict = shotTargetFor(from, end);
+        if (strict) return strict;
+        const goal = PLAY ? PLAY.goal : null;
+        if (!goal || !from || !end) return null;
+        const dx = end.x - from.x, dy = end.y - from.y;
+        const len = Math.hypot(dx, dy);
+        /* a press with no line behind it, or a line the width of the board:
+           neither is an aim, and both leave the old fallback in place */
+        if (len < 1e-6 || len > DRAWN_RAY_MAX) return null;
+        /* The drawn direction, carried out to the byline and then no further than
+           SHOT_RAY_STRETCH × SHOT_RANGE — a square or backwards line needs the
+           stretch, and the cap stops it becoming an aim at a corner flag. Past
+           the cap the drawn END is the answer, because that point is on the line
+           by definition. */
+        const gy = goal.y - from.y;
+        if (Math.abs(dy) > 1e-6) {
+            const k = gy / dy;
+            if (k > 0 && k <= SHOT_RAY_STRETCH) {
+                const x = from.x + dx * k;
+                if (Number.isFinite(x)) return { x, y: goal.y };
+            }
+        }
+        return { x: end.x, y: end.y };
+    }
+
     function hideQueueMarkers() {
         queueRings.forEach(m => { m.visible = false; });
         queueLine.visible = false;
     }
 
-    /** Drop every stacked move. Called whenever a window opens or closes. */
+    /** Drop every stacked move, and every line that was drawn for them. Called
+        whenever a window opens, closes, or a ball spills loose. */
     function clearIntents() {
         allPlayers.forEach(p => { p.queued = null; });
         hideQueueMarkers();
+        aimReset();
     }
 
     /** Draw the stack: a ring where each of the human's players will end up, and
@@ -958,9 +1578,12 @@ import {
                the ball's destination is this bare point. It used to be previewed
                at the receiver's queued run while the ball itself went even
                further, to that receiver's live position: three places at once.
-               One point, one line, one ball. */
+               One point, one line, one ball.
+               §12.f — and it STARTS on the ball, because that is where the ball
+               will be struck from. A preview drawn from the carrier's feet would
+               promise a line the ball is not going to take. */
             queueLine.visible = true;
-            queueLine.setEnds(c, move);
+            queueLine.setEnds(ballPoint(), move);
         } else {
             queueLine.visible = false;
         }
@@ -1002,16 +1625,52 @@ import {
         };
     }
 
-    /* FIVE distinct defender slots, not three. The old table was `i % 3`, so with
+    /** §12.c — where a receiver will actually BE when the pass to `dest` arrives.
+
+        The ball is quicker than a man — that is the whole point of §12.b — so a
+        ball aimed at a runner's DESTINATION always beats him to it by
+        (1 − PLAYER_SPEED/PASS_AVG) of the distance, and it ends up sitting at a
+        spot the receiver has not reached yet. That is harmless when the aim is a
+        line the human drew, because he drew it and he can see where it goes, and
+        it is exactly what "the ball rolls and the player runs onto it" means.
+        It is not harmless for the CPU, which picks a spot and then has to live
+        with it: the ball would land in the gap with only the defender who read
+        the lane anywhere near it.
+
+        So the CPU aims where the receiver will be at the moment of arrival.
+        Two rounds of the arithmetic, because the flight time depends on where the
+        ball is aimed and the aim depends on the flight time — one correction
+        brings the error to well under a tenth of a unit, far inside
+        CATCH_RADIUS. The run is capped at the distance to his destination, so
+        this leads a man to the spot he was sent to and never beyond it. */
+    function leadSpot(from, mate, dest) {
+        /* §12.f — the flight time is measured from where the ball will actually
+           be STRUCK FROM, which is the ball's own position, not the carrier's
+           centre. passTo() launches from kickFrom(from) too, so the lead the CPU
+           computes and the ball it gets are worked out from the same point. */
+        const o = kickFrom(from);
+        let aim = { x: dest.x, y: dest.y };
+        for (let k = 0; k < 2; k++) {
+            const t = Math.max(1e-6, dist(o, aim)) / PASS_AVG;
+            const run = Math.min(PLAYER_SPEED * t, dist(mate, dest));
+            const d = unit(dest.x - mate.x, dest.y - mate.y);
+            aim = { x: mate.x + d.x * run, y: mate.y + d.y * run };
+        }
+        return { x: clamp(aim.x, 4, 96), y: clamp(aim.y, 4, 96) };
+    }
+
+    /* SIX distinct defender slots, not three. The old table was `i % 3`, so with
        five outfielders defenders 0 & 3 shared a spot and 1 & 4 shared another —
        two players were drawn exactly on top of each other, which is why a
-       defending team never read as six players: you could only ever see three
-       distinct outfielders plus the keeper. Every slot below differs from every
-       other in BOTH depth and width, and the deepest sits at 0.68 so it stays
-       clear of the keeper's line (the previous deepest slot landed on top of the
-       keeper — a fourth instance of the same stacking bug). */
-    const DEF_SPREAD = [-24, -12, 12, 24, 0];
-    const DEF_DEPTH = [0.34, 0.52, 0.52, 0.34, 0.68];
+       defending team never read as its full complement: you could only ever see
+       three distinct outfielders plus the keeper. Every slot below differs from
+       every other in BOTH depth and width, and the deepest sits at 0.68 so it
+       stays clear of the keeper's line (an earlier deepest slot landed on top of
+       the keeper — a fourth instance of the same stacking bug). The sixth slot
+       arrived with the seventh player: six outfielders, six stations, and no two
+       of them ever sharing one. */
+    const DEF_SPREAD = [-24, -12, 12, 24, 0, -36];
+    const DEF_DEPTH = [0.34, 0.52, 0.52, 0.34, 0.68, 0.28];
 
     /** The spot a defender holds, between the ball and the goal they defend. */
     function defendingSpot(from, own, i) {
@@ -1029,15 +1688,102 @@ import {
     }
     const keeperSlideX = () => clamp(50 + (ball.x - 50) * 0.35, 40, 60);
 
-    /** Where a defender must be to meet a pass at the earliest possible moment. */
+    /** Where a defender must be to meet a pass at the earliest possible moment.
+       §12.b — the race is run with the contact radius, not the rulebook's
+       collection radius, so the point he is sent to is a point where he can
+       actually TOUCH the ball rather than one where he can be near it. A
+       smaller radius can make the race unwinnable where it used to be nominally
+       winnable, and the midpoint fallback below is a perfectly good place for a
+       defender whose job is to get in the way. */
     function interceptTarget(P, from, to) {
-        const t = interceptionTime(P, from, to);
+        const t = interceptionTime(P, from, to, { radius: TOUCH_R });
         if (!Number.isFinite(t)) {
             /* Unwinnable on the ground: fall back to the midpoint of the lane,
                which is still a useful "get in the way" position. */
             return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
         }
         return pointAlong(from, to, BALL_SPEED, t);
+    }
+
+    /** §12.e — where a defender presses when it CANNOT read the human's plan.
+
+       This is the whole of the "the AI must not know my moves" change, in one
+       function. The defending side used to aim at `PLAY.threat` — and
+       `cpuThreat()` was "the receiver closest to the goal being attacked",
+       which, whenever the HUMAN was in possession, was one of the HUMAN's own
+       players. The CPU was pressing a man only the human had chosen to send,
+       because the human had told it so: the plan leaked straight out through
+       the defender's target and the AI looked psychic. `threat` is gone and
+       there is nothing to read in its place.
+
+       What is left is honest geometry and nothing else. `mine` is the defender's
+       own goal — the one he is defending, which is the one piece of information
+       a defender genuinely has from watching the ball. A body standing still on
+       the ball gives `from === to`, which is degenerate: interceptionTime()
+       cannot solve a race to where the ball already is, and the old code leaned
+       on its midpoint fallback. Stepping the target a little way from the
+       carrier towards the defender's own goal does the same job without relying
+       on the fallback, and it has the right shape: stand between the man and
+       the goal you are defending. */
+    function pressPoint(from, mine) {
+        if (!from) return mine;
+        return { x: lerp(from.x, mine.x, 0.08), y: lerp(from.y, mine.y, 0.08) };
+    }
+
+    /** §12.f — where the ball actually is, which is where a kick is struck from.
+        A carried ball rides at BALL_CARRY in front of the carrier's boot (see
+        stepBall), so this is NOT the carrier's position: it is a body-width ahead
+        of him, in the direction he is travelling. Every gesture that draws a line
+        for the ball is anchored HERE, so the line on the grass and the line the
+        ball travels are the same line. */
+    function ballPoint() {
+        if (ball.mode === 'held' && ball.holder) return { x: ball.x, y: ball.y };
+        if (PLAY && PLAY.carrier) return { x: PLAY.carrier.x, y: PLAY.carrier.y };
+        return { x: ball.x, y: ball.y };
+    }
+
+    /** §12.f — the committed stroke, with every point pulled back onto the ball's
+        own line. The extra offset of up to BALL_CARRY is why a finished pass used
+        to sit visibly a little off the line it was drawn as; the tail beyond the
+        drawn distance is re-aimed at the same point along the ball's own ray, so
+        the destination is exactly the drawn one and the path is exactly straight. */
+    function anchored(stroke, from) {
+        if (!stroke) return null;
+        if (from.x === stroke.pts[0].x && from.y === stroke.pts[0].y) return stroke;
+        const dx = stroke.end.x - from.x, dy = stroke.end.y - from.y;
+        const d = Math.hypot(dx, dy);
+        const pts = stroke.pts.slice();
+        if (d > 1e-6) {
+            for (let i = 0; i < pts.length; i++) {
+                const t = Math.max(0, (pts[i].x - from.x) * dx + (pts[i].y - from.y) * dy) / (d * d);
+                pts[i] = { x: from.x + dx * t, y: from.y + dy * t };
+            }
+        } else {
+            for (let i = 0; i < pts.length; i++) pts[i] = { x: from.x, y: from.y };
+        }
+        /* pts[0] is on the ball by construction; the last is the drawn point */
+        pts[0] = { x: from.x, y: from.y };
+        pts[pts.length - 1] = { x: stroke.end.x, y: stroke.end.y };
+        return {
+            pts, end: stroke.end,
+            len: pathLength(pts), chord: Math.hypot(stroke.end.x - from.x, stroke.end.y - from.y),
+            power: stroke.power, air: stroke.air
+        };
+    }
+
+    /** §12.f — where a kick of any kind is struck FROM. If the ball is in this
+        man's possession the answer is the ball's own live position; otherwise it
+        is the man himself. Everything that launches a ball for a player — passTo
+        and shoot() — goes through here, so no kick can ever again leave the boot
+        instead of the ball and slide a body-width off the line the player drew.
+
+        (There is deliberately no second re-anchoring pass over a committed
+        stroke: it is anchored once, at commit, by anchored(), and struck from
+        here. A straight line between those two points IS the drawn ray.) */
+    function kickFrom(from) {
+        if (!from) return { x: ball.x, y: ball.y };
+        if (ball.mode === 'held' && ball.holder === from) return { x: ball.x, y: ball.y };
+        return { x: from.x, y: from.y };
     }
 
     /** Rebuild the play context around whoever now has the ball. */
@@ -1049,6 +1795,7 @@ import {
         ball.holder = p;
         ball.alive = false;
         ball.passTarget = null;
+        ball.air = false;      // §12.d — a ball in hand is never an air ball
         ball.lastTouch = p;
 
         const atk = p.team, def = other(atk);
@@ -1059,8 +1806,7 @@ import {
             carrier: p,
             receiver: null,
             keeper: keeperOf(def),
-            cpuThink: 0.9 + Math.random() * 0.7,
-            threat: null
+            cpuThink: 0.9 + Math.random() * 0.7
         };
         assignControls();
         bus.emit('role');
@@ -1109,6 +1855,10 @@ import {
         runnerMarker.visible = false;
         diveMarker.visible = false;
         hideQueueMarkers();
+        /* §12.d — the two drawn strokes belong to the window, so they come off
+           the turf with it. Without this a pass line drawn in the last window
+           would still be painted under the next passage's players. */
+        aimReset();
     }
 
     /* ==========================================================================
@@ -1152,7 +1902,17 @@ import {
             good() { tone(660, .09, 'sine', .22); tone(880, .1, 'sine', .18, .07); },
             bad() { tone(190, .18, 'sawtooth', .22); tone(120, .22, 'square', .16, .04); },
             goal() { [523, 659, 784, 1046].forEach((f, i) => tone(f, .22, 'triangle', .26, i * .09)); },
+            /* the same event from the other side of the scoreboard: a falling
+               groan where the fanfare rises */
+            concede() { [392, 311, 247, 185].forEach((f, i) => tone(f, .26, 'sawtooth', .2, i * .1)); },
             save() { tone(300, .12, 'square', .18); tone(220, .2, 'square', .14, .1); },
+            /* §12.j — the woodwork. A hard, short, tuned knock: the one sound in
+               the game that has to be recognisable before the eye has found the
+               ball, because the ball is about to be somewhere nobody expected. */
+            post() { tone(880, .07, 'square', .3); tone(1320, .05, 'square', .16, .01); tone(330, .18, 'triangle', .2, .02); },
+            /* and the hoardings / the netting — a dull thud, deliberately quiet:
+               it happens often and it must never compete with the woodwork. */
+            bounce() { tone(140, .09, 'sine', .12); },
             whistle() { tone(1750, .16, 'square', .12); setTimeout(() => tone(1750, .18, 'square', .12), 170); }
         };
     })();
@@ -1182,62 +1942,133 @@ import {
        the pitch, never cover it (game-ui-ux: anchors + containers).
        ========================================================================== */
     const el = id => document.getElementById(id);
+    const app = el('app');
+    /* Every HUD write goes through these two. The engine has to survive markup
+       that changes shape — a read-out that was deleted must never be able to
+       throw inside the frame loop — so a missing node is simply a no-op. */
+    const setText = (node, text) => {
+        if (node && node.textContent !== text) node.textContent = text;
+    };
+    const FIRE = { goal: 0 };
     const ui = {
         hudTop: el('hud-top'), hudBottom: el('hud-bottom'), pens: el('hud-pens'),
+        /* #role-strip is the stage-anchored home of the role + possession pair;
+           #role-badge / #possession-chip keep their ids inside it. */
+        roleStrip: el('role-strip'),
         role: el('role-badge'), poss: el('possession-chip'),
-        scoreYou: el('score-you').querySelector('strong'),
-        scoreCpu: el('score-cpu').querySelector('strong'),
+        /* #score-you / #score-cpu are bare text nodes now — the engine owns the
+           whole element, so there is no inner <strong> to reach for. */
+        scoreYou: el('score-you'),
+        scoreCpu: el('score-cpu'),
         halfLabel: el('half-label'), clock: el('clock'), clockBar: el('clock-bar'),
-        log: el('log'), instruction: el('instruction'),
+        instruction: el('instruction'),
         mute: el('btn-mute'), pause: el('btn-pause'), help: el('btn-help'),
         shoot: el('btn-shoot'),
         plan: el('plan-panel'), planState: el('plan-state'),
         planClock: el('plan-clock'), planBar: el('plan-bar'),
         done: el('btn-done'),
-        difficulty: el('difficulty'),
+        difficulty: el('difficulty'), planWin: el('plan-window'),
+        /* the same three settings live on the start card as well as in the
+           sheet — one id per control per surface, and the sync functions
+           keep both sets of pills pressed in step */
+        difficultyStart: el('difficulty-start'), planWinStart: el('plan-window-start'),
+        halfLen: el('half-length'), halfLenStart: el('half-length-start'),
+        menuOpen: el('btn-menu-open'), menuClose: el('btn-menu-close'),
+        menuRestart: el('btn-menu-restart'), menuQuit: el('btn-menu-quit'),
+        sheet: el('menu-sheet'), scrim: el('sheet-scrim'),
+        goalFx: el('goal-fx'), goalWord: el('goal-fx-word'),
         soTitle: el('so-title'), soYou: el('so-you'), soCpu: el('so-cpu'),
         soScore: el('so-score'), soTurn: el('so-turn')
     };
 
     let lastClock = -1, lastBar = -1;
 
+    /* The match log is no longer shown — the board IS the log, and a scrolling
+       list of sentences was the one thing on the HUD competing with it. What
+       happened is still emitted on the bus as a debug hook and kept in a tiny
+       in-memory ring, so nothing that used to read the log had to be deleted. */
+    const LOG = { lines: [], max: 5 };
     function pushLog(text, cls) {
-        const li = document.createElement('li');
-        li.textContent = text;
-        if (cls) li.className = cls;
-        ui.log.prepend(li);
-        while (ui.log.children.length > 5) ui.log.lastChild.remove();
+        LOG.lines.push({ text, cls });
+        while (LOG.lines.length > LOG.max) LOG.lines.shift();
     }
     const log = (text, cls) => bus.emit('log', { text, cls });
 
+    /* --- §18.b the goal celebration ------------------------------------------
+       Two pieces, both fired from scoreGoal(), neither of them touching a rule:
+         · a DOM word bursting out of the middle of the pitch in the scoring
+           side's own colour (the motion itself lives in the stylesheet);
+         · a ring flat on the turf, swelling out of the goalmouth that was just
+           scored in, driven from frame() off wall time so it keeps expanding
+           even while kickoff() is resetting the world underneath it.
+       Re-armed with the remove → force-reflow → add dance, because an animation
+       that is already sitting on the node will not replay on its own. */
+    const goalBurst = new THREE.Mesh(
+        new THREE.RingGeometry(.72, 1.0, 40),
+        new THREE.MeshBasicMaterial({
+            color: COL.you, transparent: true, opacity: 0,
+            side: THREE.DoubleSide, depthWrite: false
+        })
+    );
+    goalBurst.rotation.x = -Math.PI / 2;
+    goalBurst.position.y = 0.075;
+    goalBurst.material.opacity = 0;
+    scene.add(goalBurst);
+
+    function fireGoalFx(team) {
+        FIRE.goal = 0;
+        goalBurst.material.color.set(team === 'you' ? COL.you : COL.cpu);
+        if (!ui.goalFx) return;
+        ui.goalFx.style.setProperty('--goal-fx', team === 'you' ? CSS.you : CSS.cpu);
+        setText(ui.goalWord, 'GOAL');
+        ui.goalFx.classList.remove('show');
+        void ui.goalFx.offsetWidth;
+        ui.goalFx.classList.add('show');
+        window.clearTimeout(fireGoalFx._t);
+        fireGoalFx._t = window.setTimeout(() => {
+            if (ui.goalFx) ui.goalFx.classList.remove('show');
+        }, 1700);
+    }
+
     bus.on('score', () => {
-        ui.scoreYou.textContent = state.humanScore;
-        ui.scoreCpu.textContent = state.cpuScore;
+        setText(ui.scoreYou, state.humanScore);
+        setText(ui.scoreCpu, state.cpuScore);
     });
+    let lastRole = '', lastPoss = '';
     bus.on('role', () => {
         if (SO.active) return;
         const attacking = state.possession === 'you';
-        ui.role.textContent = attacking ? 'ATTACK' : 'DEFEND';
-        ui.role.className = attacking ? 'attack' : 'defend';
-        ui.poss.className = 'chip ' + state.possession;
-        ui.poss.innerHTML = '<i class="dot"></i>' + (state.possession === 'you' ? 'YOU · BALL' : 'CPU · BALL');
-        /* §17.b — the copy depends on whether the board is frozen. While the
-           window is open the human is stacking; once it closes, moves are running. */
+        /* §16.a — the role is a two-word badge, not a sentence. The possession
+           chip keeps its colour, which is the part the eye actually reads. */
+        const role = attacking ? 'ATTACK' : 'DEFEND';
+        if (role !== lastRole) { lastRole = role; setText(ui.role, role); }
+        if (ui.role) ui.role.className = attacking ? 'attack' : 'defend';
+        if (state.possession !== lastPoss) {
+            lastPoss = state.possession;
+            if (ui.poss) {
+                ui.poss.className = 'chip ' + state.possession;
+                ui.poss.innerHTML = '<i class="dot"></i>' +
+                    (state.possession === 'you' ? 'YOU · BALL' : 'CPU · BALL');
+            }
+        }
+        /* §17.b — one short line, and the only thing it has to say is what the
+           human is being asked to do with their thumb right now. The tutorial
+           screen is where the long-form explanation lives. */
         const planning = !!(PLAN && !PLAN.armed && state.phase === 'play');
-        ui.instruction.textContent = planning
+        setText(ui.instruction, planning
             ? (attacking
-                ? 'Your ball — stack every move now: drag the carrier onto a team-mate or into space, drag your runners, then press MOVES DONE.'
-                : 'Their ball — stack your moves now: drag the interceptor and the marker to close the lane, set your keeper, then press MOVES DONE.')
+                ? 'Stack your moves, then MOVES DONE.'
+                : 'Close the lane, then MOVES DONE.')
             : (attacking
-                ? 'Decisions are running — you attack the TOP goal.'
-                : 'Decisions are running — you defend the BOTTOM goal.');
+                ? 'Running — you attack the top goal.'
+                : 'Running — you defend the bottom goal.'));
     });
     bus.on('log', d => pushLog(d.text, d.cls));
     /* §17.b — the stacked-move markers are redrawn only when the stack changes */
     bus.on('plan-markers', drawQueueMarkers);
     bus.on('half', () => {
-        ui.halfLabel.textContent = SO.active ? 'PENALTIES'
-            : (state.phase === 'over' ? 'FULL TIME' : 'HALF ' + state.half);
+        setText(ui.halfLabel, SO.active ? 'PENALTIES'
+            : (state.phase === 'over' ? 'FULL TIME' : 'HALF ' + state.half));
     });
 
     /* --- screen stack (game-ui-ux: push/pop, focus handed to the top screen) --- */
@@ -1273,7 +2104,17 @@ import {
         ui.hudTop.hidden = !show;
         ui.hudBottom.hidden = !show;
         ui.pens.hidden = !(show && SO.active);
-        if (name === null) ui.pause.textContent = '❙❙';
+        /* The role strip shares the top-centre band with the shootout strip, so it
+           stands down for the whole of a shootout: the penalties read-out takes
+           the band over and the regulation roles would only be stale copy. */
+        ui.roleStrip.hidden = !(show && !SO.active);
+        if (name === null) {
+            const val = ui.pause && ui.pause.querySelector('.sheet-val');
+            if (val) setText(val, '❙❙');
+        }
+        /* A screen takes the whole viewport, so the floating sheet can never
+           legitimately be open underneath one. */
+        if (sheetOpen) setMenuOpen(false);
     });
 
     /* ==========================================================================
@@ -1295,18 +2136,22 @@ import {
        MOVES DONE. Step 1 completes on the release (which is beginExecution's
        pass), and steps 2–4 are the same three drags as before. */
     const TUTOR_STEPS = [
-        'Board frozen — drag the carrier onto a team-mate, then press MOVES DONE.',
-        'Now drag the player who will run onto the ball.',
-        'Now drag the passer, so they move on after playing it.',
-        'Drag a runner towards the goal to commit somebody to the attack.'
+        'Board frozen — draw a line out of the carrier to play the ball, then press MOVES DONE.',
+        'Now draw a line from the player who will run onto the ball.',
+        'Now draw the carrier a second line — his own run once the ball has gone.',
+        'Draw a runner towards the goal to commit somebody to the attack.'
     ];
 
-    /* Four slots for the coached opening. `dy` is measured *behind* the ball, so
-       every one of these lands in the side's own half, and all four take a
-       different x — six players, six separate places on the board at kick-off. */
+    /* Six slots for the coached opening. `dy` is measured *behind* the ball, so
+       every one of these lands in the side's own half, and all six take a
+       different x — seven players, seven separate places on the board at
+       kick-off. The first four are the slots the walkthrough names and always
+       were; 4 and 5 exist so a sixth outfielder has somewhere to stand instead
+       of being handed `undefined`. */
     const RESTART_SHAPE = [
         { dx: -17, dy: 9 }, { dx: 17, dy: 9 },
-        { dx: -9, dy: 23 }, { dx: 9, dy: 27 }
+        { dx: -9, dy: 23 }, { dx: 9, dy: 27 },
+        { dx: -26, dy: 15 }, { dx: 26, dy: 15 }
     ];
 
     /** Where the coached slots go for a restart at `pos`. All four sit behind
@@ -1323,6 +2168,10 @@ import {
             runner: of(RESTART_SHAPE[1].dx, RESTART_SHAPE[1].dy),
             passer: of(RESTART_SHAPE[2].dx, RESTART_SHAPE[2].dy),
             mover: of(RESTART_SHAPE[3].dx, RESTART_SHAPE[3].dy),
+            /* every coached slot beyond the four the walkthrough names, in order,
+               so the fixed spots never move and the extra outfielder joins the
+               line rather than being asked to stand on `undefined` */
+            extra: RESTART_SHAPE.slice(4).map(s => of(s.dx, s.dy)),
             goal: goalFor(team)
         };
     }
@@ -1348,8 +2197,13 @@ import {
         };
 
         if (centred && !state.tutorDone) {
-            /* the coached kick-off: the carrier stands on the spot and the other
-               four take the walkthrough's fixed slots */
+            /* the coached kick-off: the carrier stands on the spot, the next four
+               take the walkthrough's fixed slots, and anybody left over walks into
+               the extra coached places. The leftovers are placed with a loop and a
+               fallback rather than four literal indexes, because `rest[4]` on a
+               side with five outfielders was a crash waiting for the squad to
+               grow — an exception thrown out of arrangeRestart() would have taken
+               the kick-off with it. */
             const plan = tutorPlan(atk, pos);
             place(carrier, pos, false);
             const rest = outfield.filter(p => p !== carrier);
@@ -1357,6 +2211,9 @@ import {
             place(rest[1], plan.passer, false);
             place(rest[2], plan.mover, false);
             place(rest[3], plan.runner, false);
+            rest.slice(4).forEach((p, i) => {
+                place(p, plan.extra[i] || attackingSpot(pos, home, i), true);
+            });
             state.tutorTargets = { passer: null, goal: plan.goal };
             state.tutor = 1;
             state.tutorClock = 0;
@@ -1433,8 +2290,18 @@ import {
         if (state.phase !== 'play') return;         // the shape is still walking out
         state.tutorClock += dt;
         if (state.tutorClock < TUTOR_DELAY) return;
+        /* §12.d — step 1 is "draw the ball's line", and a stroke committed to AIM
+           IS that line. It used to wait for a completed pass, which no longer
+           happens at draw time (the ball is struck when the window closes), and
+           which would also miss a player who drew a shot angle instead. Either
+           line advances the step. */
+        if (state.tutor === 1 && (AIM.pass || AIM.move)) {
+            state.tutor = 2;
+            state.tutorClock = 0;
+            return;
+        }
         const step = TUTOR_STEPS[state.tutor - 1];
-        if (step && ui.instruction.textContent !== step) ui.instruction.textContent = step;
+        if (step) setText(ui.instruction, step);
         if (state.tutorClock > TUTOR_DELAY + TUTOR_STEP_MS / 1000) finishTutor();
     }
 
@@ -1444,12 +2311,26 @@ import {
         log((team === 'you' ? 'Your' : 'CPU') + ' kick-off from the centre spot.', '');
     }
 
-    /** §3 — a save is a goal kick from the saving side's own penalty spot. */
+    /** §3 — a goal kick is taken IN PLACE. The keeper already has the ball; the
+       clock never stops for it and NOBODY is repositioned.
+
+       This used to call arrangeRestart(), which hard-writes x/y/px/py for all
+       fourteen players, resets both keepers onto their lines and drops the phase
+       back to 'restart'. So every save — and every shot that went wide — snapped
+       the whole board back into formation, throwing away the picture the player
+       had just built and the ground they had just won. A restart SHAPE belongs
+       to a kick-off and to half-time; a keeper picking the ball up is a
+       possession change, and setCarrier() already knows how to resolve one: it
+       hands the ball over exactly where it is and opens the decision window, so
+       play resumes from where the save happened instead of from the centre. */
     function goalKick(team) {
-        const own = ownGoal(team);
-        const spot = { x: 50 + (Math.random() - .5) * 8, y: own.y + attackSide(team) * PENALTY_SPOT };
-        arrangeRestart(team, spot);
-        log((team === 'you' ? 'Your' : 'CPU') + ' keeper restarts from the penalty spot.', '');
+        const k = keeperOf(team);
+        if (!k) return kickoff(team);
+        ball.mode = 'held'; ball.alive = false;
+        ball.holder = k;
+        ball.x = k.x; ball.y = k.y;
+        setCarrier(k);
+        log((team === 'you' ? 'Your' : 'CPU') + ' keeper plays on from where he stands.', '');
     }
 
     function beginMatch() {
@@ -1461,13 +2342,12 @@ import {
         state.tutor = 0; state.tutorTargets = null; state.tutorClock = 0;
         state.tutorDone = false;
         endShootout(true);
-        ui.log.innerHTML = '';
         bus.emit('score'); bus.emit('half');
         Sfx.unlock(); Sfx.whistle();
         hideOverlays();
         kickoff('you');
         log('You defend the bottom goal and attack the top one — two ' +
-            formatClock(HALF_LENGTH) + ' halves.', '');
+            formatClock(halfLength) + ' halves.', '');
     }
 
     /** §3 — half and full time. The ball is always dead before the whistle. */
@@ -1476,6 +2356,10 @@ import {
         if (state.half === 1) {
             state.half = 2;
             state.halfT = 0;
+            /* Half time pushes no screen, so the screen handler's force-close
+               never fires — close the sheet here or it would sit over the
+               second half's kick-off. */
+            if (sheetOpen) setMenuOpen(false);
             bus.emit('half');
             Sfx.whistle();
             banner('HALF TIME', CSS.warn);
@@ -1487,27 +2371,36 @@ import {
     }
 
     function finishMatch() {
-        state.phase = 'over';
+        const level = state.humanScore === state.cpuScore;
+        const won = state.humanScore > state.cpuScore;
         /* the window belongs to live play only — drop it and its stacked moves,
            or the next match opens with a stale clock and a board full of rings */
         PLAN = null;
         clearIntents();
-        bus.emit('half');
+        /* the sheet can be open over live play, and the shootout pushes no
+           screen to force it shut — close it here for whichever way full
+           time goes */
+        if (sheetOpen) setMenuOpen(false);
         Sfx.whistle();
-        const level = state.humanScore === state.cpuScore;
-        const won = state.humanScore > state.cpuScore;
-        el('over-title').textContent = level
-            ? 'LEVEL ' + state.humanScore + '–' + state.cpuScore
-            : (won ? 'YOU WIN ' : 'CPU WINS ') + state.humanScore + '–' + state.cpuScore;
-        el('over-detail').textContent = level
-            ? 'Full time. Settle it from the spot.'
-            : 'Full time after two ' + formatClock(HALF_LENGTH) + ' halves.';
-        /* §0/§10 — the shootout is a manual choice, and only when level. */
+        /* §0/§10 — level at full time goes straight to the spot: the over
+           screen's "GO TO PENALTIES" hop added nothing but a click. */
+        if (level) {
+            banner('FULL TIME', CSS.warn);
+            log('Full time: ' + state.humanScore + '–' + state.cpuScore + '. Straight to penalties.', '');
+            beginShootout();
+            return;
+        }
+        state.phase = 'over';
+        bus.emit('half');
+        /* the pens button is unreachable now — level never reaches this
+           screen — but pin it hidden whatever the markup says */
         const pens = el('btn-pens');
-        if (pens) pens.hidden = !level;
-        el('screen-over').querySelector('.eyebrow').textContent = level ? 'Level at full time' : 'Full time';
-        log(level ? 'Full time: level. Go to penalties?' : (won ? 'Full time: you win!' : 'Full time: CPU wins.'), won ? 'good' : 'bad');
-        pushScreen('over', { focus: level ? '#btn-pens' : '#btn-again' });
+        if (pens) pens.hidden = true;
+        el('over-title').textContent = (won ? 'YOU WIN ' : 'CPU WINS ') + state.humanScore + '–' + state.cpuScore;
+        el('over-detail').textContent = 'Full time after two ' + formatClock(halfLength) + ' halves.';
+        el('screen-over').querySelector('.eyebrow').textContent = 'Full time';
+        log(won ? 'Full time: you win!' : 'Full time: CPU wins.', won ? 'good' : 'bad');
+        pushScreen('over', { focus: '#btn-again' });
     }
 
     /* ==========================================================================
@@ -1515,21 +2408,43 @@ import {
        ========================================================================== */
     const defenderInputs = team => teamOutfield(team).map(p => ({ x: p.x, y: p.y, speed: p.speed }));
 
-    /** A defender's cut is checked against the ball's live position. */
-    function contestFlight() {
+    /** §12.b — how close the ball's LAST STEP came to a point.
+
+        A frame is not a moment. A rolled pass covers ~0.45 units in a 60 Hz
+        frame and as much as 1.3 when dt hits its 0.05 ceiling, and against a
+        contact radius of ~1 unit that is more than enough for the ball to pass
+        straight through a defender's feet between two consecutive samples: off
+        the line on one side before the frame, off it on the other side after,
+        and never within the radius at either sample. So the question is asked
+        of the whole segment the ball travelled — where it was when the frame
+        began to where it is now — which is exactly "did the ball reach him?"
+        and is frame-rate independent. */
+    function ballPathDist(P, fromX, fromY) {
+        const A = {
+            x: Number.isFinite(fromX) ? fromX : ball.x,
+            y: Number.isFinite(fromY) ? fromY : ball.y
+        };
+        /* projectOnSegment() clamps to the segment, so a ball rolling AWAY from
+           a defender is measured against the part of the step it was actually
+           alongside, never against an imaginary continuation behind it. */
+        return projectOnSegment(P, A, ball).dist;
+    }
+
+    /** A defender's cut is checked against the ball's path, and it is a TOUCH. */
+    function contestFlight(fromX, fromY) {
         const atk = state.possession, def = other(atk);
 
         /* --- a pass is not contestable until it has actually been played ------
            `ball.travel` is how far the ball has covered since it left the boot.
-           While that is still inside CATCH_RADIUS the ball has not gone
-           anywhere: it is still exactly where the passer was standing, and a
-           defender standing over the passer is not reading a pass — they are
-           just standing where the ball started.
+           While that is still inside TOUCH_R the ball has not gone anywhere: it
+           is still exactly where the passer was standing, and a defender
+           standing over the passer is not reading a pass — they are just
+           standing where the ball started.
 
            Without this guard the cut-out fired on the very first frame of every
            pass made under pressure. launchBall() puts the ball at the boot, the
            next frame advances it by speed·dt (a few tenths of a unit), and so
-           the ball was still inside the control radius of the defender who was
+           the ball was still inside the contact radius of the defender who was
            already standing there — an "interception" of a ball that had never
            been played. A marked player could not complete a pass at all: the
            ball bounced between the two of them on the same spot, frame after
@@ -1544,19 +2459,71 @@ import {
            defender who is already on top of the ball. So the CPU kept choosing
            the pass its own model called safe and the engine kept killing it at
            t = 0. A defender genuinely in the lane still wins the ball: the
-           moment the ball has cleared the boot, the normal race applies. */
-        if (ball.mode !== 'pass' || ball.travel >= CATCH_RADIUS) {
-            /* outfielders of the defending side may cut any ball in flight */
+           moment the ball has cleared the boot, the normal race applies.
+
+           §12.b — and now the cut itself is a touch. The old test here was
+           `dist(p, ball) <= CATCH_RADIUS`, three full units of aura that took
+           the ball off the passer for passing NEAR a defender. A pass that only
+           whistles past somebody now runs on, which is what the drawn line
+           promised; a defender who wants it has to get his feet to it, and the
+           loose-ball rule is what collects it for him if he does not. */
+        if (!ball.air && (ball.mode !== 'pass' || ball.travel >= TOUCH_R)) {
+            /* outfielders of the defending side may cut any ball in flight, but
+               only by reaching it */
             for (const p of teamOutfield(def)) {
-                if (dist(p, ball) <= CATCH_RADIUS) return cutOut(p, atk);
+                if (ballPathDist(p, fromX, fromY) <= TOUCH_R) return cutOut(p, atk);
             }
         }
-        /* the defending keeper: a full reach against a shot, a normal catch
-           radius against a pass */
+        /* the defending keeper: a hand's reach against a pass, and — against a
+           shot — the rulebook's own save race, NOT a circle around him.
+
+           He used to be a symmetric aura: `ballPathDist(k) <= KEEPER_REACH`,
+           measured around his LIVE position and blind to what he was doing. Since
+           he is 12.5 units from the centre of a 25-unit mouth at the moment of
+           the strike, that circle already covers half the goal before he moves,
+           and because a diving keeper is driven straight onto the ball it grew
+           again as he went. Nothing about the dive could ever be wrong: he
+           collected everything.
+
+           So the save is now the race the rulebook describes and a property test
+           pins — ball at the speed it was ACTUALLY struck, against the keeper
+           running to the point he is actually diving at, `reach` as the margin.
+           The dive is the input, not a decoration: a keeper going the other way
+           is a GOAL, and that is true because `shotOutcome()` says so with the
+           same geometry the tests read.
+
+           It is also evaluated every frame against his live position, so he
+           saves a ball he can still get to and cannot retroactively catch one
+           that has gone past him — and `ball.total === flight` for a struck ball,
+           so the `ball.t >= r.t` gate lands the catch exactly when it reaches
+           him instead of snapping the ball to his chest from mid-air. */
         const k = keeperOf(def);
         if (k) {
-            const r = ball.mode === 'shot' ? KEEPER_REACH : CATCH_RADIUS;
-            if (dist(k, ball) <= r) return caughtByKeeper(k, atk);
+            if (ball.mode === 'shot') {
+                const r = shotOutcome({
+                    from: { x: ball.from.x, y: ball.from.y },
+                    target: ball.target,
+                    keeper: { x: k.x, y: k.y },
+                    keeperTarget: k.dive || { x: k.x, y: k.y },
+                    goalX: PLAY.goal.x,
+                    goalHalfWidth: GOAL_HALF_WIDTH,
+                    shotSpeed: Number.isFinite(ball.speed) ? ball.speed : SHOT_SPEED,
+                    /* §0.d — his arms, and they are the engine's arms rather than
+                       the rulebook's: KEEPER_SAVE_REACH is shorter than
+                       RULES.KEEPER_REACH, which is what "decrease the keeper's
+                       diving length" means on the save side. rules.js is
+                       untouched and its own property tests still call
+                       shotOutcome() with no `reach` at all. */
+                    reach: KEEPER_SAVE_REACH,
+                    /* the dive is stepped through the §0.c pace dial AND the
+                       keeper dial like every other body, so the race he is
+                       judged by is the race he is actually running */
+                    diveSpeed: DIVE_SPEED * RUN_SCALE * KEEPER_SCALE
+                });
+                if (r.outcome === 'SAVED' && ball.t >= r.t - 1e-6) return caughtByKeeper(k, atk);
+            } else if (ballPathDist(k, fromX, fromY) <= KEEPER_TOUCH_R) {
+                return caughtByKeeper(k, atk);
+            }
         }
     }
 
@@ -1565,14 +2532,19 @@ import {
         ball.mode = 'held'; ball.alive = false;
         ball.x = p.x; ball.y = p.y;
         if (p.team !== atk) {
+            /* No banner here: the bottom-centre band belongs to the guide line
+               now, and an interception is legible from the possession mark
+               flipping and the log line below — the sound and the shake carry
+               the tactile part. */
             Sfx.bad(); shake(.28);
-            banner('INTERCEPTED', CSS.bad);
             log(logName(p) + ' cuts it out.', p.team === 'you' ? 'good' : 'bad');
         }
         setCarrier(p);
     }
 
-    /** §3 — the save is a goal kick, and the clock never stops for it. */
+    /** §3 — the save is a goal kick, and the clock never stops for it.
+       The keeper keeps the ball exactly where he caught it, and goalKick() now
+       resolves that in place — no formation reset, no repositioning of anybody. */
     function caughtByKeeper(k, atk) {
         const wasShot = ball.mode === 'shot';
         ball.mode = 'held'; ball.alive = false;
@@ -1588,46 +2560,221 @@ import {
     function scoreGoal(team) {
         if (team === 'you') state.humanScore++; else state.cpuScore++;
         bus.emit('score');
-        Sfx.goal(); shake(.7);
+        /* §18.b — celebrate before the reset: fireGoalFx() is DOM and wall-time
+           driven, so it carries on while kickoff() rebuilds the board. Nothing
+           here touches a rule, a position or the clock. */
+        fireGoalFx(team);
+        /* §9.b — one event, two feelings: your goal is a fanfare, the CPU's
+           is a groan */
+        if (team === 'you') Sfx.goal(); else Sfx.concede();
+        shake(.7);
         banner('GOAL', team === 'you' ? CSS.you : CSS.cpu);
         log(team === 'you' ? 'GOAL! ' + state.humanScore + '–' + state.cpuScore : 'CPU score. ' + state.humanScore + '–' + state.cpuScore,
             team === 'you' ? 'good' : 'bad');
         kickoff(other(team));
     }
 
+    /* ==========================================================================
+       § 12.j THE REBOUND — see the constants block above for why this exists.
+       Everything here moves the ball; nothing here awards it to anybody.
+       ========================================================================== */
+
+    /** Re-launch the live ball from where it is, along the line it would leave a
+        surface with normal `n`, keeping `keep` of the pace it arrived with.
+        The reflection is the textbook one, d′ = d − 2(d·n)n, and the ball is
+        re-based on its new origin so the §12.b roll integrator picks it up from
+        this frame with no discontinuity. It always comes off as a LOOSE ball:
+        a rebound belongs to nobody until somebody runs to it. */
+    function reboundBall(nx, ny, keep) {
+        const dir = ball.dir || { x: 0, y: 1 };
+        const dot = dir.x * nx + dir.y * ny;
+        let dx = dir.x - 2 * dot * nx, dy = dir.y - 2 * dot * ny;
+        const dl = Math.hypot(dx, dy);
+        if (dl < 1e-6) { dx = nx; dy = ny; }
+        else { dx /= dl; dy /= dl; }
+        ball.from = { x: ball.x, y: ball.y };
+        ball.dir = { x: dx, y: dy };
+        ball.travel = 0;
+        ball.t = 0;
+        ball.s = Math.max(REBOUND_FLOOR, (Number.isFinite(ball.s) ? ball.s : BALL_SPEED) * keep);
+        ball.mode = 'loose';
+        ball.alive = true;
+        ball.air = false;
+        ball.h = 0.42;
+        ball.holder = null;
+        ball.passTarget = null;
+    }
+
+    /** §12.j — has the ball left the playing area, and off what? Asked of the
+        live position every frame a ball is loose, and it answers by bouncing it.
+        Order matters: the netting is tested before the hoardings, because the
+        mouth sits in front of them and a ball rolling into the back of the goal
+        has to stop at the net rather than carry on through the frame. */
+    function bounceOffBoards() {
+        const inMouth = Math.abs(ball.x - GOAL.you.x) <= GOAL_HALF_WIDTH + POST_R;
+        /* the two goal lines, between the posts: the netting */
+        if (ball.y <= 0 && inMouth && ball.dir && ball.dir.y < 0) {
+            ball.y = 0.1; reboundBall(0, 1, BOUNCE_NET); Sfx.bounce(); return true;
+        }
+        if (ball.y >= 100 && inMouth && ball.dir && ball.dir.y > 0) {
+            ball.y = 99.9; reboundBall(0, -1, BOUNCE_NET); Sfx.bounce(); return true;
+        }
+        /* the hoardings behind each byline */
+        if (ball.y <= -OUT_PAD) { ball.y = -OUT_PAD; reboundBall(0, 1, BOUNCE_BOARD); Sfx.bounce(); return true; }
+        if (ball.y >= 100 + OUT_PAD) { ball.y = 100 + OUT_PAD; reboundBall(0, -1, BOUNCE_BOARD); Sfx.bounce(); return true; }
+        /* and the two touchlines */
+        if (ball.x <= -OUT_PAD) { ball.x = -OUT_PAD; reboundBall(1, 0, BOUNCE_BOARD); Sfx.bounce(); return true; }
+        if (ball.x >= 100 + OUT_PAD) { ball.x = 100 + OUT_PAD; reboundBall(-1, 0, BOUNCE_BOARD); Sfx.bounce(); return true; }
+        return false;
+    }
+
+    /** §12.j — did this shot strike a post, and along what normal?
+
+        The posts stand at the two ends of the mouth, on the goal line. A shot is
+        only ever tested against the one it is nearer, and the test is the real
+        one: solve |from + dir·t − C| = POST_R for the first root on the flight,
+        which is the moment the ball's surface meets the woodwork. That root is
+        also WHERE it hits, so the normal is (impact − C) / POST_R and the ball
+        comes off the post the way it actually struck it — flush on the inside
+        face and it goes back across the mouth, a clip on the outside and it goes
+        away. Returns null when the line never touches the circle, which is every
+        shot that goes cleanly in or cleanly wide. */
+    function postStruck(goal) {
+        if (!ball.from || !ball.dir) return null;
+        const side = ball.target.x >= goal.x ? 1 : -1;
+        const C = { x: goal.x + side * GOAL_HALF_WIDTH, y: goal.y };
+        const fx = ball.from.x - C.x, fy = ball.from.y - C.y;
+        const b = fx * ball.dir.x + fy * ball.dir.y;
+        const c = fx * fx + fy * fy - POST_R * POST_R;
+        const disc = b * b - c;
+        if (disc < 0) return null;
+        const t = -b - Math.sqrt(disc);
+        /* the root has to lie on the flight that was actually flown — a post
+           "behind" the strike, or one the ball stopped short of, is not a hit */
+        if (t < 0 || t > ball.travel + POST_R) return null;
+        const ix = ball.from.x + ball.dir.x * t, iy = ball.from.y + ball.dir.y * t;
+        return { x: ix, y: iy, nx: (ix - C.x) / POST_R, ny: (iy - C.y) / POST_R };
+    }
+
+    /** §12.j — the ball is live, it is nobody's, and the race for it starts on
+        the very next frame. Shared by every way a shot can fail to be a goal, and
+        by the pass nobody was there to collect. */
+    function spillLoose() {
+        ball.mode = 'loose';
+        ball.alive = true;
+        ball.air = false;
+        /* §12.d — the flight is over, and with it the arc: a spilled shot was
+           up to ARC_SHOT high at the end of its travel, and the loose-ball
+           integrator never touches `h`, so without this the ball would roll
+           around at chest height waiting for somebody to collect it. */
+        ball.h = 0.42;
+        ball.holder = null;
+        ball.passTarget = null;
+        /* every stacked move belonged to a passage that is over: left standing,
+           each runner would keep serving a plan that no longer means anything and
+           the shape loop would skip him, which is the frozen board this avoids */
+        allPlayers.forEach(p => { p.dest = null; });
+        clearIntents();
+    }
+
     /** What happens when the ball finishes its travel without being cut out. */
     function resolveArrival() {
-        ball.alive = false;
+        /* §12.d — the flight is over, so the ball is on the deck again from here
+           on. A chip only escapes the outfield cut while it is actually flying;
+           the loose ball that spills out of one is an ordinary loose ball. */
+        ball.air = false;
         const goal = goalFor(state.possession);
 
         if (ball.mode === 'shot') {
-            if (isOnTarget(ball.target.x, goal.x, GOAL_HALF_WIDTH)) return scoreGoal(state.possession);
-            Sfx.bad(); banner('WIDE', CSS.bad);
-            log('Shot wide — goal kick.', state.possession === 'you' ? 'bad' : 'good');
-            return goalKick(other(state.possession));
+            /* §12.j — THE WOODWORK IS FIRST. A ball on the post is neither in nor
+               out, and `isOnTarget()` cannot tell you which: the post stands ON
+               the edge of the mouth, so a shot aimed at x = goal ± GOAL_HALF_WIDTH
+               reads as on target and used to be given as a goal. */
+            const post = postStruck(goal);
+            if (post) {
+                ball.x = post.x; ball.y = post.y;
+                reboundBall(post.nx, post.ny, BOUNCE_POST);
+                spillLoose();
+                Sfx.post(); shake(.34);
+                banner('POST', CSS.warn);
+                log('Off the post — and it is still live.', '');
+                return;
+            }
+            /* A shot only ever answers ON the goal line. drawnShotRay() can hand
+               back the drawn END of a line that has no byline answer, and a ball
+               that stopped in the middle of the pitch is not a goal — it is a
+               loose ball like any other. */
+            const atLine = Math.abs(ball.target.y - goal.y) <= 1.5;
+            if (atLine && isOnTarget(ball.target.x, goal.x, GOAL_HALF_WIDTH)) {
+                ball.alive = false;
+                return scoreGoal(state.possession);
+            }
+            /* Wide, over, or short of the line. The ball keeps the line it was
+               struck on and carries into the run-off, where the hoardings send it
+               back; nobody is awarded anything, and the keeper who wants it has
+               to leave his line and go and get it like everybody else. */
+            ball.s = Math.max(REBOUND_FLOOR, (Number.isFinite(ball.s) ? ball.s : SHOT_SPEED) * SPILL_DAMP);
+            ball.from = { x: ball.x, y: ball.y };
+            ball.travel = 0;
+            ball.t = 0;
+            spillLoose();
+            Sfx.bad();
+            banner(atLine ? 'WIDE' : 'MISCUED', CSS.bad);
+            log(atLine ? 'Shot wide — the ball is still in play.' : 'Shot never reached the line.',
+                state.possession === 'you' ? 'bad' : 'good');
+            return;
         }
 
-        /* §17.b — a pass is only *completed* if the nearest body to the ball when
-           it arrives is a team-mate. Testing `passTarget` alone was fine while
-           moves resolved one at a time, but with simultaneous moves a defender can
-           arrive on the same frame: a pass no one claims cleanly has to be a
-           genuine fifty-fifty, so the ball goes loose and the nearest player in
-           each kit races for it. Whoever wins that race gets the next window. */
+        ball.alive = false;
+        /* §17.b — a pass is only *completed* if a team-mate is actually ON the
+           ball when it arrives.
+
+           This test used to have no radius in it at all. `best` was the nearest
+           body in the whole squad and the only question asked of it was which
+           shirt it wore — so a ball played into empty space resolved to whichever
+           team-mate happened to be closest to the spot, forty units away,
+           standing still, having made no attempt to get it, and setCarrier() put
+           it in his hands. On the board the ball teleported from the point it had
+           been drawn to, across the pitch, onto a player who never moved. That is
+           the worst thing the engine can do to the picture the player is reading,
+           because it makes the aim line meaningless: nothing you draw can be
+           trusted.
+
+           A claim now has to be a real claim — the nearest team-mate has to be
+           inside CATCH_RADIUS, the same radius he would have needed to collect
+           the ball on the ground — and the fallback is the loose ball: the ball
+           is where it is, it keeps rolling with the pace it arrived with until
+           friction kills it, and somebody has to come and get it. There is no
+           third option in which the ball is awarded to the nearest shirt.
+
+           It also keeps the engine honest about §12.b. The ball is quicker than a
+           man, so a pass played ahead of a runner gets there first; a receiver
+           who has not arrived yet is simply not inside CATCH_RADIUS of it, and he
+           has to finish the run before he can have it. */
         let best = null, bd = Infinity;
         for (const p of allPlayers) {
+            if (p.team !== state.possession) continue;
             const d = dist(p, ball);
             if (d < bd) { bd = d; best = p; }
         }
-        if (best && best.team === state.possession) {
+        if (best && bd <= CATCH_RADIUS) {
             setCarrier(best);
             Sfx.good();
             return;
         }
-        /* (a pass into space is resolved by the loose-ball race below) */
-        /* Nobody claimed it: the ball is simply loose, and the nearest player
-           in either kit wins the race for it. */
-        ball.mode = 'loose';
-        ball.alive = true;
+        /* Nobody is on it. The ball is loose, exactly where the roll left it, and
+           the nearest player in each kit has to run to it to win it.
+
+           The passage that produced the pass is over — the ball never reached the
+           point it was drawn to — so every stacked move is dropped here too. Left
+           standing, those runs were what froze the board on a loose ball: each
+           runner was still locked onto a destination from a plan that no longer
+           meant anything, and the race for the ball was skipped for anyone who
+           had one. The match does NOT stop: the chase starts on the very next
+           frame, and the decision window only opens when somebody actually wins
+           the ball (setCarrier → openPlan). That is the pause the player sees —
+           after the ball, not instead of going to get it. */
+        spillLoose();
     }
 
     function stepBall(dt) {
@@ -1645,9 +2792,10 @@ import {
             const h = ball.holder;
             const px = Number.isFinite(h.px) ? h.px : h.x;
             const py = Number.isFinite(h.py) ? h.py : h.y;
-            let bx = h.x - px, by = h.y - py;
-            const step = Math.hypot(bx, by);
-            if (step > 1e-4) { bx /= step; by /= step; }
+            const sx = h.x - px, sy = h.y - py;
+            const step = Math.hypot(sx, sy);
+            let bx, by;                      /* where the ball WANTS to be held */
+            if (step > 1e-4) { bx = sx / step; by = sy / step; }
             else {
                 /* never moved: face the goal being attacked (the carrier spawns
                    facing it) rather than produce a zero-length offset */
@@ -1655,12 +2803,34 @@ import {
                 const gl = Math.max(1e-6, Math.hypot(g.x - h.x, g.y - h.y));
                 bx = (g.x - h.x) / gl; by = (g.y - h.y) / gl;
             }
-            ball.x = clamp(h.x + bx * BALL_CARRY, 2, 98);
-            ball.y = clamp(h.y + by * BALL_CARRY, 2, 98);
+            /* §12.b — and the carry direction is EASED, not snapped.
+               Reading the step direction straight off the last frame meant the
+               ball flicked from one side of the player to the other the instant
+               they reversed or cut: a one-frame jump of more than two ball
+               widths, which reads as the ball glitching rather than being
+               carried, and it is the same class of error as the old fixed goal
+               offset — the ball whose position the player cannot predict. The
+               direction is now a vector on the ball, turned towards the step at
+               a finite rate (faster while running, slower when settling), so
+               control is a thing the player can feel. A TRUE reversal still
+               collapses the vector to nothing on the way through, and the
+               collapse guard re-seeds it from the step, because a carried ball
+               must never slide THROUGH the body it is in front of. */
+            const turn = Math.min(1, dt * (step > 1e-4 ? 9 : 3));
+            ball.cdx += (bx - ball.cdx) * turn;
+            ball.cdy += (by - ball.cdy) * turn;
+            const cl = Math.hypot(ball.cdx, ball.cdy);
+            if (cl < 1e-4) { ball.cdx = bx; ball.cdy = by; }
+            else { ball.cdx /= cl; ball.cdy /= cl; }
+            ball.x = clamp(h.x + ball.cdx * BALL_CARRY, 2, 98);
+            ball.y = clamp(h.y + ball.cdy * BALL_CARRY, 2, 98);
             ball.h = 0.42;
             ball.s = 0;
         } else if (ball.mode === 'pass' || ball.mode === 'shot') {
             if (!ball.alive) return;
+            /* where the ball was when the last frame ended — the §12.b cut is
+               asked of the path between there and here, not of one instant */
+            const fromX = ball.x, fromY = ball.y;
             ball.t = Math.min(ball.total, ball.t + dt);
             if (ball.roll) {
                 /* Linear friction, v(t) = v0 − dec·t, and the distance is the
@@ -1676,9 +2846,16 @@ import {
             ball.x = ball.from.x + ball.dir.x * ball.travel;
             ball.y = ball.from.y + ball.dir.y * ball.travel;
             const frac = ball.total > 0 ? clamp(ball.t / ball.total, 0, 1) : 1;
-            ball.h = 0.42 + Math.sin(Math.PI * frac) * ball.arc;
+            /* §12.f — the lift is LINEAR in the flight, never a sine across it. A
+               sine is a bow: the ball climbs away from the drawn line and comes
+               back down onto it, so the line on the grass is only true at its two
+               ends. Rising and falling straight, underneath a flat line, keeps the
+               ball on the drawn line for every frame in between. `arc` is a lie
+               about height and nothing else; at 0 — every rolled ball — the ball
+               never leaves the deck. */
+            ball.h = 0.42 + frac * ball.arc;
 
-            contestFlight();
+            contestFlight(fromX, fromY);
             if (ball.t >= ball.total && ball.mode !== 'held') resolveArrival();
         } else if (ball.mode === 'loose') {
             /* §12.b — and the loose ball keeps rolling. It used to sit on the
@@ -1705,9 +2882,15 @@ import {
                 const s = Math.max(0, ball.s - dec * dt);
                 ball.travel += (ball.s + s) * 0.5 * dt;
                 ball.s = s;
-                ball.x = clamp(ball.from.x + ball.dir.x * ball.travel, 2, 98);
-                ball.y = clamp(ball.from.y + ball.dir.y * ball.travel, 2, 98);
-                if (s <= 0.01 && ball.travel > 0) ball.alive = false;
+                /* §12.j — NOT clamped. The clamp used to be `clamp(…, 2, 98)`,
+                   which stops a ball dead on a line instead of letting it leave
+                   the pitch, and a ball parked on a line is a ball that has to be
+                   given to somebody. It runs where the line takes it now and
+                   bounceOffBoards() is what turns it round. */
+                ball.x = ball.from.x + ball.dir.x * ball.travel;
+                ball.y = ball.from.y + ball.dir.y * ball.travel;
+                bounceOffBoards();
+                if (ball.s <= 0.01 && ball.travel > 0) ball.alive = false;
             }
             /* The CLOSEST player inside the control radius takes it. This used
                to be "the first player in allPlayers order", which is not the same
@@ -1754,12 +2937,48 @@ import {
 
     function updateKeeper(k, dt) {
         if (!k) return;
+        /* A keeper who is ON the ball is a carrier, not a shot-stopper. Sliding
+           him back towards his line while he holds it would drag the ball with
+           him, and the carrier is the one body nothing in this engine is allowed
+           to move on its own — possession only advances by a pass or a shot. */
+        if (ball.mode === 'held' && ball.holder === k) return;
         const home = keeperHome(k.team);
         if (k.dive) {
-            moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED, dt);
+            moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED * KEEPER_SCALE, dt);
             return;
         }
-        moveToward(k, keeperSlideX(), home.y, DRILL_SPEED * 1.5, dt);
+        /* --- and the sweep --------------------------------------------------
+           He comes off his line for a dead ball that is HIS to deal with, and
+           only for that. Three things have to hold: the ball is nearer his own
+           goal than the halfway line, no team-mate is anywhere near it, and the
+           run never follows it past KEEPER_SWEEP_MAX. If an outfielder is near
+           it, the keeper stays home — the chase in simPlayers() owns a ball the
+           outfield is contesting, and a keeper leaving his line while somebody
+           else is favourite is the worst of both.
+
+           The target y is clamped on his OWN side of his line, so he comes out
+           for it and never follows it into his own net. */
+        const own = ownGoal(k.team);
+        if (ball.alive && ball.mode !== 'pass' && ball.mode !== 'shot' &&
+            Math.abs(ball.y - own.y) < 50) {
+            let mate = false;
+            for (const p of teamOutfield(k.team)) {
+                if (dist(p, ball) <= KEEPER_SWEEP_R) { mate = true; break; }
+            }
+            const fromHome = dist(home.x, home.y, ball.x, ball.y);
+            if (!mate && (fromHome <= KEEPER_CHASE_DIST || dist(k, ball) <= KEEPER_CLEAR_R)) {
+                const dyHome = home.y - own.y;      // points OFF his own line
+                const dyBall = ball.y - own.y;      // same sign when the ball is off it
+                let ty = k.y;
+                if (dyHome !== 0 && dyBall * dyHome > 0) {
+                    ty = own.y + Math.sign(dyBall) *
+                        Math.min(Math.abs(dyBall), KEEPER_SWEEP_MAX);
+                }
+                moveToward(k, clamp(ball.x, 6, 94), ty, DRILL_SPEED * 1.6 * KEEPER_SCALE, dt);
+                return;
+            }
+        }
+        moveToward(k, keeperSlideX(), home.y, DRILL_SPEED * 1.5 * KEEPER_SCALE, dt);
     }
 
     function simPlayers(dt) {
@@ -1770,10 +2989,55 @@ import {
             if (p.dest && moveToward(p, p.dest.x, p.dest.y, p.speed, dt)) p.dest = null;
         });
 
-        /* 2. the CPU holds its shape. The human's outfielders never move by
-              themselves: every step they take is a step the player asked for.
-              That is both what the walkthrough teaches — "then drag a player" —
-              and what stops the board looking like it is playing itself.
+        /* 1.b a loose ball is a RACE, and the racers are chosen before anybody
+               else is told to move.
+
+               Two rules used to drive the same body: the shape loop pulled the
+               nearest man back towards his station and the chase pushed him at
+               the ball, on the same frame, in opposite directions — and the
+               chase then skipped him entirely if he had a destination. A loose
+               ball could therefore sit there with nobody committed to it, which
+               is exactly the frozen board this is fixing. So the chaser of each
+               kit is picked first, the shape loop is told to keep its hands off
+               them, and they go at the ball at full pace. Nothing here opens a
+               window: the pause comes when the ball is actually won. */
+        const loose = ball.mode === 'loose';
+        const chasers = [];
+        if (loose) {
+            ['you', 'cpu'].forEach(team => {
+                const near = allPlayers
+                    .filter(p => p.team === team)
+                    /* §12.j — a keeper races only for a ball at HIS end. Without
+                       this he is simply another body in the list, and the nearest
+                       body to a rebound at the far end can be the keeper who has
+                       nothing to do with it. */
+                    .filter(p => p.role !== 'keeper' || dist(ball, ownGoal(team)) <= KEEPER_RACE_DIST)
+                    .sort((a, b) => dist(a, ball) - dist(b, ball));
+                if (near[0]) chasers.push(near[0]);
+                /* §12.j — and the second man, if he is actually in the race */
+                if (near[1] && dist(near[1], ball) <= CHASE_SECOND) chasers.push(near[1]);
+            });
+        }
+        const chasing = p => chasers.indexOf(p) >= 0;
+
+        /* 2. BOTH sides hold a shape.
+
+              This used to be the CPU's loop alone, under a comment that said the
+              human's outfielders "never move by themselves: every step they take
+              is a step the player asked for". That is what left the human's side
+              standing in a block the moment a dragged run finished: the player
+              had spent his instruction, the man had arrived, and he then stood
+              there for the rest of the passage while every other body on the
+              board moved around him. An off-ball player now walks towards the
+              station his own duty calls for — the same stations the two planners
+              use, so a man who was sent on a run and a man who was left alone end
+              up working the same shape instead of two different ones.
+
+              It must never outrank the player, though, so holdShape() refuses
+              three things in order: a stacked run (p.dest), a man sent to win a
+              loose ball (a chaser, picked in 1.b), and whoever is actually
+              holding the ball (moveCarrier drives him). Drag anybody and your
+              instruction wins; leave them and they work the shape.
 
               A defender's shape is keyed to the goal it is ACTUALLY defending —
               ownGoal(p.team) — and never to PLAY.own, which is the own goal of
@@ -1785,33 +3049,55 @@ import {
               attacking.
 
               Every defending target is then clamped into the defending team's own
-              half, so the CPU presses up to the halfway line and no further: it
+              half, so a side presses up to the halfway line and no further: it
               defends its own goal and its own post. Only the attacking branch is
               allowed to cross the line. */
-        teamOutfield('cpu').forEach((p, i) => {
-            if (p.dest) return;
-            if (atk === 'cpu' && p === PLAY.carrier) return;
+        /* Whoever is on the ball is exempt — and that only means something while
+           there IS a carrier: with the ball loose it would exempt a man who no
+           longer has anything to do with the play. */
+        const holder = (!loose && ball.mode === 'held') ? ball.holder : null;
 
-            /* --- CPU in possession: free to advance, shape along its attack --- */
-            if (atk === 'cpu') {
-                const s = attackingSpot(PLAY.carrier, PLAY.goal, i);
+        const holdShape = (p, i) => {
+            if (p.dest) return;        // the human's stacked run outranks the shape
+            if (chasing(p)) return;    // a man sent for the ball holds shape for nobody
+            if (p === holder) return;  // moveCarrier() drives the man on the ball
+
+            /* With the ball loose there IS no carrier, only a body that used to
+               have it — so the whole shape keys off the live ball instead of the
+               stale man. Without this a side marks and presses a player who no
+               longer has anything to do with where the ball is going, which is
+               the shape equivalent of the ball teleporting. */
+            const anchor = loose ? ball : (PLAY.carrier || ball);
+            const mine = ownGoal(p.team);
+
+            /* --- in possession: free to advance, shape along the attack --- */
+            if (atk === p.team) {
+                const s = attackingSpot(anchor, PLAY.goal, i);
                 moveToward(p, s.x, s.y, DRILL_SPEED, dt);
                 return;
             }
 
-            /* --- CPU defending: hold the half in front of its own goal --- */
-            const mine = ownGoal(p.team);
-            if (p.duty === 'interceptor') {
-                const to = PLAY.threat || PLAY.carrier;
-                const s = interceptTarget(p, PLAY.carrier, to);
+            /* --- defending: hold the half in front of the own goal --- */
+            const c = PLAY.carrier;
+            if (p.duty === 'interceptor' && c) {
+                /* with the ball loose there is no lane to intercept: the ball
+                   IS the objective, and it is still moving */
+                if (loose) {
+                    moveToward(p, ball.x, ownHalf(p.team, ball.y), PLAYER_SPEED * 0.9, dt);
+                    return;
+                }
+                /* §12.e — press the MAN, not a guess at his receiver. This is
+                   the live, every-frame read that mattered most: even with the
+                   planner fixed, a single `PLAY.threat` here meant the shape was
+                   re-reading the human's intention sixty times a second. */
+                const s = interceptTarget(p, c, pressPoint(c, mine));
                 moveToward(p, s.x, ownHalf(p.team, s.y), PLAYER_SPEED * 0.9, dt);
                 return;
             }
-            if (p.duty === 'marker') {
-                const c = PLAY.carrier;
+            if (p.duty === 'marker' && c) {
                 /* stand goal-side of the carrier, where "goal" means the one
                    being defended — so the marker drops off towards its own end
-                   rather than being pulled towards the human's */
+                   rather than being pulled towards the other one */
                 const s = {
                     x: clamp(c.x - (mine.x - c.x) * 0.12, 6, 94),
                     y: clamp(lerp(c.y, mine.y, 0.12), 6, 94)
@@ -1819,30 +3105,31 @@ import {
                 moveToward(p, s.x, ownHalf(p.team, s.y), PLAYER_SPEED * 0.88, dt);
                 return;
             }
-            const s = defendingSpot(PLAY.carrier, mine, i);
+            const s = defendingSpot(anchor, mine, i);
             moveToward(p, s.x, ownHalf(p.team, s.y), DRILL_SPEED, dt);
-        });
+        };
+
+        /* one function, both kits — so neither side can be the one that stands
+           still while the other plays around it */
+        teamOutfield('you').forEach((p, i) => holdShape(p, i));
+        teamOutfield('cpu').forEach((p, i) => holdShape(p, i));
 
         moveCarrier(dt);
 
-        /* 3. a loose ball is a race for the nearest player in each kit. The
-              chaser is clamped to its own half while it is the defending side,
-              so a ball spilling back towards the human's end cannot drag a CPU
-              player over the line with it: the CPU contests the ball in front of
-              its own goal and leaves the human's half alone. */
-        if (ball.mode === 'loose') {
-            ['you', 'cpu'].forEach(team => {
-                const near = allPlayers
-                    .filter(p => p.team === team)
-                    .sort((a, b) => dist(a, ball) - dist(b, ball))[0];
-                if (!near || near.dest) return;
-                const chaseY = team === def ? ownHalf(team, ball.y) : ball.y;
-                moveToward(near, ball.x, chaseY, PLAYER_SPEED, dt);
-            });
-        }
+        /* 3. and the race itself — the runners picked in 1.b, at full pace, at
+              the ball's live position, so they are chasing a ball that is still
+              rolling rather than one that stopped dead for them. The chaser is
+              clamped to its own half while it is the defending side, so a ball
+              spilling back towards the human's end cannot drag a CPU player over
+              the line with it: the CPU contests the ball in front of its own
+              goal and leaves the human's half alone. */
+        chasers.forEach(p => {
+            const chaseY = p.team === def ? ownHalf(p.team, ball.y) : ball.y;
+            moveToward(p, ball.x, chaseY, PLAYER_SPEED, dt);
+        });
 
-        updateKeeper(keeperOf(atk), dt);
-        updateKeeper(keeperOf(def), dt);
+        /* a keeper who is running for a loose ball keeps his own line out of it */
+        [keeperOf(atk), keeperOf(def)].forEach(k => { if (k && !chasing(k)) updateKeeper(k, dt); });
     }
 
     /* ==========================================================================
@@ -1871,12 +3158,13 @@ import {
         dfs.forEach((p, i) => { p.duty = i === 0 ? 'interceptor' : (i === 1 ? 'marker' : null); });
     }
 
-    /** The most dangerous receiver: the one closest to the goal it is attacking. */
-    function cpuThreat() {
-        const mates = teamOutfield(state.possession).filter(p => p !== PLAY.carrier);
-        if (!mates.length) return PLAY.carrier;
-        return mates.slice().sort((a, b) => dist(a, PLAY.goal) - dist(b, PLAY.goal))[0];
-    }
+    /* §12.e — cpuThreat() used to live here: "the most dangerous receiver, the
+       one closest to the goal it is attacking", read through state.possession,
+       which is the side IN POSSESSION — so while the human held the ball it
+       named a HUMAN player. Every defender pressed that man and the AI read as
+       though it were inside the human's head. It is deleted rather than
+       repaired: there is no honest version of "which of your players are you
+       about to use", and a defender does not get to know. */
 
     /** Score each pass with the very race the player will face. */
     function cpuChoosePass(rng, spots) {
@@ -1892,14 +3180,19 @@ import {
         const gk = keeperOf('you');
         const defenders = defenderInputs('you').concat(gk ? [{ x: gk.x, y: gk.y, speed: PLAYER_SPEED }] : []);
         const scored = cands.map(m => {
-            /* Score the race to the SPOT the mate is being sent to whenever the
-               planner knows it, because that is where the ball is actually going
-               and therefore the race that will really be run. Falls back to his
-               current feet for the safety-net pass in cpuThink(), which has no
-               plan to read. */
+            /* Score the race to where the mate will actually be when the ball
+               arrives, because that is where the ball is going and therefore the
+               race that will really be run. Falls back to his current feet for
+               the safety-net pass in cpuThink(), which has no plan to read. */
             const s = spots ? spots.get(m) : null;
-            const to = s ? { x: s.x, y: s.y } : { x: m.x, y: m.y };
-            const race = resolvePassRace({ from, to, defenders });
+            const to = s ? leadSpot(from, m, s) : { x: m.x, y: m.y };
+            /* §12.b — score the race with the radius the engine actually
+               enforces (TOUCH_R), not the rulebook's collection radius. The
+               default used to be CATCH_RADIUS, which made the CPU's own model
+               three times stricter than the pitch it was standing on: it
+               refused passes the engine would have let run, and the whole side
+               read as timid. Model and engine now measure the same thing. */
+            const race = resolvePassRace({ from, to, defenders, radius: TOUCH_R });
             const safe = race.outcome === 'COMPLETE' ? 1 : 0.15;
             const progress = clamp((dist(from, PLAY.goal) - dist(to, PLAY.goal)) / 60, 0, 1);
             const shot = dist(to, PLAY.goal) <= SHOT_RANGE ? 0.45 : 0;
@@ -1920,18 +3213,27 @@ import {
         if (!PLAN || PLAN.armed) return;
         if (ball.mode !== 'held' || ball.holder !== PLAY.carrier) return;
         cpuAssignDuties();
-        PLAY.threat = cpuThreat();
+        /* §12.e — the write that used to be here fed nothing: cpuThink() never
+           read it back, so it was a leak with no consumer. Gone with the rest. */
         PLAY.cpuThink -= dt;
         if (PLAY.cpuThink > 0) return;
 
         const c = PLAY.carrier;
         const rng = mulberry32(hashSeed(state.seed, state.half, Math.floor(state.halfT * 60)));
 
-        /* §5 — inside range it may go for goal instead */
+        /* §5 / §12.i — inside range it goes for goal, and the closer to goal he
+           is the more often he goes. It used to be a flat
+           `0.25 + 0.5 × difficulty` on one instantaneous reading of the
+           distance, which is a strange way to weigh the single best action on
+           the pitch: the dice are now scaled by how good the spot actually is,
+           so the front edge of the range is usually a shot and the outer edge is
+           a nibble. This is the safety-net path — the real decision is made in
+           planForCpu() and fired by beginExecution() — so it reads the same
+           distance and stacks the same shot. */
         const toGoal = dist(c, PLAY.goal);
-        if (toGoal <= SHOT_RANGE && rng() < 0.25 + 0.5 * state.difficulty) {
-            const aim = clamp(PLAY.goal.x + randRange(rng, -GOAL_HALF_WIDTH * 0.85, GOAL_HALF_WIDTH * 0.85), 0, 100);
-            shoot(c, { x: aim, y: PLAY.goal.y });
+        if (toGoal <= SHOT_RANGE &&
+            rng() < (0.5 + 0.5 * state.difficulty) * (1 - 0.5 * (toGoal / SHOT_RANGE))) {
+            shoot(c, cpuShotAim(0.85));
             return;
         }
 
@@ -1943,7 +3245,13 @@ import {
     /* ==========================================================================
        § 15. ACTIONS — the three things a human can do, and the two the CPU does.
        ========================================================================== */
-    function passTo(from, to, speed) {
+    function passTo(from, to, speed, opts) {
+        const o = opts || {};
+        /* §12.d — the stroke rides through here: `pace` is its length and `air`
+           is whether it was long and bent enough to be chipped. Everything else
+           that calls a pass (the CPU, autoPass, the shootout) passes neither, and
+           gets exactly the ball it always got: standard pace, on the deck. */
+        const air = o.air === true;
         ball.lastTouch = from;
         /* §12.b/c — every pass is a rolled ball. It leaves the boot firm, flat on
            the deck, and keeps more than a running pace the whole way, so it beats
@@ -1953,18 +3261,41 @@ import {
            in the game.
 
            `to` is a POINT, always — the spot on the turf that was drawn. The
-           ball is never played to a player's live position. */
-        launchBall({ x: from.x, y: from.y }, { x: to.x, y: to.y },
+           ball is never played to a player's live position.
+
+           §12.f — THE STRIKE ORIGIN IS THE BALL, NOT THE BOOT. A carried ball
+           rides BALL_CARRY ahead of the carrier, so launching from `from` — a
+           body — put the entire flight on a line PARALLEL to the drawn one,
+           offset by a body-width. That parallel offset is the whole of the "the
+           ball did not go where I drew" report, and it applies to every pass
+           from every pass of the ball. Reading the ball's own live position
+           makes the drawn line and the flight line share their origin as well as
+           their destination. `from` is still the man: it stays the last touch and
+           the tutor still reads it.
+
+           §12.f — a chip is a ball over a leg, not a lob, so it stays a ROLL:
+           the same CHIP_GAIN-scaled profile, the same arrival fraction, the same
+           flight time for the same distance. That is what keeps the drawn
+           distance, the strike speed and the moment of arrival describing one
+           thing, and it is why `roll` is no longer keyed to `air`. */
+        launchBall(kickFrom(from), { x: to.x, y: to.y },
             speed || BALL_SPEED,
-            { mode: 'pass', passTarget: to.team ? to : null, arc: ARC_PASS, roll: true });
+            {
+                mode: 'pass', passTarget: to.team ? to : null,
+                arc: air ? AIR_ARC : ARC_PASS, roll: true, air, pace: o.pace
+            });
         /* only a real body can be the receiver; a pass into space has none */
         if (PLAY && to.team) PLAY.receiver = to;
         tutorOnPass(from);
         Sfx.kick();
     }
 
-    /** §5 — a shot is only legal inside SHOT_RANGE, and it flies at SHOT_SPEED. */
-    function shoot(from, target) {
+    /** §5 / §12.h — a shot is only legal inside SHOT_RANGE. It is struck at
+        SHOT_SPEED × STRIKE_GAIN, and a shot drawn along a long line is struck up
+        to SHOT_POWER_GAIN harder on top of that: the LENGTH OF THE LINE IS THE
+        POWER OF THE STRIKE, exactly as it is for a pass. `power` is absent for the
+        CPU and for a bare press, and both then keep the flat struck speed. */
+    function shoot(from, target, power) {
         if (!PLAY) return false;
         if (dist(from, PLAY.goal) > SHOT_RANGE) {
             log('Too far out to shoot — get inside ' + SHOT_RANGE + '.', '');
@@ -1972,47 +3303,91 @@ import {
             return false;
         }
         ball.lastTouch = from;
-        launchBall({ x: from.x, y: from.y }, target, SHOT_SPEED, { mode: 'shot', arc: ARC_SHOT });
+        /* §12.f/§12.g — the shot is struck from the same place the drawn angle
+           was measured: the ball's own position. drawnShotRay() projects the
+           player's ray from ballPoint(), so launching from the carrier's feet put
+           the whole shot on a line parallel to the one held on the grass — a
+           body-width of error at the near post, which is the difference between
+           the post and the goal. */
+        const struck = SHOT_SPEED * STRIKE_GAIN
+            * (1 + SHOT_POWER_GAIN * clamp(power === undefined ? 0 : power, 0, 1));
+        launchBall(kickFrom(from), target, struck, { mode: 'shot', arc: ARC_SHOT });
         /* §7 — the keeper's dive is set the instant the shot leaves the boot,
-           and stays re-writable for the whole flight. */
+           and stays re-writable for the whole flight. A dive the human already
+           gave him during the window is NEVER overwritten: that instruction is
+           the whole point of the defending phase — the player picked the side,
+           and the shot either goes where his keeper is or it does not. */
         const k = keeperOf(other(state.possession));
-        if (k && !k.held) {
-            k.dive = k.team === 'cpu'
-                ? cpuKeeperDive(k, target)
-                : defaultDiveTarget(k, target, KEEPER_REACH);
+        if (k && !k.held && !k.dive) {
+            /* §0.d — the uncommanded keeper dives on a GUESS, and both teams get
+               the same guess.
+
+               Everything that made him unbeatable ran through this branch. He
+               was handed the shot's true side (defaultDiveTarget) and then
+               `shotOutcome()` wrapped the rulebook's full KEEPER_REACH around
+               the spot he dove to, from a seat on x = 50 that is already only
+               12.5 from either post. That is a wall, not a save model, and it is
+               also why the computer's keeper read as better than the player's:
+               the human's own dive is a point he DRAWS, so it is only ever as
+               good as his read, while this one was always as good as the truth.
+
+               Now the side is a coin flip (KEEPER_READ_CHANCE) and the ground is
+               short (KEEPER_STEP), so a keeper who guessed wrong is beaten —
+               including by the ball passing him on the far side — and a keeper
+               who guessed right still has to be beaten at the far post. A dive
+               the human drew during the window is never overwritten (`!k.dive`),
+               which keeps his read the one that decides his own keeper. */
+            const gx = PLAY.goal.x;
+            const trueSide = target.x === gx ? 1 : Math.sign(target.x - gx);
+            const readSide = Math.random() < KEEPER_READ_CHANCE ? trueSide : -trueSide;
+            applyAutoDive(k, { x: gx + readSide * KEEPER_STEP, y: k.y });
         }
         Sfx.kick(); shake(.12);
         log((from.team === 'you' ? 'You shoot' : 'CPU shoots') + '!', '');
         return true;
     }
 
-    /**
-     * §7 — a keeper with no instruction dives toward the shot's side. The CPU's
-     * keeper is allowed to *read* it, and it reads with `shotOutcome`, so its
-     * eyesight is the same geometry the property tests cover.
-     */
-    function cpuKeeperDive(k, target) {
-        const home = keeperHome(k.team);
-        const guessed = defaultDiveTarget(k, target, KEEPER_REACH);
-        if (Math.random() > 0.2 + 0.75 * state.difficulty) return guessed;
-        const committed = { x: clamp(target.x, 8, 92), y: home.y };
-        const read = shotOutcome({
-            from: { x: ball.from.x, y: ball.from.y },
-            target,
-            keeper: { x: k.x, y: k.y },
-            keeperTarget: committed,
-            goalX: PLAY.goal.x,
-            goalHalfWidth: GOAL_HALF_WIDTH
-        });
-        const blind = shotOutcome({
-            from: { x: ball.from.x, y: ball.from.y },
-            target,
-            keeper: { x: k.x, y: k.y },
-            keeperTarget: guessed,
-            goalX: PLAY.goal.x,
-            goalHalfWidth: GOAL_HALF_WIDTH
-        });
-        return read.outcome === 'SAVED' || blind.outcome !== 'SAVED' ? committed : guessed;
+    /** §0.d — an uncommanded keeper's dive, from the engine's own model.
+
+        `defaultDiveTarget()` (rules.js) is the honest SHAPE of a dive — go
+        toward the shot's side, no further than a single reach — and the shootout
+        keeps it, because there the human draws the dive and penaltyKickOutcome()
+        reads a committed point. In open play nothing is drawn, and a keeper who
+        is handed the shot's side for free is not making a save, he is reading
+        the striker's mind. So this sets the same kind of point, from a side the
+        caller has already gambled on, and parks him on his own line (y = k.y):
+        the dive is lateral, which is what the fair version of §12.h always was.
+
+        One dive per window is enough — openPlan() clears both keepers' dives at
+        the top of every window, so nothing here can leak into the next one. */
+    function applyAutoDive(k, target) {
+        if (!k) return;
+        k.dive = { x: clamp(target.x, 8, 92), y: k.y };
+    }
+
+    /** §12.i — where the CPU aims a shot it has decided to take.
+
+        Two things are wrong with aiming at the middle of the goal. The keeper
+        lives there — 12.5 units from each post, and a shot down the centre never
+        makes him move — and the middle is the one place his arms cover without a
+        step. So the aim is biased into the half of the mouth the keeper is NOT
+        standing in, and then jittered across it. `spread` is the jitter as a
+        fraction of a half-width: 0.85 is the full band, 0.55 keeps it nearer the
+        post it has chosen (and still always inside the mouth).
+
+        The keeper is read LIVE, at the instant the plan is made. That is the
+        point of the whole change: §0.d makes him commit to a side on a coin flip
+        when the ball is struck, so a plan that aimed down the middle threw the
+        guess away instead of punishing a wrong one. */
+    function cpuShotAim(spread) {
+        const gx = PLAY.goal.x;
+        const k = keeperOf('you');
+        const away = (k && k.x > gx) ? -1 : 1;
+        const mid = clamp(gx + away * GOAL_HALF_WIDTH * 0.42, 2, 98);
+        return {
+            x: clamp(mid + (Math.random() - 0.5) * 2 * GOAL_HALF_WIDTH * spread, 0, 100),
+            y: PLAY.goal.y
+        };
     }
 
     /* ==========================================================================
@@ -2069,8 +3444,8 @@ import {
         /* §8 — the HUD has swapped modes: the readouts are the shootout's now, so
            the regulation log and instruction line would only be stale copy. */
         ui.pens.hidden = false;
-        ui.log.innerHTML = '';
-        ui.instruction.textContent = 'Draw the aim line, then draw the dive line. Within reach it is saved.';
+        ui.roleStrip.hidden = true;
+        setText(ui.instruction, 'Draw your aim, then the dive.');
         bus.emit('half');
         soHudState();
         soSetupKick(Math.random() < 0.5 ? 'you' : 'cpu');
@@ -2080,8 +3455,14 @@ import {
     function endShootout(silent) {
         SO.active = false;
         if (!silent) return;
+        /* the shootout's readouts are tear-down too, so leaving penalties never
+           leaves a stale dots row behind in the regulation HUD */
+        ui.pens.hidden = true;
         setPenaltyView(false);
         if (ui.pens) ui.pens.hidden = true;
+        /* Hand the top-centre band back to the role strip — but never over a
+           screen, so it mirrors #hud-top, the same show/hide gate. */
+        ui.roleStrip.hidden = ui.hudTop.hidden;
     }
 
     function soSetupKick(turn) {
@@ -2215,7 +3596,8 @@ import {
         const kicker = SO.turn;
         if (SO.result.outcome === 'GOAL') {
             if (kicker === 'you') SO.you++; else SO.cpu++;
-            Sfx.goal(); shake(.5);
+            if (kicker === 'you') Sfx.goal(); else Sfx.concede();
+            shake(.5);
             banner('GOAL', kicker === 'you' ? CSS.you : CSS.cpu);
         } else if (SO.result.outcome === 'SAVED') {
             Sfx.save(); shake(.25);
@@ -2316,13 +3698,17 @@ import {
         }
         /* the keeper's dive always plays out */
         const k = soDefKeeper();
-        if (k && k.dive) moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED, dt);
+        if (k && k.dive) moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED * KEEPER_SCALE, dt);
     }
 
     /* ==========================================================================
        § 17. INPUT — Pointer Events: one code path for mouse, touch and pen
        ========================================================================== */
-    const drag = { kind: null, player: null, x0: 0, y0: 0, x: 0, y: 0, moved: 0, id: null };
+    /* §12.d — `path` is the gesture's own polyline, and it exists only while the
+       man on the ball is being drawn for: it is what the freehand stroke is
+       rendered from, and what readStroke() measures at the moment of release to
+       decide the power of the pass and whether the ball goes in the air. */
+    const drag = { kind: null, player: null, x0: 0, y0: 0, x: 0, y: 0, moved: 0, id: null, path: null };
     let lastTap = { t: 0, x: 0, y: 0 };
 
     function canvasPoint(e) {
@@ -2368,6 +3754,7 @@ import {
         if (e.button !== undefined && e.button !== 0) return;
         const pt = canvasPoint(e);
         drag.x0 = pt.x; drag.y0 = pt.y; drag.x = pt.x; drag.y = pt.y; drag.moved = 0; drag.id = e.pointerId;
+        drag.path = null;
         canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
         canvas.classList.add('grabbing');
 
@@ -2385,7 +3772,23 @@ import {
 
         const p = pickPlayer(pt);
         if (humanAttacking() && p === PLAY.carrier) {
+            /* §12.d — the man on the ball gets TWO lines, drawn one after the
+               other: the first is the ball (the point you are passing to, or the
+               angle you will shoot along), the second is his own run once the
+               ball has gone. A third line means he has changed his mind, so it
+               wipes both and starts again.
+               "Which line is this?" is asked HERE, at the start of the gesture,
+               because that is the only moment the answer is known before the
+               stroke itself changes it. */
             drag.kind = 'aim'; drag.player = p;
+            if (AIM.pass && AIM.move) aimReset();   // third line: wipe both
+            AIM.slot = AIM.pass ? 2 : 1;
+            /* §12.f — the stroke starts ON THE BALL, not under the finger. The
+               finger supplies the DIRECTION; the ball supplies the ORIGIN, so the
+               line drawn on the grass and the line of flight are anchored at the
+               same end. Seeding this with the touch point is what made a stroke
+               drawn from the carrier's chest ride a body-width off his own ball. */
+            drag.path = [ballPoint()];
         } else if (p && p.team === 'you' && p.role === 'keeper') {
             /* the human's keeper: a pre-dive, or a dive during a shot */
             drag.kind = 'keeper'; drag.player = p;
@@ -2409,21 +3812,40 @@ import {
         drag.moved = Math.hypot(pt.x - drag.x0, pt.y - drag.y0);
 
         if (drag.kind === 'aim' && drag.moved > TAP_SLOP) {
-            /* §12.c — the line IS the ball's destination. It used to snap its end
-               onto whichever teammate the drag pointed at, so the shot you drew
-               and the pass you got were two different things: the line finished
-               on the player while the ball was led to that player's run. Now the
-               drag draws a point on the turf and the ball goes to that point. The
-               marker still lights up to say a teammate is in the lane, but the
-               line never leaves your finger. */
-            const tgt = aimPoint(drag.x0, drag.y0, drag.x, drag.y);
-            const mate = mateInDirection(drag.x0, drag.y0, drag.x, drag.y);
-            aimLine.visible = true;
-            aimLine.material.color.setHex(mate ? COL.aim : COL.ghost);
-            aimLine.material.opacity = mate ? .85 : .3;
-            aimLine.setEnds({ x: drag.x0, y: drag.y0 }, tgt);
-            runnerMarker.visible = !!mate;
-            if (mate) runnerMarker.position.set(worldX(mate.x), 0.09, worldZ(mate.y));
+            /* §12.d — the drawing IS the plan. The stroke under the finger is kept
+               point for point (a 0.8-unit gap filter, capped at STROKE_MAX) and
+               handed straight back to a freehand line, so what the player sees on
+               the grass is exactly the path they drew: not a chord, and not a
+               snap onto whichever teammate the drag went near. The colour says
+               what the line will DO — slot 1 glows amber when the drawn angle is
+               on target or a mate is in the lane, dims to grey when it is neither
+               (a shot that is going to miss), and slot 2, the carrier's own run,
+               is drawn faint because it is a plan and not a ball. aimLine stays
+               hidden for the whole gesture: two lines for one gesture would read
+               as two different instructions. */
+            const path = drag.path;
+            if (path) {
+                const last = path[path.length - 1];
+                if (Math.hypot(drag.x - last.x, drag.y - last.y) >= 0.8 && path.length < STROKE_MAX) {
+                    path.push({ x: drag.x, y: drag.y });
+                }
+                const mate = AIM.slot === 2 ? null : mateInDirection(drag.x0, drag.y0, drag.x, drag.y);
+                const line = AIM.slot === 2 ? moveCurve : strokeLine;
+                if (AIM.slot === 2) {
+                    line.material.color.setHex(COL.ghost);
+                    line.material.opacity = .45;
+                } else {
+                    const t = shotTargetFor(ballPoint(), { x: drag.x, y: drag.y });
+                    const hit = t && isOnTarget(t.x, PLAY.goal.x, GOAL_HALF_WIDTH);
+                    line.material.color.setHex(hit || mate ? COL.aim : (t ? COL.bad : COL.ghost));
+                    line.material.opacity = .95;
+                }
+                line.setPoints(path);
+                line.visible = true;
+                runnerMarker.visible = !!mate;
+                if (mate) runnerMarker.position.set(worldX(mate.x), 0.09, worldZ(mate.y));
+            }
+            aimLine.visible = false;
         } else if (drag.kind === 'move' && drag.moved > TAP_SLOP) {
             runnerMarker.visible = true;
             runnerMarker.position.set(worldX(clamp(pt.x, 5, 95)), 0.09, worldZ(clamp(pt.y, 5, 95)));
@@ -2456,13 +3878,6 @@ import {
                 diveMarker.position.set(worldX(t.x), 0.09, worldZ(t.y));
             }
         }
-    }
-
-    /** Where a pass aimed in this direction would land. */
-    function aimPoint(x0, y0, x, y) {
-        const d = unit(x - x0, y - y0);
-        const reach = Math.max(18, Math.hypot(x - x0, y - y0));
-        return { x: clamp(x0 + d.x * reach, 4, 96), y: clamp(y0 + d.y * reach, 4, 96) };
     }
 
     /** §4 — the teammate the drag is pointing at, if any. */
@@ -2503,20 +3918,82 @@ import {
         drag.kind = null; drag.player = null; drag.id = null;
 
         if (kind === 'aim') {
+            /* §12.d — release commits the line, and WHICH line it is was decided
+               back at pointerdown, so a stroke that grew long enough to become a
+               shot cannot change its meaning halfway through the gesture. Slot 1
+               is the ball: if the drawn angle crosses the goal line it is a shot,
+               and it is HELD for the SHOOT button or the double-tap so that the
+               ball leaves along the angle that was drawn; if it crosses nothing,
+               it is a pass to the point the line ends on, struck with the power
+               and the air the stroke earned. Slot 2 is the carrier's own run,
+               kept for beginExecution() to fire the moment the ball has gone. */
+            const pts = drag.path || [];
+            drag.path = null;
             aimLine.visible = false;
             runnerMarker.visible = false;
-            if (moved > TAP_SLOP) {
-                /* §12.c — the ball goes to the POINT that was drawn, full stop.
-                   This line used to read `mate || aimPoint(...)`: the moment the
-                   drag pointed anywhere near a teammate the drawn point was
-                   thrown away and the teammate OBJECT was queued instead, and
-                   beginExecution() then resolved the ball to wherever that player
-                   had run to. The line ended on the man, the ball went somewhere
-                   else, and the two never agreed. A mate in the lane is now only
-                   a hint that lights the line up — it does not retarget it. */
-                const target = aimPoint(drag.x0, drag.y0, pt.x, pt.y);
-                const mate = mateInDirection(drag.x0, drag.y0, pt.x, pt.y);
-                if (queuePass(target) && !mate) log('Queued: played into space.', '');
+            if (moved > TAP_SLOP && pts.length > 1) {
+                const stroke = readStroke(pts);
+                if (AIM.slot === 2) {
+                    AIM.move = stroke;
+                    moveCurve.setPoints(stroke.pts);
+                    moveCurve.visible = true;
+                    log('Run drawn: the carrier follows it once the ball is away.', '');
+                } else {
+                    /* §12.f — the committed stroke is re-seated on the ball's own
+                       position and re-aimed at the point the finger stopped on. A
+                       stroke is drawn from a body and the ball is struck from a
+                       ball, and `anchored` collapses the BALL_CARRY between the
+                       two: every point is projected onto the ball→finger ray, so
+                       the line the player keeps on the grass IS the ball's line,
+                       from its first point to its last. Everything downstream —
+                       the shot ray, the queued pass point, the preview — reads
+                       this ONE object, which is what makes one line mean one
+                       thing. */
+                    const shot = anchored(stroke, ballPoint());
+                    /* §12.f — and the END of the stroke is the finger's RELEASE
+                       point, not merely the last sample the 0.8-unit gap filter
+                       happened to keep. A flick that lifts and lands a couple of
+                       units further on dribbles the ball short of the spot the
+                       line visibly ended on; so the released point is written in
+                       and the stroke is re-read from it, which re-derives the
+                       length (and through it the power and the air) from the line
+                       the player can actually see. */
+                    shot.pts[shot.pts.length - 1] = { x: pt.x, y: pt.y };
+                    const landed = readStroke(shot.pts);
+                    AIM.pass = landed;
+                    passCurve.setPoints(landed.pts);
+                    passCurve.visible = true;
+                    strokeLine.visible = false;
+                    const t = shotTargetFor(ballPoint(), landed.end);
+                    /* §12.f — THE DRAWN LINE IS ALWAYS THE QUEUED BALL.
+                       This is the whole of the "passing to my own half instead of
+                       the forward line I drew" report. An angle that had a
+                       goal-line answer used to queue NOTHING: it was "held" for
+                       the SHOOT button and the double-tap, and if the player
+                       closed the window with MOVES DONE instead, the plan held no
+                       pass at all and beginExecution() fell through to
+                       autoPass() — a random delivery that could point at the
+                       passer's OWN half while the forward line he had just drawn
+                       sat on the grass meaning nothing. Straight up the pitch is
+                       exactly where the goal is, so almost every forward line has
+                       a goal-line answer and almost every forward pass was being
+                       thrown away. The queue therefore happens FIRST and
+                       unconditionally; SHOOT and the double-tap re-queue the shot
+                       on top of it and null the pass again (queueShot), which is
+                       what makes an angle an upgrade of a pass into a shot rather
+                       than the replacement of one. */
+                    const queued = queuePass(landed.end, landed, t ? true : false);
+                    if (t) {
+                        log(isOnTarget(t.x, PLAY.goal.x, GOAL_HALF_WIDTH)
+                            ? 'Angle set: the ball goes down the drawn line — SHOOT to strike it.'
+                            : 'Angle set: the ball goes down the drawn line, heading wide of goal.', '');
+                    } else if (queued) {
+                        log('Queued: pass of power ' + Math.round(landed.power * 100) + '%'
+                            + (landed.air ? ', in the air.' : '.'), '');
+                    } else {
+                        log('Draw a line towards a teammate or the goal.', '');
+                    }
+                }
             } else {
                 /* a tap on the carrier: is this the second half of a double-tap? */
                 const now = performance.now();
@@ -2619,24 +4096,76 @@ import {
     /* ==========================================================================
        § 17.b SIMULTANEOUS PLANNING — the decision window.
        The match now runs in two beats. A *decision window* opens the moment a
-       side wins the ball; for PLAN_WINDOW seconds the board is frozen and the
-       match clock stops for both sides, while each side stacks up every move it
-       means to make — a pass, a run for each player, a keeper dive, a shot.
-       Nothing resolves one at a time. The window closes when the human presses
-       MOVES DONE (or when it expires), and both sides' stacked moves fire
-       together. A side that says nothing auto-plays, so the match never stalls.
+       side wins the ball; for a few seconds the board is frozen and the match
+       clock stops for both sides, while each side stacks up every move it means
+       to make — a pass, a run for each player, a keeper dive, a shot. Nothing
+       resolves one at a time. The window closes when the human presses MOVES DONE
+       (or when it expires), and both sides' stacked moves fire together. A side
+       that says nothing auto-plays, so the match never stalls.
        ========================================================================== */
-    const PLAN_WINDOW = 10;       // seconds each side has to set every move
+    /* §17.b — how long the window stays open is the player's choice: 3, 5, 10 or
+       20 seconds, 10 by default. The match clock is STOPPED while a window runs,
+       so this budget is thinking time and nothing else — changing it can never
+       change the length of a match. rules.js keeps its own PLAN_WINDOW for the
+       rulebook's property tests; the engine reads `planWindow`. */
+    const PLAN_WINDOW_STEPS = [3, 5, 10, 20];
+    const PLAN_WINDOW_DEFAULT = 10;
+    let planWindow = PLAN_WINDOW_DEFAULT;
     const PLAN_CPU_BEAT = 0.9;    // the CPU quietly "clicks Done" about here
+
+    /* §3 — the half length is the player's choice too: 1, 2 or 3 minutes a
+       half, 2 by default. rules.js keeps its own HALF_LENGTH = 120 for the
+       rulebook's property tests (the verify summary reads the rulebook, not
+       the engine); the engine reads `halfLength`. */
+    const HALF_LENGTH_STEPS = [60, 120, 180];
+    const HALF_LENGTH_DEFAULT = 120;
+    let halfLength = HALF_LENGTH_DEFAULT;
+
+    /** §3 — set the half length and re-sync both surfaces' pills. A running
+        clock is never rewound or stretched: the new length applies from the
+        next match, and a half already past a newly shorter length simply
+        ends on its next tick. */
+    function setHalfLength(secs) {
+        const n = Math.round(Number(secs));
+        halfLength = HALF_LENGTH_STEPS.indexOf(n) >= 0 ? n : HALF_LENGTH_DEFAULT;
+        [ui.halfLen, ui.halfLenStart].forEach(group => {
+            if (!group) return;
+            Array.from(group.querySelectorAll('button[data-half]')).forEach(b =>
+                b.setAttribute('aria-pressed', String(Number(b.dataset.half) === halfLength)));
+        });
+    }
+
+    /** §17.b — set the decision-window budget and re-sync the HUD. The window is
+        an input to two things only: the `t` a fresh plan starts with, and the
+        fraction the ring is drawn from — so both are handled here and nowhere
+        else. A window already running is capped to the new budget (never pushed
+        out) or the ring would sit full and the countdown would look stuck. */
+    function setPlanWindow(secs) {
+        const n = Math.round(Number(secs));
+        planWindow = PLAN_WINDOW_STEPS.indexOf(n) >= 0 ? n : PLAN_WINDOW_DEFAULT;
+        if (PLAN && !PLAN.armed && PLAN.t > planWindow) PLAN.t = planWindow;
+        lastPlanBar = -1;
+        [ui.planWin, ui.planWinStart].forEach(group => {
+            if (!group) return;
+            Array.from(group.querySelectorAll('button[data-lock]')).forEach(b =>
+                b.setAttribute('aria-pressed', String(Number(b.dataset.lock) === planWindow)));
+        });
+        refreshPlanHud();
+    }
 
     let PLAN = null;
 
     function newPlan() {
         return {
             atk: state.possession, def: other(state.possession),
-            t: PLAN_WINDOW, cpuT: 0, cpuPlanned: false, armed: false,
+            t: planWindow, cpuT: 0, cpuPlanned: false, armed: false,
             pass: { you: null, cpu: null },
-            shot: { you: null, cpu: null }
+            shot: { you: null, cpu: null },
+            /* §12.d — the second line the human can draw: where the man on the
+               ball runs once the ball has gone. It is a plan like any other, so
+               it rides in the plan, is wiped with it, and is read by nobody but
+               beginExecution(). The CPU never looks at it. */
+            move: { you: null, cpu: null }
         };
     }
 
@@ -2669,23 +4198,46 @@ import {
         drew — and that is where the ball will go, whatever the intended
         receiver does next. Aim ahead of a runner to lead him; aim at his feet
         to hit him. The nearest body at arrival decides who really gets it. */
-    function queuePass(to) {
+    function queuePass(to, stroke, silent) {
         if (!PLAN || PLAN.armed || !to) return false;
         const team = state.possession;
         /* copied to a fresh bare point on purpose: storing the player object here
            is what used to let the ball be led to that player's live position
-           instead of travelling to the point that was drawn */
-        PLAN.pass[team] = { x: to.x, y: to.y };
+           instead of travelling to the point that was drawn. The stroke rides
+           along as two bare numbers — the length-derived pace and the air flag —
+           so the ball that is struck in beginExecution carries the properties the
+           gesture earned without the plan holding on to a single live object. */
+        PLAN.pass[team] = {
+            x: to.x, y: to.y,
+            power: stroke ? stroke.power : 0,
+            air: stroke ? stroke.air === true : false
+        };
         PLAN.shot[team] = null;
         /* the carrier is told to stay put, so a queued pass is a pass and not
-           also a sprint — the ball leaves his boot, not his boot and his legs */
+           also a sprint — the ball leaves his boot, not his boot and his legs.
+           Unless he drew himself a run, which is the one case where he IS going
+           somewhere: that is the pass-and-move, and it is honoured in
+           beginExecution() the moment the ball is away. */
         const c = PLAY && PLAY.carrier;
-        if (c) setIntent(c, { x: c.x, y: c.y });
-        if (team === 'you') log('Queued: pass to ' + (to.label || 'space') + '.', '');
+        if (c && !AIM.move) setIntent(c, { x: c.x, y: c.y });
+        if (team === 'you' && !silent) log('Queued: pass to ' + (to.label || 'space') + '.', '');
         return true;
     }
 
-    /** Stack a shot. The button, Space and S, and the double-tap all land here. */
+    /** Stack a shot. The button, Space and S, and the double-tap all land here.
+        §12.d — the shot leaves along the angle that was DRAWN. The drag sets the
+        line and this fires on it: where that line crosses the byline is the
+        target, so a line drawn at the near post goes to the near post and a line
+        drawn across the face misses the far side. The target itself comes from
+        drawnShotRay(), which ALWAYS answers with a point ON the drawn line —
+        where it meets the byline, or its own end when it has no byline answer —
+        so this call can no longer invent a line of its own. Only a gesture with
+        no line at all (a bare button press, Space, S) falls back to the post the
+        keeper is furthest from. Dead centre used to be that default and it was
+        the worst answer available: keeperHome() parks the keeper on x = 50, so a
+        bare button press flew straight at him and the save-test geometry did the
+        rest (the test is the distance from the keeper's dive target to the ball's
+        flight path, and the flight path passed through him). */
     function queueShot() {
         if (!PLAN || PLAN.armed || !PLAY || PLAY.atk !== 'you') return false;
         const c = PLAY.carrier;
@@ -2695,10 +4247,24 @@ import {
             log('Shooting only works inside ' + SHOT_RANGE + ' units of the goal.', '');
             return false;
         }
-        PLAN.shot.you = { x: clamp(PLAY.goal.x, 0, 100), y: PLAY.goal.y };
+        const drawn = drawnShotRay();
+        const keeper = keeperOf('cpu');
+        const side = (keeper && keeper.x > PLAY.goal.x) ? -1 : 1;
+        /* §12.d — the strike carries the length of the line that is still held on
+           the grass, so SHOOT and the double-tap both fire a ball as hard as the
+           gesture that set the angle earned. The fallback is a shot with NO line
+           — a bare button press, Space, S — and a line that was never drawn has
+           no power to carry, so that one is struck at exactly SHOT_SPEED. */
+        PLAN.shot.you = drawn
+            ? { x: drawn.x, y: drawn.y, power: AIM.pass ? AIM.pass.power : 0 }
+            : { x: clamp(PLAY.goal.x + side * GOAL_HALF_WIDTH * 0.72, 2, 98), y: PLAY.goal.y, power: 0 };
         PLAN.pass.you = null;
         setIntent(c, { x: c.x, y: c.y });
-        log('Queued: shot at goal.', '');
+        log(drawn
+            ? (isOnTarget(drawn.x, PLAY.goal.x, GOAL_HALF_WIDTH)
+                ? 'Queued: shot along the drawn angle.'
+                : 'Queued: shot along the drawn angle — it is heading wide.')
+            : 'Queued: shot at goal.', '');
         return true;
     }
 
@@ -2711,36 +4277,82 @@ import {
         /* --- the CPU is the side in possession: choose the ball's destination --- */
         if (state.possession === 'cpu') {
             cpuAssignDuties();
-            PLAY.threat = cpuThreat();
             const c = PLAY.carrier;
             const mates = teamOutfield('cpu').filter(m => m !== c);
             /* §12.c — settle WHERE everybody is going FIRST, then aim the ball at
-               that spot. The pass is struck from the carrier's feet and the
-               receiver breaks at the same instant, so a ball aimed at his boots
-               is aimed at a place he is leaving: it lands at his marker's feet and
-               the only thing waiting at the end of it is a defender running the
-               other way. Leading the receiver here is not a nicety, it is the
-               difference between a pass and a turnover. */
+               that spot. The pass is struck from the ball and the receiver breaks
+               at the same instant, so a ball aimed at his boots is aimed at a
+               place he is leaving: it lands at his marker's feet and the only
+               thing waiting at the end of it is a defender running the other way.
+               Leading the receiver here is not a nicety, it is the difference
+               between a pass and a turnover. */
             const spots = new Map();
             mates.forEach((m, i) => spots.set(m, attackingSpot(c, PLAY.goal, i)));
 
-            if (dist(c, PLAY.goal) <= SHOT_RANGE && rng() < 0.25 + 0.5 * state.difficulty) {
-                PLAN.shot.cpu = {
-                    x: clamp(PLAY.goal.x + randRange(rng, -GOAL_HALF_WIDTH * 0.85, GOAL_HALF_WIDTH * 0.85), 0, 100),
-                    y: PLAY.goal.y
-                };
+            /* §12.i — THE AI MUST TAKE THE SHOT THAT IS ON.
+
+               Two things stood between a good shooting spot and a shot, and the
+               report named the symptom exactly.
+
+                 1. THE AIM. Every shot was aimed at the middle of the goal — the
+                    centre of the mouth, which is where the keeper already is
+                    (keeperHome() parks him on x = 50, half a unit from dead
+                    centre). The one shot the CPU did take was therefore the one
+                    shot no keeper has ever had to move for, and it was saved
+                    almost every time it was struck. It now aims into the half of
+                    the mouth the keeper is NOT standing in, read live at this
+                    instant (cpuShotAim) — the same half §0.d makes him gamble on,
+                    so the shot stops handing the guess back to him.
+                 2. THE DICE. The shot was one instantaneous reading of the
+                    distance against a flat `0.25 + 0.5 × difficulty`, so a man
+                    camped on the edge of the box for ten seconds almost never
+                    fired while a man who clipped the edge for one frame fired on
+                    that frame's roll. The dice are weighted by how good the spot
+                    actually is now: the front half of the range shoots more
+                    often than it passes.
+
+               The range test is read live here, at the moment the plan is made,
+               and read AGAIN in beginExecution() when the ball is actually
+               struck, so the shot cannot be planned and then lost — and the
+               carrier is pinned in place below, so the shape never walks him out
+               of the range over the window either. */
+            const inRange = dist(c, PLAY.goal) <= SHOT_RANGE;
+            const quality = inRange ? 1 - 0.5 * (dist(c, PLAY.goal) / SHOT_RANGE) : 0;
+            if (inRange && rng() < (0.55 + 0.45 * state.difficulty) * quality) {
+                PLAN.shot.cpu = cpuShotAim(0.55);
             } else {
-                /* §12.c — the ball is aimed at the chosen receiver's DESTINATION,
+                /* §12.c — the ball is aimed at where the chosen receiver WILL BE,
                    never at the receiver himself. Handing the plan the live player
                    object is what let the ball follow him; and because the carrier
                    was then also given that same object as a run, it is what made
                    the CPU look like it was dribbling the length of the pitch
                    single-handed. */
                 const target = cpuChoosePass(rng, spots);
-                const s = target ? spots.get(target) : null;
-                PLAN.pass.cpu = s
-                    ? { x: s.x, y: s.y }
-                    : { x: PLAY.goal.x, y: PLAY.goal.y };
+                if (target) {
+                    /* §12.i — and if the LINE TO GOAL IS CLEAR, the shot wins over
+                       the pass. This is read with the very race the CPU scores its
+                       own passes with, against the defenders between it and the
+                       goal; the defending keeper is deliberately left out of it,
+                       because a shot is not a pass to his feet — his save is
+                       settled by the read in shoot(), the moment the ball is
+                       struck, and guessing at it from here would only be a worse
+                       copy of the same answer. */
+                    const lane = resolvePassRace({
+                        from: { x: c.x, y: c.y },
+                        to: cpuShotAim(0.55),
+                        defenders: defenderInputs('you'),
+                        radius: TOUCH_R
+                    });
+                    if (lane.outcome === 'COMPLETE') {
+                        PLAN.shot.cpu = cpuShotAim(0.55);
+                    } else {
+                        const s = leadSpot(c, target, spots.get(target));
+                        PLAN.pass.cpu = { x: s.x, y: s.y };
+                    }
+                } else {
+                    /* nobody to pass to at all: a shot is the only forward option */
+                    PLAN.shot.cpu = cpuShotAim(0.55);
+                }
             }
             mates.forEach(m => setIntent(m, spots.get(m)));
             /* the carrier is told to stand exactly where he is: he holds the
@@ -2754,12 +4366,13 @@ import {
                reads the real flight at execution time, which is a better keeper
                than any guess made from here would be. --- */
         cpuDefendDuties();
-        PLAY.threat = cpuThreat();
+        /* §12.e — `mine` is read BEFORE anything is written now. It is the CPU's
+           own goal, and it is the only steering this planner gets. */
         const mine = ownGoal('cpu');
         teamOutfield('cpu').forEach((p, i) => {
             if (p.duty === 'interceptor') {
-                const to = PLAY.threat || PLAY.carrier;
-                const s = interceptTarget(p, PLAY.carrier, to);
+                /* the same blindfold as holdShape(): press the carrier himself */
+                const s = interceptTarget(p, PLAY.carrier, pressPoint(PLAY.carrier, mine));
                 setIntent(p, { x: s.x, y: ownHalf('cpu', s.y) });
             } else if (p.duty === 'marker') {
                 const c = PLAY.carrier;
@@ -2806,12 +4419,24 @@ import {
     function autoPass() {
         if (!PLAY || !PLAY.carrier) return;
         const c = PLAY.carrier;
+        const side = attackSide(c.team);
         const mates = teamOutfield(c.team).filter(m => m !== c);
         const rng = mulberry32(hashSeed(state.seed, state.half, Math.floor(state.halfT * 60) + 31));
-        const options = mates.concat([{
+        /* §12.c — THE AUTOMATIC BALL GOES FORWARD.
+           The pool used to be EVERY team-mate plus one space spot, and a defender
+           standing behind the carrier is a team-mate: the "no instruction"
+           delivery could leave the boot aimed at the passer's own half, which is
+           the second half of the "passing the wrong way" report — the ball moved
+           backwards on a window the player had said nothing in. The mates are now
+           filtered to the ones who are AHEAD in the direction of the attack, and
+           a forward patch of turf beyond the carrier is always on the list, so
+           the ball travels upfield whatever the shape happens to look like. */
+        const ahead = mates.filter(m => (m.y - c.y) * side > 0.5);
+        const spot = {
             x: clamp(c.x + (rng() - 0.5) * 44, 8, 92),
-            y: clamp(c.y + attackSide(c.team) * (12 + rng() * 26), 8, 92)
-        }]);
+            y: clamp(c.y + side * (12 + rng() * 26), 8, 94)
+        };
+        const options = ahead.length ? ahead.concat([spot]) : [spot];
         const pick = options[Math.floor(rng() * options.length)];
         if (pick) passTo(c, pick, BALL_SPEED);
     }
@@ -2821,6 +4446,11 @@ import {
     function humanPlanEmpty() {
         if (!PLAN) return false;
         if (PLAN.pass.you || PLAN.shot.you) return false;
+        /* §12.d — a drawn line is a spoken instruction, even though it is not a
+           queued run. Both lines count: the ball is one, and the carrier's own
+           run is the other, so a human who has drawn either must not be handed
+           the automatic plan on top of it. */
+        if (AIM.pass || AIM.move) return false;
         return !allPlayers.some(p => p.team === 'you' && p.queued);
     }
 
@@ -2848,10 +4478,17 @@ import {
         /* Defending. Both keepers are left out on purpose: shoot() reads the real
            flight when the ball is actually struck, which beats guessing from here. */
         const mine = ownGoal('you');
-        const bound = c ? (c.queued || c) : { x: 50, y: 50 };
+        /* §12.e — the human's own defence is planned by the same geometry, under
+           the same blindfold, and for the same reason. `bound` used to be
+           `c.queued` — the CPU's stacked run, read straight out of the plan the
+           CPU had just written. That is the exact mirror image of the leak this
+           change exists to close, just running the other way, and it made the
+           human's shape look like it knew where the CPU was going. All that is
+           left is the carrier and the ball. */
+        const bound = c || ball;
         teamOutfield('you').forEach((p, i) => {
             if (c && i === 0) {
-                const s = interceptTarget(p, c, bound);
+                const s = interceptTarget(p, c, pressPoint(c, mine));
                 setIntent(p, { x: s.x, y: ownHalf('you', s.y) });
             } else if (c && i === 1) {
                 setIntent(p, {
@@ -2889,20 +4526,70 @@ import {
         });
         const c = carrier;
         if (c) {
-            const shot = plan.shot[plan.atk];
+            let shot = plan.shot[plan.atk];
             const pass = plan.pass[plan.atk];
+            /* §12.f — the human's shot is re-read off the LIVE ball here, one
+               frame before it is struck. The window is long, the board is not
+               perfectly still (a carried ball eases along with its carrier), and
+               a target solved when the line was drawn can be a body-width stale
+               by the time the boot swings — stale meaning the ball leaves on a
+               line parallel to the one on the grass. Solving the same ray again
+               from where the ball actually is keeps the strike on the drawn line
+               under every condition. It can only run when a line was drawn, so
+               the bare-button shot keeps exactly the aim it was given. */
+            if (shot && plan.atk === 'you' && AIM.pass) {
+                const live = drawnShotRay();
+                /* the strike's power is carried across the re-derivation: the
+                   live ray answers with the angle, never with the length, and
+                   the length is half of what the plan was holding. */
+                if (live) shot = { x: live.x, y: live.y, power: shot.power };
+            }
             if (shot && dist(c, PLAY.goal) <= SHOT_RANGE) {
-                shoot(c, shot);
+                shoot(c, shot, shot.power);
+            } else if (pass && plan.atk === 'you' && AIM.pass) {
+                /* §12.f — THE DRAWN LINE WINS OVER THE DICE. `pass` is the bare
+                   point queuePass() stored, and on the human's side that point IS
+                   the end of the stroke — but the stroke also rides in AIM.pass
+                   for the whole window, and it is the authority on what was
+                   drawn. Reading it here, one branch ahead of the random
+                   delivery, is what makes it impossible for a human window to end
+                   in a ball struck at a spot the player never drew: whatever the
+                   plan is holding, if a line is on the grass the ball follows it.
+                   The power and the air come off the stroke for the same reason
+                   they do below — a long line is a hard pass, a bent one is over
+                   the top. */
+                passTo(c, { x: AIM.pass.end.x, y: AIM.pass.end.y }, BALL_SPEED,
+                    { pace: AIM.pass.power, air: AIM.pass.air === true });
             } else if (pass && pass.x !== undefined) {
                 /* §12.c — the ball is played to the POINT that was drawn and to
                    nothing else. This used to resolve to `pass.queued` — the
                    intended receiver's planned run — so the ball silently left
-                   the drawn line and chased the man. Read the bare point. */
-                passTo(c, { x: pass.x, y: pass.y }, BALL_SPEED);
+                   the drawn line and chased the man. Read the bare point.
+                   §12.d — the stroke carries the pace and the air: a long line is
+                   a hard pass, and a long bent line is a ball over the top that
+                   the outfielders cannot cut out. Only a rolled ball is left to
+                   the default pace, because a chip's whole point is its flight. */
+                passTo(c, { x: pass.x, y: pass.y }, BALL_SPEED,
+                    { pace: pass.power, air: pass.air === true });
             } else {
                 autoPass();
             }
+            /* §12.d — THE CARRIER'S OWN RUN, fired after the kick and never
+               before it. The loop above deliberately refuses to move the carrier,
+               which is what keeps a solo dribble out of the game; but the human
+               drew a run for him, so he goes — once the ball has left his boot.
+               That is a pass-and-move, and it is the only way the man on the ball
+               is ever allowed to travel. The stroke's last point is the
+               destination, clamped inside the turf. */
+            const run = plan.move ? plan.move[plan.atk] : null;
+            const end = run && run.pts && run.pts.length ? run.pts[run.pts.length - 1] : null;
+            if (end) {
+                c.dest = { x: clamp(end.x, 5, 95), y: clamp(end.y, 5, 95) };
+                c.speed = PLAYER_SPEED;
+            }
         }
+        /* the drawn lines are spent: the ball is moving and the window is over */
+        aimReset();
         bus.emit('role');
     }
 
@@ -2933,8 +4620,8 @@ import {
                     if (ball.mode === 'held' || ball.mode === 'loose') endHalf();
                 } else {
                     state.halfT += dt;
-                    if (state.halfT >= HALF_LENGTH) {
-                        state.halfT = HALF_LENGTH;
+                    if (state.halfT >= halfLength) {
+                        state.halfT = halfLength;
                         state.pendingHalf = true;
                     }
                 }
@@ -3021,10 +4708,12 @@ import {
         refreshShootButton();
     }
 
-    /* --- the plan panel -----------------------------------------------------
-       The countdown and the MOVES DONE button sit in the bottom dock beside the
-       log. Like the match clock this is change-guarded: nothing is written to
-       the DOM unless the tenth-of-a-second bucket actually moved. */
+    /* --- the decision ring ---------------------------------------------------
+       §17.b — the countdown is the arc of the centre circle now, and the MOVES
+       DONE button is the only other thing the thumb needs. There is no number on
+       screen: the arc emptying IS the read-out, and #plan-clock / #plan-state
+       carry the same information to a screen reader. Like the match clock this is
+       change-guarded, so nothing is written to the DOM unless the bucket moved. */
     let lastPlanSec = -1, lastPlanBar = -1, lastPlanState = '', lastPlanShow = null;
     function refreshPlanHud() {
         if (!ui.plan || !ui.planClock) return;
@@ -3040,18 +4729,26 @@ import {
         const secs = Math.max(0, Math.ceil(PLAN.t - 1e-6));
         if (secs !== lastPlanSec) {
             lastPlanSec = secs;
-            ui.planClock.textContent = String(secs);
-            ui.plan.classList.toggle('low', secs <= 3);
+            setText(ui.planClock, String(secs));
+            /* "low" has to mean something on every budget: a quarter of the
+               window, capped at the old three seconds, so a 3s window is not
+               painted red from the instant it opens and a 20s window still warns
+               at the same point it always did. */
+            ui.plan.classList.toggle('low', secs <= Math.min(3, Math.ceil(planWindow / 4)));
         }
-        const k = clamp(PLAN.t / PLAN_WINDOW, 0, 1);
+        /* The ring is an SVG circle with pathLength="1" and stroke-dasharray:1,
+           so the dash offset is the fraction of the circle that is NOT drawn:
+           0 is a full ring, 1 is an empty one. It empties as the window closes —
+           over whichever budget the player chose. */
+        const k = clamp(PLAN.t / Math.max(1e-6, planWindow), 0, 1);
         if (Math.abs(k - lastPlanBar) > 0.004) {
             lastPlanBar = k;
-            ui.planBar.style.transform = 'scaleX(' + k.toFixed(3) + ')';
+            if (ui.planBar) ui.planBar.style.strokeDashoffset = (1 - k).toFixed(4);
         }
         const label = PLAN.cpuPlanned ? 'CPU READY · YOUR MOVE' : 'PLANNING';
         if (label !== lastPlanState) {
             lastPlanState = label;
-            ui.planState.textContent = label;
+            setText(ui.planState, label);
         }
     }
 
@@ -3059,20 +4756,21 @@ import {
         refreshShootButton();
         refreshPlanHud();
         if (SO.active) return;
-        const left = Math.max(0, HALF_LENGTH - state.halfT);
+        const left = Math.max(0, halfLength - state.halfT);
         const secs = Math.ceil(left - 1e-6);
         if (secs !== lastClock) {
             lastClock = secs;
-            ui.clock.textContent = formatClock(secs);
+            setText(ui.clock, formatClock(secs));
             /* the last 15 seconds are the only time the clock is allowed to go
-               warm; the class lives on the panel so both the fill and the
-               numerals can respond to it */
-            ui.clock.parentElement.parentElement.classList.toggle('low', secs <= 15);
+               warm; the class lives on the clock wrap's parent — the whole
+               top-right corner — so the numerals and the fill warm together */
+            const corner = ui.clock && ui.clock.parentElement && ui.clock.parentElement.parentElement;
+            if (corner) corner.classList.toggle('low', secs <= 15);
         }
-        const k = clamp(left / HALF_LENGTH, 0, 1);
+        const k = clamp(left / halfLength, 0, 1);
         if (Math.abs(k - lastBar) > 0.004) {
-            ui.clockBar.style.transform = 'scaleX(' + k.toFixed(3) + ')';
             lastBar = k;
+            if (ui.clockBar) ui.clockBar.style.transform = 'scaleX(' + k.toFixed(3) + ')';
         }
     }
 
@@ -3090,6 +4788,18 @@ import {
         camera.top = view.hh; camera.bottom = -view.hh;
         camera.updateProjectionMatrix();
         renderer.setSize(w, h, false);
+        /* §17.b — the decision ring is supposed to sit ON the painted centre
+           circle, so its diameter is not a design constant — it is whatever the
+           camera fit currently makes that circle. The circle is painted at 9.15m
+           (makePitchTexture), which is 9.15 / M_Y game units of radius, and one
+           game unit of y is h / (2 * view.hh) pixels (the same conversion
+           canvasPoint() uses to turn a tap into a board position). Written to
+           --ring-d on #app, the ring's positioned ancestor, so it survives the
+           zoom setPenaltyView() applies. */
+        if (app) {
+            const ringPx = (9.15 / M_Y) * (app.clientHeight || h) / view.hh;
+            app.style.setProperty('--ring-d', ringPx.toFixed(2) + 'px');
+        }
     }
     window.addEventListener('resize', fitView);
     window.addEventListener('orientationchange', () => setTimeout(fitView, 120));
@@ -3152,9 +4862,25 @@ import {
         ballPing.position.set(worldX(ball.x), 0.07, worldZ(ball.y));
         ballPing.scale.setScalar(0.7 + cyc * 2.2);
         ballPing.material.opacity = Math.pow(1 - cyc, 1.7) * 0.42;
+        /* §18.b — the goal burst. It expands off wall time (like the beacon and
+           for the same reason) so it carries on through kickoff(), which is
+           already moving every player and resetting the ball underneath it. It
+           grows out of the middle of the pitch, where the camera is looking and
+           where the DOM word is bursting, and it is the side's colour, so the
+           celebration says who scored before the scoreline is read. */
+        if (FIRE.goal > 0) {
+            FIRE.goal += dt;
+            const gp = Math.min(1, FIRE.goal / 1.15);
+            goalBurst.position.set(0, 0.075, 0);
+            goalBurst.scale.set(1 + gp * 15, 1 + gp * 15, 1);
+            goalBurst.material.opacity = Math.pow(1 - gp, 1.5) * 0.9;
+            if (gp >= 1) FIRE.goal = 0;
+        } else if (goalBurst.material.opacity !== 0) {
+            goalBurst.material.opacity = 0;
+        }
         /* And the carrier wears the triangle. Possession is the thing a viewer
            has to know at a glance — it is what decides whose decision window is
-           open — and at this zoom "which of the twelve has it" is genuinely not
+           open — and at this zoom "which of the fourteen has it" is genuinely not
            obvious from the ball alone, because the ball is the smaller object of
            the two and it sits at their feet. The mark hangs over the head, in the
            team's own colour, bobbing on the same beat as everything else so the
@@ -3181,20 +4907,67 @@ import {
        ========================================================================== */
     function toggleMute() {
         const m = Sfx.toggle();
-        ui.mute.textContent = m ? '🔇' : '♪';
-        ui.mute.setAttribute('aria-pressed', String(m));
+        const val = ui.mute && ui.mute.querySelector('.sheet-val');
+        if (val) setText(val, m ? 'OFF' : 'ON');
+        if (ui.mute) ui.mute.setAttribute('aria-pressed', String(m));
         if (!m) Sfx.unlock();
+    }
+
+    /* --- the floating menu (game-ui-ux: an overlay over the board) -----------
+       A dropdown rather than a screen: it is a sheet with its own scrim, so the
+       board stays visible underneath and closing it cannot desync the screen
+       stack. `open` is the single source of truth for what is showing. */
+    let sheetOpen = false;
+    function setMenuOpen(open) {
+        if (!ui.sheet) return;
+        sheetOpen = !!open;
+        ui.sheet.hidden = !sheetOpen;
+        if (ui.scrim) ui.scrim.hidden = !sheetOpen;
+        if (ui.menuOpen) ui.menuOpen.setAttribute('aria-expanded', String(sheetOpen));
+        if (sheetOpen && ui.menuClose) requestAnimationFrame(() => ui.menuClose.focus());
+        else if (!sheetOpen && ui.menuOpen && ui.menuOpen.focus) ui.menuOpen.focus();
     }
 
     el('btn-start').addEventListener('click', () => { popScreen(); beginMatch(); });
     el('btn-tutorial').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
     el('btn-tut-close').addEventListener('click', () => popScreen());
-    el('btn-help').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
+    /* Every row of the sheet does its one thing and then gets out of the way —
+       the board is the game, and the menu is a detour from it. */
+    if (ui.help) ui.help.addEventListener('click', () => {
+        setMenuOpen(false);
+        pushScreen('tutorial', { focus: '#btn-tut-close' });
+    });
     if (ui.shoot) ui.shoot.addEventListener('click', shootFromButton);
     /* §17.b — the human's half of the decision window */
     if (ui.done) ui.done.addEventListener('click', humanDone);
-    el('btn-pause').addEventListener('click', () => pauseGame());
-    el('btn-mute').addEventListener('click', toggleMute);
+    if (ui.pause) ui.pause.addEventListener('click', () => { setMenuOpen(false); pauseGame(); });
+    if (ui.mute) ui.mute.addEventListener('click', toggleMute);
+    if (ui.menuOpen) ui.menuOpen.addEventListener('click', () => setMenuOpen(!sheetOpen));
+    if (ui.menuClose) ui.menuClose.addEventListener('click', () => setMenuOpen(false));
+    if (ui.scrim) ui.scrim.addEventListener('click', () => setMenuOpen(false));
+    if (ui.menuRestart) ui.menuRestart.addEventListener('click', () => {
+        setMenuOpen(false);
+        state.paused = false;
+        while (topScreen()) popScreen();
+        beginMatch();
+    });
+    if (ui.menuQuit) ui.menuQuit.addEventListener('click', () => {
+        setMenuOpen(false);
+        state.paused = false;
+        while (topScreen()) popScreen();
+        state.phase = 'idle';
+        pushScreen('menu', { focus: '#btn-start' });
+    });
+    /* Escape closes the sheet before anything else gets a look at it. Capture
+       phase, so a menu that is open swallows the key rather than letting the
+       pause handler underneath it fire on the same press. */
+    window.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && sheetOpen) {
+            e.preventDefault();
+            e.stopPropagation();
+            setMenuOpen(false);
+        }
+    }, true);
     el('btn-resume').addEventListener('click', resumeGame);
     el('btn-restart').addEventListener('click', () => { state.paused = false; while (topScreen()) popScreen(); beginMatch(); });
     el('btn-quit').addEventListener('click', () => { state.paused = false; while (topScreen()) popScreen(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' }); });
@@ -3207,15 +4980,44 @@ import {
         const r = runVerification(true);
         banner(r.allPass ? 'RULEBOOK OK' : 'RULEBOOK FAILED', r.allPass ? CSS.goal : CSS.bad);
     });
-    if (ui.difficulty) {
-        ui.difficulty.addEventListener('click', e => {
+    /* one shared sync for both surfaces: the pressed pill is decided by the
+       value, never by which button was clicked */
+    function syncDifficulty() {
+        [ui.difficulty, ui.difficultyStart].forEach(group => {
+            if (!group) return;
+            Array.from(group.querySelectorAll('button[data-diff]')).forEach(x =>
+                x.setAttribute('aria-pressed', String(parseFloat(x.dataset.diff) === state.difficulty)));
+        });
+    }
+    [ui.difficulty, ui.difficultyStart].forEach(group => {
+        if (!group) return;
+        group.addEventListener('click', e => {
             const b = e.target.closest('button[data-diff]');
             if (!b) return;
             state.difficulty = parseFloat(b.dataset.diff);
             if (PLAY) { PLAY.cpuThink = 0.6; cpuAssignDuties(); }
-            Array.from(ui.difficulty.querySelectorAll('button')).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+            syncDifficulty();
         });
-    }
+    });
+    /* The window budget is a setting, not a phase: no screen is pushed and the
+       match is never interrupted. setPlanWindow() owns the aria-pressed sync, so
+       there is one place that decides what "selected" looks like. */
+    [ui.planWin, ui.planWinStart].forEach(group => {
+        if (!group) return;
+        group.addEventListener('click', e => {
+            const b = e.target.closest('button[data-lock]');
+            if (b) setPlanWindow(parseFloat(b.dataset.lock));
+        });
+    });
+    /* the half length is a setting like the other two: no screen is pushed,
+       nothing running is interrupted, and setHalfLength() owns the sync */
+    [ui.halfLen, ui.halfLenStart].forEach(group => {
+        if (!group) return;
+        group.addEventListener('click', e => {
+            const b = e.target.closest('button[data-half]');
+            if (b) setHalfLength(parseFloat(b.dataset.half));
+        });
+    });
 
     /* first user gesture unlocks Web Audio */
     ['pointerdown', 'keydown', 'touchstart'].forEach(evt =>
@@ -3223,6 +5025,10 @@ import {
 
     /* --- boot --- */
     fitView();
+    /* the settings pills start pressed from their markup, but state is the
+       truth — sync every surface from it before the first frame */
+    syncDifficulty();
+    setHalfLength(HALF_LENGTH_DEFAULT);
     allPlayers.forEach(p => { syncToMesh(p); refreshRings(); });
     setCarrier(teamOutfield('you')[0]);
     state.phase = 'idle';
@@ -3247,9 +5053,11 @@ import {
             passTo, shoot, pauseGame, resumeGame, toggleMute,
             humanDone, openPlan, beginExecution, queuePass, queueShot,
             setDifficulty: d => { state.difficulty = clamp(d, 0, 1); },
-            /** Pin the clock, for testing full time without playing 2:00. */
-            setHalfTime: t => { state.halfT = clamp(t, 0, HALF_LENGTH); },
-            drainHalf: () => { state.halfT = HALF_LENGTH; state.pendingHalf = true; }
+            setPlanWindow, setHalfLength,
+            get planWindow() { return planWindow; },
+            /** Pin the clock, for testing full time without playing the half out. */
+            setHalfTime: t => { state.halfT = clamp(t, 0, halfLength); },
+            drainHalf: () => { state.halfT = halfLength; state.pendingHalf = true; }
         }
     };
 })();

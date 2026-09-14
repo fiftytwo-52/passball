@@ -5,15 +5,35 @@
    DESIGN.md token layer in `tokens.css`. It follows the system's rules rather
    than inventing its own:
 
-     · the HUD is a near-white sheet carrying ink, structured by 1px hairlines;
-     · system controls are 6px squares / 64px category pills — never marketing
-       pills, so the "which surface am I on" signal stays honest (the one true
-       marketing pill, the kick-off CTA on the menu card, is a deliberate
-       exception: it is the landing surface);
+     · the HUD is a set of small, dark, translucent overlays floating ON the
+       turf — never a sheet that pushes the pitch around;
      · colour appears only as small accent marks (possession, outcomes, the
-       clock fill, shootout dots) and in the hero mesh gradient — never as a
-       chrome fill;
-     · depth is a 1px hairline plus, at most, a whisper shadow.
+       clock fill, shootout dots, the goal burst) and in the hero mesh
+       gradient — never as a chrome fill;
+     · depth is a hairline plus, at most, a whisper shadow.
+
+   THE BIG STRUCTURAL RULE (game-ui-ux: anchors + containers)
+   ---------------------------------------------------------
+   The pitch is the whole screen and nothing may ever cover it except the
+   player's own eye-line furniture. So every HUD piece here is:
+     · absolutely positioned against `#stage`, not in flow;
+     · anchored to a corner/edge with the safe-area inset folded in;
+     · `pointer-events: none`, with only the controls opting back in.
+
+   That is why the pitch is *never* resized by the chrome: the canvas always
+   fills the stage, and the chrome sits in the margins the camera already
+   leaves around the painted ground.
+
+   NOTE on the engine's DOM contract — read before renaming anything:
+     · `#role-badge` has its `className` assigned outright (so it carries no
+       class but `.attack` / `.defend`);
+     · `#score-you` / `#score-cpu` have their `textContent` assigned outright
+       (so they must not wrap a <strong>);
+     · `#clock`'s *grandparent* receives `.low` — the chain is
+       `#clock` → `.clock-wrap` → `.hud-corner.hud-tr`, and it must stay two
+       levels deep;
+     · `#clock-bar` and `#plan-bar` are the two state fills, written by the
+       engine on change only (never per frame).
    ========================================================================= */
 
 :root {
@@ -38,6 +58,28 @@
 
     --hud-pad: clamp(10px, 1.6vmin, 18px);
     --tap: 44px;
+
+    /* The decision ring is sized to the *painted* centre circle. The engine
+       measures it in `fitView()` from the camera fit and writes it here, so the
+       arc lands on the grass circle at every aspect ratio instead of being a
+       decorative ring floating near it. The fallback only matters for the first
+       paint, before the first `fitView()` runs. */
+    --ring-d: clamp(96px, 30vmin, 240px);
+
+    /* Dark-glass furniture: one recipe, three densities, so every overlay reads
+       as the same material. */
+    --glass: rgba(10, 20, 12, 0.32);
+    --glass-strong: rgba(10, 20, 12, 0.86);
+    /* `--glass-xthin` is the density reserved for *guiding* copy — the
+       instruction line and the two status pills. They sit over live play and are
+       read, never tapped, so they tint the grass instead of covering it: the
+       ball stays the brightest thing on the pitch. Legibility is carried by a
+       text-shadow rather than by the fill. */
+    --glass-xthin: rgba(10, 20, 12, 0.2);
+    --glass-line: rgba(255, 255, 255, 0.1);
+    --glass-line-soft: rgba(255, 255, 255, 0.055);
+    --on-glass: rgba(255, 255, 255, 0.94);
+    --on-glass-mute: rgba(255, 255, 255, 0.6);
 }
 
 html,
@@ -52,14 +94,7 @@ body {
 }
 
 /* ============================================================================
-   THE APP SHELL — a column of bands: top dock / stage / shootout strip / bottom
-   dock
-   ----------------------------------------------------------------------------
-   The docks and the penalty strip are *flow siblings* of the stage, never
-   overlays on it. The stage therefore takes whatever height the chrome leaves,
-   so at any viewport size the chrome can only push the pitch smaller — it can
-   never cover any part of the ground. The turf carries the players and the ball
-   and nothing else.
+   THE APP SHELL — one stage, the pitch, and inert overlays on top of it
    ========================================================================= */
 
 #app {
@@ -69,29 +104,12 @@ body {
     display: flex;
     flex-direction: column;
     /* NOTE: the shell must stay hit-testable — it contains the canvas, which owns
-       every drag gesture. Only the docks are made inert, below. */
+       every drag gesture. The overlays inside it are made inert individually. */
 }
 
-/* The docks are inert so a stray tap on a panel does not reach the pitch (or the
-   ground's drag handler); their controls opt back in individually. The shootout
-   strip is inert too — it is pure readout, with no controls of its own. */
-#hud-top,
-#hud-bottom,
-#hud-pens {
-    pointer-events: none;
-}
-
-#app button,
-#app .segmented {
-    pointer-events: auto;
-}
-
-/* The stage: the only band that grows, and the only thing in it is the canvas */
 #stage {
     position: relative;
     flex: 1 1 auto;
-    /* a flex item will not shrink below its content height without this, which
-       would let the canvas push the bottom dock off the bottom of the screen */
     min-height: 0;
 }
 
@@ -111,64 +129,34 @@ body {
     cursor: grabbing;
 }
 
-/* --- the docks and the penalty strip ------------------------------------ */
-
+/* --- the inert overlay layer --------------------------------------------
+   Every HUD piece is inert by default so a stray tap lands on the pitch (and
+   the ground's drag handler) rather than on a panel. Controls opt back in —
+   either through the `#app button` rule below or with an explicit
+   `pointer-events: auto`. */
 #hud-top,
+#hud-pens,
+#role-strip,
 #hud-bottom,
-#hud-pens {
-    flex: 0 0 auto;
-    /* horizontal safe-area only; the vertical insets belong to the outermost
-       edge of each band, so they are applied separately below */
-    padding-left: calc(var(--hud-pad) + var(--sa-l));
-    padding-right: calc(var(--hud-pad) + var(--sa-r));
+#plan-panel,
+#goal-fx {
+    pointer-events: none;
 }
 
-#hud-top {
-    padding-top: calc(var(--hud-pad) + var(--sa-t));
+#app button,
+#app .segmented {
+    pointer-events: auto;
 }
 
-/* The shootout strip sits between the pitch and the bottom dock. It only exists
-   while a shootout is live, so during normal play the pitch keeps the space. */
-#hud-pens {
-    padding-bottom: var(--hud-pad);
-}
+/* ============================================================================
+   BUTTONS
+   ----------------------------------------------------------------------------
+   The token layer styles every `.btn-*` variant but deliberately ships no `.btn`
+   base, so the shared button chrome is normalised here: the reset plus the
+   pointer affordances. This is also what makes an overlay button clickable
+   inside the inert layer above.
+   ========================================================================= */
 
-#hud-bottom {
-    padding-bottom: calc(var(--hud-pad) + var(--sa-b));
-}
-
-#hud-top[hidden],
-#hud-bottom[hidden],
-#hud-pens[hidden] {
-    display: none;
-}
-
-/* One row of clusters per band: identity on the left, controls on the right */
-.dock {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: var(--s-xs);
-}
-
-#hud-bottom .dock {
-    align-items: flex-end;
-}
-
-.cluster {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: clamp(6px, 1.1vmin, 10px);
-}
-
-/* --- buttons ------------------------------------------------------------
-   The token layer styles every `.btn-*` variant but deliberately ships no
-   `.btn` base, so the shared button chrome is normalised here: the reset
-   (background/border/colour inherit nothing) plus the pointer affordances.
-   `btn-` alone is exempted from `pointer-events: none` up in the shell, so this
-   is what makes a dock button actually clickable. */
 .btn {
     pointer-events: auto;
     appearance: none;
@@ -192,64 +180,191 @@ body {
     outline-offset: 2px;
 }
 
-/* LOCK-style disabled affordances are gone, but the pens CTA still hides itself
-   when the match was not level */
 .btn[disabled] {
     opacity: 0.4;
     cursor: not-allowed;
 }
 
-/* The HUD panel: a white hairline card floating over the dark board */
-.panel {
-    background: var(--c-canvas-elevated);
-    border: 1px solid var(--c-hairline);
-    border-radius: var(--r-md);
-    box-shadow: var(--e-1);
-    padding: 7px 11px;
+/* Small circular icon button, used inside the dark sheet */
+.btn-icon-xs {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--r-sm);
+    background: rgba(255, 255, 255, 0.09);
+    color: var(--on-glass);
+    font-size: 11px;
+    line-height: 1;
+    transition: background-color 0.15s ease;
 }
 
-/* The mono eyebrow, used for every HUD field label */
-.hud-label {
+.btn-icon-xs:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+/* Accessibility helper for the two read-outs that keep a real text node for
+   assistive tech while showing nothing on the pitch. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* ============================================================================
+   HUD — TOP: SCORE (left) · ROLE STRIP (centre) · CLOCK + MENU (right)
+   ----------------------------------------------------------------------------
+   The whole match state, in two corners and one centred strip, in minimal text.
+   Nothing here is ever polled per frame: the score is written on the `score`
+   event and the clock only when the displayed second changes.
+   ========================================================================= */
+
+#hud-top {
+    position: absolute;
+    inset: 0 0 auto 0;
+    z-index: 4;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--s-sm);
+    padding: calc(var(--hud-pad) + var(--sa-t)) calc(var(--hud-pad) + var(--sa-r)) 0 calc(var(--hud-pad) + var(--sa-l));
+}
+
+#hud-top[hidden],
+#hud-bottom[hidden],
+#hud-pens[hidden],
+#role-strip[hidden] {
+    display: none;
+}
+
+/* The role + possession read-out. It is the last thing to leave a corner: the
+   pair moved out of the top-left to the top-centre band, which is the strip
+   behind the far (computer's) goal — the exact mirror of the guide line reading
+   from the strip behind the near one. It borrows #hud-pens' anchoring contract
+   (a child of #stage, pinned to the top centre) because the two share this band
+   and never show at once. */
+#role-strip {
+    position: absolute;
+    z-index: 3;
+    top: calc(var(--hud-pad) + var(--sa-t) + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    justify-content: center;
+    max-width: min(calc(100% - 2 * var(--hud-pad)), 420px);
+}
+
+.hud-corner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+/* The scoreline stands alone in this corner — the role + possession pair lives
+   on the top-centre band now (#role-strip). */
+.hud-tl {
+    align-items: flex-start;
+}
+
+.hud-tr {
+    flex: none;
+}
+
+/* --- the scoreline -------------------------------------------------------
+   The one number you must never have to hunt for. It sits on its own, bare on
+   an ink pill so it survives a bright pitch behind it. */
+.score-mini {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 4px 12px;
+    border-radius: var(--r-pill-category);
+    background: var(--glass);
+    border: 1px solid var(--glass-line-soft);
+    backdrop-filter: blur(10px) saturate(120%);
+    -webkit-backdrop-filter: blur(10px) saturate(120%);
+    box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.6);
+}
+
+.sc {
     font-family: var(--f-mono);
-    font-size: 10px;
-    font-weight: var(--t-eyebrow-weight);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--c-mute);
-    display: block;
+    font-size: clamp(1.05rem, 3.6vmin, 1.5rem);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
 }
 
-/* --- role badge: a category pill, the same shape as the difficulty tabs -- */
+/* the two kits, as text — the same mint/pink contract the pitch uses */
+#score-you {
+    color: var(--x-you);
+}
+
+#score-cpu {
+    color: var(--x-cpu);
+}
+
+.sc-dash {
+    font-size: clamp(0.8rem, 2.4vmin, 1rem);
+    line-height: 1;
+    color: var(--on-glass-mute);
+}
+
+/* --- attack / defend + possession ---------------------------------------
+   Two small pills, deliberately quiet: they answer "which end am I playing
+   toward" and "whose ball is it" without competing with the scoreline. */
+.status-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+}
+
+/* The engine assigns `className` outright, so this element carries no other
+   class — `.attack` and `.defend` are the only two states it can be in. */
 #role-badge {
     display: inline-flex;
     align-items: center;
-    height: 26px;
-    padding: 0 12px;
-    border-radius: var(--r-pill-category);
-    border: 1px solid var(--c-hairline);
-    background: var(--c-canvas-elevated);
-    font-size: var(--t-body-sm-size);
-    font-weight: 500;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--c-ink);
     gap: 6px;
+    height: 22px;
+    padding: 0 10px;
+    border-radius: var(--r-pill-category);
+    background: var(--glass-xthin);
+    border: 1px solid var(--glass-line-soft);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+    font-family: var(--f-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--on-glass);
+    white-space: nowrap;
 }
 
 #role-badge::before {
     content: '';
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: var(--r-full);
     background: currentColor;
+    flex: none;
 }
 
-#role-badge.attack {
-    color: var(--c-ink);
-}
-
+/* defending is the "read it" verb, so it gets the accent; attacking stays neutral */
 #role-badge.defend {
-    color: var(--c-link);
+    color: var(--x-aim);
 }
 
 /* --- possession chip ---------------------------------------------------- */
@@ -257,243 +372,332 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    height: 26px;
-    padding: 0 11px;
+    height: 22px;
+    padding: 0 10px 0 8px;
     border-radius: var(--r-pill-category);
-    border: 1px solid var(--c-hairline);
-    background: var(--c-canvas-elevated);
-    font-size: var(--t-body-sm-size);
-    font-weight: var(--t-label-sm-weight);
-    letter-spacing: 0.06em;
+    background: var(--glass-xthin);
+    border: 1px solid var(--glass-line-soft);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+    font-family: var(--f-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
+    color: var(--on-glass);
     white-space: nowrap;
 }
 
 .chip .dot {
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
     border-radius: var(--r-full);
     background: currentColor;
     display: inline-block;
-}
-
-.chip.you {
-    color: var(--c-ink);
-    border-color: color-mix(in srgb, var(--x-you) 55%, var(--c-hairline));
+    flex: none;
 }
 
 .chip.you .dot {
     background: var(--x-you);
 }
 
-.chip.cpu {
-    color: var(--c-ink);
-    border-color: color-mix(in srgb, var(--x-cpu) 55%, var(--c-hairline));
-}
-
 .chip.cpu .dot {
     background: var(--x-cpu);
-}
-
-/* --- scoreboard -------------------------------------------------------- */
-.scoreboard {
-    display: flex;
-    align-items: center;
-    gap: clamp(8px, 1.4vmin, 16px);
-}
-
-.score {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-width: clamp(46px, 8vmin, 64px);
-    line-height: 1;
-}
-
-.score strong {
-    display: block;
-    font-size: clamp(1.25rem, 3.6vmin, 1.75rem);
-    font-weight: 600;
-    letter-spacing: -0.04em;
-    color: var(--c-ink);
-}
-
-.score .hud-label {
-    margin-top: 3px;
-}
-
-#score-you strong {
-    color: color-mix(in srgb, var(--x-you) 72%, var(--c-ink));
-}
-
-#score-cpu strong {
-    color: color-mix(in srgb, var(--x-cpu) 78%, var(--c-ink));
-}
-
-.vs {
-    font-family: var(--f-mono);
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    color: var(--c-faint);
 }
 
 /* ============================================================================
    THE MATCH CLOCK (§8)
    ----------------------------------------------------------------------------
-   The clock counts DOWN the current half and is written by the engine only when
-   the displayed second changes — never per frame. It is a shallow strip, like
-   the scoreboard, so the pair of them cost the pitch as little height as
-   possible. The fill drains as the half runs out; the last stretch turns it
-   warm, which is the one moment the chrome is allowed to go red.
+   Top-right, in minimal mono text, with a hairline that drains as the half runs
+   out. Written by the engine only when the displayed second changes. The last
+   15 seconds turn it warm — the one moment the chrome is allowed to go amber.
    ========================================================================= */
 
-.panel-clock {
-    display: inline-flex;
+.clock-wrap {
+    display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 7px 13px;
-    min-width: clamp(96px, 17vmin, 148px);
+    align-items: flex-end;
+    gap: 5px;
+    min-width: clamp(74px, 16vmin, 108px);
+    padding: 5px 10px;
 }
 
-.clock-line {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
+.clock-half {
+    font-family: var(--f-mono);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 .clock-num {
     font-family: var(--f-mono);
-    font-size: clamp(0.9rem, 2.2vmin, 1.15rem);
-    font-weight: 500;
-    color: var(--c-ink);
-    font-variant-numeric: tabular-nums;
+    font-size: clamp(0.95rem, 2.8vmin, 1.2rem);
+    font-weight: 600;
     line-height: 1;
+    letter-spacing: -0.01em;
+    color: var(--on-glass);
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
-.clock-track {
+.clock-line {
+    display: block;
     position: relative;
-    height: 4px;
+    width: 100%;
+    height: 3px;
     border-radius: var(--r-full);
-    background: var(--c-hairline);
+    background: rgba(255, 255, 255, 0.3);
     overflow: hidden;
 }
 
 /* Both clocks share the fill strip: the half draining and the decision window
-   draining are the same signal, drawn the same way. */
-#clock-bar,
-#plan-bar {
+   draining are the same signal, drawn the same way. The engine drives this one
+   with `scaleX()`. */
+#clock-bar {
     position: absolute;
     inset: 0;
+    display: block;
     transform-origin: 0 50%;
     transform: scaleX(1);
     will-change: transform;
-    background: var(--c-ink);
+    background: var(--on-glass);
     border-radius: var(--r-full);
 }
 
-/* Time nearly up is the one moment the chrome is allowed to go warm */
-.panel-clock.low #clock-bar,
-.panel-clock.low #plan-bar {
-    background: var(--c-error);
+/* The engine toggles `.low` on #clock's *grandparent*, which is this corner —
+   so both the numerals and the fill respond to it. */
+.hud-corner.hud-tr.low .clock-num {
+    color: var(--x-aim);
 }
 
-.panel-clock.low .clock-num {
-    color: var(--c-error-deep);
+.hud-corner.hud-tr.low #clock-bar {
+    background: var(--x-aim);
 }
 
-/* ============================================================================
-   THE DECISION WINDOW (§17.b)
-   ----------------------------------------------------------------------------
-   Sits in the bottom dock beside the log and the shoot button. The panel is the
-   same shallow clock strip as the match clock — a label, the countdown, and a
-   draining fill — so "how long have I got" reads identically in both places.
-   Everything here is `hidden` in open play: the board being frozen is the only
-   thing that puts it on screen.
-   ========================================================================= */
-
-.panel-plan {
-    min-width: clamp(104px, 18vmin, 152px);
+.hud-corner.hud-tr.low .clock-num {
+    animation: clock-pulse 1s ease-in-out infinite;
 }
 
-/* `.panel-clock` sets display:inline-flex, which would beat the UA `[hidden]`
-   rule, so the plan panel has to be hidden explicitly — same reason the docks
-   are spelled out up top. The button is inline-level too. */
-#plan-panel[hidden],
-#btn-done[hidden] {
-    display: none;
+@keyframes clock-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.45;
+    }
 }
 
-/* The right-hand cluster of the bottom dock. It is the action end of the band,
-   so it hugs the thumb-side edge rather than the log's. */
-.dock-actions {
-    justify-content: flex-end;
-}
-
-/* --- MOVES DONE ----------------------------------------------------------
-   The commit control for the whole phase: ink-filled because it is the primary
-   action, and the same pill geometry as the other dock buttons. Hover inverts
-   it — border colour rather than a border swap, so the box never shifts. */
-.btn-done {
+/* --- the floating menu button ------------------------------------------ */
+.hud-icon-btn {
     display: inline-flex;
     align-items: center;
-    height: 32px;
-    padding: 0 14px;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
     border-radius: var(--r-sm);
-    background: var(--c-ink);
-    color: var(--c-on-primary);
-    border: 1px solid var(--c-ink);
-    font-family: var(--f-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    transition: background-color 0.15s ease, color 0.15s ease,
-        border-color 0.15s ease;
+    background: var(--glass);
+    border: 1px solid var(--glass-line);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: var(--on-glass);
+    font-size: 15px;
+    line-height: 1;
+    transition: background-color 0.15s ease, transform 0.1s ease;
 }
 
-.btn-done:hover {
-    background: var(--c-canvas-elevated);
-    color: var(--c-ink);
-    border-color: var(--c-hairline);
+.hud-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.16);
 }
 
-.btn-done:focus-visible {
-    outline: 2px solid var(--c-ink);
+.hud-icon-btn:active {
+    transform: scale(0.94);
+}
+
+.hud-icon-btn:focus-visible {
+    outline: 2px solid var(--x-you);
     outline-offset: 2px;
 }
 
-/* --- difficulty selector: the category-pill row ------------------------ */
+/* ============================================================================
+   THE FLOATING MENU SHEET
+   ----------------------------------------------------------------------------
+   Everything the match does not need on screen lives in here: how to play,
+   sound, pause, restart, quit — and the CPU difficulty, which is a set-and-
+   forget control and so has no business taking pitch space. The match keeps
+   running underneath, so this is a dropdown, not a screen.
+   ========================================================================= */
+
+.sheet-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    background: rgba(4, 10, 6, 0.42);
+}
+
+.sheet-scrim[hidden] {
+    display: none;
+}
+
+.hud-sheet {
+    position: absolute;
+    z-index: 9;
+    top: calc(var(--hud-pad) + var(--sa-t) + 44px);
+    right: calc(var(--hud-pad) + var(--sa-r));
+    width: min(258px, calc(100% - 2 * var(--hud-pad)));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border-radius: var(--r-lg);
+    background: var(--glass-strong);
+    border: 1px solid var(--glass-line);
+    backdrop-filter: blur(18px) saturate(120%);
+    -webkit-backdrop-filter: blur(18px) saturate(120%);
+    box-shadow: 0 20px 44px -14px rgba(0, 0, 0, 0.72);
+    color: var(--on-glass);
+    pointer-events: auto;
+    animation: sheet-in 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.hud-sheet[hidden] {
+    display: none;
+}
+
+@keyframes sheet-in {
+    from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/* the mono eyebrow, used for every HUD field label — inverted for dark glass */
+.hud-label {
+    display: block;
+    font-family: var(--f-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--on-glass-mute);
+}
+
+.sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.sheet-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.sheet-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.sheet-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    min-height: 38px;
+    padding: 0 12px;
+    border-radius: var(--r-sm);
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid var(--glass-line-soft);
+    color: var(--on-glass);
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: left;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.sheet-row:hover {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.sheet-row-danger {
+    color: #ff9d9d;
+}
+
+.sheet-val {
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--on-glass-mute);
+    flex: none;
+}
+
+/* --- difficulty selector: the category-pill row, inverted for dark glass --- */
 .segmented {
     display: inline-flex;
     align-items: center;
     gap: 2px;
     padding: 2px;
-    border: 1px solid var(--c-hairline);
+    border: 1px solid var(--glass-line-soft);
     border-radius: var(--r-pill-category);
-    background: var(--c-canvas-elevated);
-    box-shadow: var(--e-1);
+    background: rgba(255, 255, 255, 0.06);
     overflow: hidden;
 }
 
 .segmented button {
+    flex: 1 1 auto;
     min-height: 28px;
-    padding: 0 clamp(8px, 1.5vmin, 14px);
+    padding: 0 8px;
     border-radius: var(--r-pill-category);
-    font-size: 11px;
-    font-weight: 500;
+    font-family: var(--f-mono);
+    font-size: 10px;
+    font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--c-mute);
+    color: var(--on-glass-mute);
     transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .segmented button:hover {
-    color: var(--c-ink);
+    color: var(--on-glass);
 }
 
 .segmented button[aria-pressed='true'] {
-    background: var(--c-ink);
-    color: var(--c-on-primary);
+    background: var(--on-glass);
+    color: #0b1a10;
+}
+
+/* --- the lock-timer row: four pure numbers, so give each one an equal quarter
+   of the sheet's width. The digits are short enough that the standard 8px pill
+   padding would make the row wider than the group it sits in. */
+.segmented-num {
+    display: flex;
+}
+
+.segmented-num button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 4px;
+    letter-spacing: 0.02em;
 }
 
 /* ============================================================================
@@ -501,32 +705,49 @@ body {
    ----------------------------------------------------------------------------
    While a shootout is live the HUD swaps into this view: a separate shootout
    score, the kicker order as a row of dots per side, and whose turn it is. The
-   dots mirror the regulation scoreboard's colour contract — mint for you, pink
-   for the CPU — so "scored" reads at a glance without a legend.
+   dots mirror the scoreline's colour contract — mint for you, pink for the CPU —
+   so "scored" reads at a glance without a legend.
    ========================================================================= */
 
-.panel-pens {
-    display: inline-flex;
+#hud-pens {
+    position: absolute;
+    z-index: 3;
+    top: calc(var(--hud-pad) + var(--sa-t) + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 7px 13px;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 7px;
+    max-width: min(calc(100% - 2 * var(--hud-pad)), 700px);
 }
 
-.pens-score {
-    font-family: var(--f-mono);
-    font-size: clamp(0.9rem, 2.2vmin, 1.15rem);
-    font-weight: 500;
-    color: var(--c-ink);
-    font-variant-numeric: tabular-nums;
-    line-height: 1;
-    white-space: nowrap;
-}
-
+.panel-pens,
 .pens-order {
     display: inline-flex;
     align-items: center;
     gap: 9px;
-    padding: 7px 12px;
+    padding: 5px 11px;
+    border-radius: var(--r-md);
+    background: var(--glass);
+    border: 1px solid var(--glass-line-soft);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.panel-pens .hud-label {
+    margin-right: 1px;
+}
+
+.pens-score {
+    font-family: var(--f-mono);
+    font-size: clamp(0.9rem, 2.4vmin, 1.1rem);
+    font-weight: 600;
+    color: var(--on-glass);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    white-space: nowrap;
 }
 
 .pens-dots {
@@ -536,17 +757,17 @@ body {
 }
 
 .pens-dots .dot {
-    width: 9px;
-    height: 9px;
+    width: 8px;
+    height: 8px;
     border-radius: var(--r-full);
-    border: 1px solid var(--c-hairline);
+    border: 1px solid rgba(255, 255, 255, 0.35);
     background: transparent;
     display: inline-block;
 }
 
 /* taken but missed — still counts, so it tints rather than fills */
 .pens-dots .dot.taken {
-    background: var(--c-hairline-soft);
+    background: rgba(255, 255, 255, 0.22);
 }
 
 /* scored — the side's accent, the same two colours the pitch uses */
@@ -564,90 +785,342 @@ body {
 
 #so-turn {
     font-family: var(--f-sans);
-    font-weight: 600;
-    font-size: var(--t-body-sm-size);
-    letter-spacing: 0.06em;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--c-ink);
+    color: var(--on-glass);
     white-space: nowrap;
 }
 
-/* --- match log --------------------------------------------------------- */
-#log-panel {
-    max-width: min(44vw, 360px);
+#so-turn {
+    padding: 6px 12px;
+    border-radius: var(--r-pill-category);
+    background: var(--glass);
+    border: 1px solid var(--glass-line-soft);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
 }
 
-#log {
-    list-style: none;
-    margin: 5px 0 0;
-    padding: 0;
+/* ============================================================================
+   THE DECISION WINDOW (§17.b) — the centre circle IS the timer
+   ----------------------------------------------------------------------------
+   The board freezes for ten seconds on every change of possession, and the
+   countdown is drawn on the grass itself: a stroke tracing the painted centre
+   circle, draining clockwise. There are no numerals on screen — the arc emptying
+   is the whole read-out, which is exactly what a player wants to glance at
+   without leaving the pitch.
+
+   It is centred on the stage, which is precisely where the camera puts game
+   (50, 50). `--ring-d` is written by the engine's `fitView()` from the camera
+   fit, so the arc sits ON the grass circle at every aspect ratio.
+
+   The label and the seconds remain in the DOM (visually hidden) because the
+   engine writes them there and because a ring alone tells a screen reader
+   nothing.
+   ========================================================================= */
+
+#plan-panel {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    z-index: 3;
+    width: var(--ring-d);
+    height: var(--ring-d);
+    /* centred on the pitch centre spot, then spun a quarter turn so the arc
+       starts at 12 o'clock and drains clockwise */
+    transform: translate(-50%, -50%);
+    transform-origin: 50% 50%;
+    animation: ring-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* The panel is a plain <div>, so the UA `[hidden]` rule would work — but it is
+   spelled out here for the same reason the docks are: it must never depend on
+   nothing else setting `display`. */
+#plan-panel[hidden] {
+    display: none;
+}
+
+@keyframes ring-in {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.88);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+}
+
+#plan-panel .ring {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    /* the live arc sits proud of the grass line, so it must not be clipped */
+    overflow: visible;
+    /* 12 o'clock start */
+    transform: rotate(-90deg);
+}
+
+.ring-track {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.24);
+    stroke-width: 1.5;
+}
+
+/* `pathLength="1"` on the circle makes the dash maths resolution-independent:
+   the engine only ever writes a 0…1 number here, never a pixel length. */
+.ring-fill {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.95);
+    stroke-width: 4.6;
+    stroke-linecap: round;
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+    will-change: stroke-dashoffset;
+    filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35));
+}
+
+/* Three seconds left: the ring is the only warning the player gets, so it goes
+   amber and starts to breathe. */
+#plan-panel.low .ring-track {
+    stroke: rgba(255, 195, 0, 0.32);
+}
+
+#plan-panel.low .ring-fill {
+    stroke: var(--x-aim);
+    filter: drop-shadow(0 0 8px rgba(255, 195, 0, 0.5));
+    animation: ring-pulse 0.62s ease-in-out infinite;
+}
+
+@keyframes ring-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* ============================================================================
+   HUD — BOTTOM: two corner controls, one instruction line, one outcome banner
+   ----------------------------------------------------------------------------
+   THE CONTROLS GO IN THE CORNERS, NOT THE CENTRE. Both goals are painted on the
+   board's vertical centre line, so anything anchored to the bottom *centre* of
+   the stage lands squarely on the near goal mouth — the one patch of turf the
+   player is aiming at. MOVES DONE is therefore pinned bottom-left and SHOOT
+   bottom-right, which are also the two thumb-rest positions on a phone.
+
+   The footer itself is still a full-bleed column, so its own centre stays the
+   viewport centre horizontally; only the action row inside it is split.
+   ========================================================================= */
+
+#hud-bottom {
+    position: absolute;
+    inset: auto 0 0 0;
+    z-index: 4;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    align-items: center;
+    gap: clamp(6px, 1.2vmin, 10px);
+    padding: 0 calc(var(--hud-pad) + var(--sa-r)) calc(var(--hud-pad) + var(--sa-b)) calc(var(--hud-pad) + var(--sa-l));
 }
 
-#log li {
-    font-size: var(--t-body-sm-size);
-    line-height: 1.45;
-    color: var(--c-mute);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
+/* --- the guiding line ----------------------------------------------------
+   The prompt, and nothing else. It is the LAST child of this bar, which lands
+   it on the bottom-centre of the stage: the strip behind the near goal that the
+   outcome words used to flash in, and the one band the two corner controls do
+   not claim. It is a plain flex item, so it shrinks to its own copy and centres
+   itself in the bar — nothing is pinned in pixels, which is what keeps it in
+   that band on every viewport.
 
-#log li:nth-child(1) {
-    color: var(--c-ink);
-}
-
-#log li.good {
-    color: #067a5f;
-}
-
-#log li.bad {
-    color: var(--c-error);
-}
-
+   It carries NO fill. Legibility is a hairline plus a shadow — enough for the
+   copy to survive the goal line and the net, not enough to be a second HUD
+   element. */
 #instruction {
-    max-width: min(48vw, 420px);
-    font-size: var(--t-body-sm-size);
-    line-height: 1.5;
-    color: var(--c-body);
-    background: var(--c-canvas-elevated);
-    border: 1px solid var(--c-hairline);
-    border-radius: var(--r-md);
-    padding: 8px 11px;
-    box-shadow: var(--e-1);
+    z-index: 4;
+    margin: 0;
+    max-width: min(100%, 420px);
+    padding: 3px 12px;
+    border-radius: var(--r-pill-category);
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    text-align: center;
+    text-wrap: balance;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.35;
+    letter-spacing: 0.01em;
+    color: rgba(255, 255, 255, 0.86);
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.74);
+}
+
+/* --- the action row ------------------------------------------------------
+   A two-track grid, so each control owns a corner outright. The tracks are
+   `1fr 1fr` rather than implicit/auto ones on purpose: an explicit second track
+   keeps SHOOT on the right even while MOVES DONE is `hidden`, which it is for
+   most of the match. Capped in width so that on a desktop the two controls stay
+   near the painted ground instead of being flung to the far edges of an
+   ultrawide window — on a phone the cap never binds and they sit in the true
+   screen corners, inside the safe-area inset the footer already folds in. */
+.hud-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    max-width: min(100%, 1000px);
+}
+
+/* MOVES DONE — left corner. */
+#btn-done {
+    grid-column: 1;
+    justify-self: start;
+}
+
+/* SHOOT — right corner. */
+#btn-shoot {
+    grid-column: 2;
+    justify-self: end;
+}
+
+/* --- MOVES DONE ----------------------------------------------------------
+   The commit control for the whole phase. It used to be the one solid-white
+   element on screen, which put a bright block in the corner of the goal mouth.
+   It now wears the same glass as SHOOT, so neither control paints over the
+   pitch and the `.ready`-lit SHOOT button is the only thing allowed to glow. */
+.btn-done {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    padding: 0 20px;
+    border-radius: var(--r-pill-category);
+    background: var(--glass);
+    border: 1px solid var(--glass-line);
+    backdrop-filter: blur(10px) saturate(120%);
+    -webkit-backdrop-filter: blur(10px) saturate(120%);
+    color: rgba(255, 255, 255, 0.82);
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    box-shadow: 0 8px 22px -8px rgba(0, 0, 0, 0.55);
+    transition: background-color 0.15s ease, color 0.15s ease,
+        border-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.btn-done:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: var(--on-glass);
+}
+
+.btn-done:active {
+    transform: scale(0.96);
+}
+
+.btn-done:focus-visible {
+    outline: 2px solid var(--glass-line);
+    outline-offset: 2px;
+}
+
+#btn-done[hidden] {
+    display: none;
+}
+
+/* --- the shoot control ---------------------------------------------------
+   The one pitch action that gets a button, and it is the one control that
+   lights up. `refreshShootButton()` adds `.ready` the instant a shot is legal,
+   so "you can shoot" and "you are in range" are the same signal — the button is
+   the range indicator. :disabled keeps it legible but unmistakably inert. */
+.btn-shoot {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 18px 0 14px;
+    border-radius: var(--r-pill-category);
+    background: var(--glass);
+    border: 1px solid var(--glass-line);
+    backdrop-filter: blur(10px) saturate(120%);
+    -webkit-backdrop-filter: blur(10px) saturate(120%);
+    color: rgba(255, 255, 255, 0.82);
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    transition: background-color 0.15s ease, color 0.15s ease,
+        border-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.btn-shoot .ico {
+    width: 20px;
+    height: 20px;
+    display: block;
+    flex: none;
+}
+
+.btn-shoot:disabled {
+    opacity: 0.38;
+    cursor: default;
+}
+
+/* In range and on the ball: the whole control takes the aim colour. */
+.btn-shoot.ready {
+    color: #14210f;
+    background: var(--x-aim);
+    border-color: var(--x-aim);
+    box-shadow: 0 0 0 4px rgba(255, 195, 0, 0.16), 0 8px 20px -8px rgba(255, 195, 0, 0.7);
+}
+
+.btn-shoot.ready:hover {
+    background: #ffd23f;
+}
+
+.btn-shoot.ready:active {
+    transform: scale(0.96);
+}
+
+.btn-shoot:focus-visible {
+    outline: 2px solid var(--x-aim);
+    outline-offset: 2px;
 }
 
 /* ============================================================================
    OUTCOME BANNER
    ----------------------------------------------------------------------------
-   It used to sit in the middle of the screen, which meant it sat in the middle
-   of the pitch. It is now one more chip in the bottom dock: it can only push the
-   ground smaller, never cover it. It is deliberately an *ink* chip — the engine
-   writes an accent colour into it per outcome, and those accents (mint, pink,
-   amber) are illegible on the light panel language but read well on ink.
+   A transient toast for the small decisions — SAVED, GOAL, WIDE, MISS.
+   It is deliberately an *ink* chip: the engine writes an accent colour into it
+   per outcome, and those accents (mint, pink, amber) are illegible on white but
+   read well on ink.
    ========================================================================= */
 
 #banner {
     display: inline-flex;
     align-items: center;
-    height: 34px;
-    padding: 0 14px;
-    border-radius: var(--r-pill-category);
-    background: var(--c-ink);
-    border: 1px solid var(--c-ink);
-    box-shadow: var(--e-1);
+    height: 26px;
+    padding: 0 13px;
+    border-radius: var(--r-full);
+    background: var(--glass-strong);
+    border: 1px solid var(--glass-line);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     font-family: var(--f-sans);
-    font-weight: 600;
-    font-size: var(--t-body-sm-size);
-    letter-spacing: 0.06em;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     white-space: nowrap;
     /* the engine sets `style.color` per outcome; this is only the fallback */
-    color: var(--c-on-primary);
+    color: #ffffff;
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px);
     transition: opacity 0.14s ease, transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -657,9 +1130,122 @@ body {
 }
 
 /* The chip is empty most of the time. With no text it must have no box at all,
-   or it would reserve a dark slab in the dock the whole match. */
+   or it would reserve a slab on the pitch the whole match. */
 #banner:empty {
     display: none;
+}
+
+/* ============================================================================
+   THE GOAL CELEBRATION
+   ----------------------------------------------------------------------------
+   Fired from `scoreGoal()` at the one moment the game is allowed to shout. Two
+   layers: a shockwave ring expanding out along the turf, and the word itself
+   punching up off the grass. The colour is a custom property the engine sets per
+   scoring side, so the celebration is tinted with that team's kit.
+
+   The `.show` class is removed after the run, and re-adding it restarts both
+   animations — that is why this uses classes rather than a `visible` flag.
+   ========================================================================= */
+
+#goal-fx {
+    position: absolute;
+    inset: 0;
+    z-index: 7;
+    display: grid;
+    place-items: center;
+    opacity: 0;
+}
+
+#goal-fx-word {
+    font-family: var(--f-sans);
+    font-weight: 700;
+    font-size: clamp(44px, 16vmin, 140px);
+    line-height: 1;
+    letter-spacing: -0.05em;
+    text-transform: uppercase;
+    color: var(--goal-fx, #ffffff);
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.3), 0 20px 52px rgba(0, 0, 0, 0.6);
+    transform: scale(0.6);
+}
+
+/* the shockwave — a ring that grows out of the centre spot */
+#goal-fx::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: min(46vmin, 330px);
+    aspect-ratio: 1;
+    border-radius: var(--r-full);
+    border: 2px solid var(--goal-fx, #ffffff);
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.3);
+}
+
+#goal-fx.show {
+    animation: goal-flash 1.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#goal-fx.show #goal-fx-word {
+    animation: goal-word 1.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#goal-fx.show::after {
+    animation: goal-ring 1.15s cubic-bezier(0.16, 0.9, 0.2, 1) forwards;
+}
+
+@keyframes goal-flash {
+    0% {
+        opacity: 0;
+    }
+
+    10% {
+        opacity: 1;
+    }
+
+    72% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+    }
+}
+
+@keyframes goal-word {
+    0% {
+        transform: scale(0.55) translateY(16px);
+    }
+
+    18% {
+        transform: scale(1.09) translateY(0);
+    }
+
+    30% {
+        transform: scale(1) translateY(0);
+    }
+
+    72% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+
+    100% {
+        opacity: 0;
+        transform: scale(1.06) translateY(-20px);
+    }
+}
+
+@keyframes goal-ring {
+    0% {
+        opacity: 0.9;
+        transform: translate(-50%, -50%) scale(0.3);
+    }
+
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(1.55);
+    }
 }
 
 /* ============================================================================
@@ -694,6 +1280,25 @@ body {
     box-shadow: var(--e-2);
     padding: clamp(20px, 3.6vmin, 34px);
     overflow: hidden;
+}
+
+/* the start card carries the brand mark above the wordmark */
+.card-start {
+    width: min(480px, 100%);
+    text-align: left;
+}
+
+.start-mark {
+    width: 40px;
+    height: 40px;
+    margin-bottom: var(--s-md);
+    color: var(--c-ink);
+}
+
+.start-mark svg {
+    display: block;
+    width: 100%;
+    height: 100%;
 }
 
 /* menu card only: the mesh gradient, washed to near-nothing behind the copy */
@@ -754,6 +1359,63 @@ body {
 
 .card .actions>[hidden] {
     display: none;
+}
+
+/* --- the start card's settings block -------------------------------------
+   The same three settings as the in-game sheet, but the card is a LIGHT
+   surface: the dark-glass pill chrome has to be re-inked for it. The pressed
+   pill inverts to an ink fill with white text, mirroring the sheet's white
+   fill with dark text. */
+.start-settings {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-md);
+    margin-top: var(--s-lg);
+}
+
+.start-settings .hud-label {
+    color: var(--c-mute);
+}
+
+.start-settings .segmented {
+    border-color: var(--c-hairline);
+    background: rgba(23, 23, 23, 0.04);
+}
+
+.start-settings .segmented button {
+    color: var(--c-mute);
+}
+
+.start-settings .segmented button:hover {
+    color: var(--c-ink);
+}
+
+.start-settings .segmented button[aria-pressed='true'] {
+    background: var(--c-ink);
+    color: #fff;
+}
+
+/* The one true marketing pill in the app: the kick-off CTA. It is a deliberate
+   exception because the menu is the landing surface, and the landing surface is
+   where the system's marketing voice lives. */
+.btn-xl {
+    height: 52px;
+    font-size: var(--t-button-lg-size);
+}
+
+/* The rulebook self-test is a developer affordance, so it is demoted to a quiet
+   text link below the real actions rather than competing with them. */
+.verify-link {
+    width: 100%;
+    margin-top: var(--s-md);
+    color: var(--c-mute);
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+}
+
+.verify-link:hover {
+    color: var(--c-ink);
 }
 
 /* A hairline-divided spec list, in place of bullets, for the tutorial */
@@ -819,168 +1481,98 @@ body {
     box-shadow: var(--e-2);
 }
 
-/* --- the shoot control ---------------------------------------------------
-   The only pitch action that gets a button. It carries the same 6px-square
-   chrome as the rest of the top dock, but is the one control that lights up:
-   `.ready` (set by refreshShootButton() the moment a shot is legal) swaps the
-   hairline for the aim colour, so "you can shoot" and "you are in range" are
-   the same signal. :disabled keeps it legible but unmistakably inert. */
-.btn-shoot {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    height: 32px;
-    padding: 0 12px 0 9px;
-    border-radius: var(--r-sm);
-    background: var(--c-canvas-elevated);
-    color: var(--c-body);
-    border: 1px solid var(--c-hairline);
-    font-family: var(--f-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-}
-
-.btn-shoot .ico {
-    width: 17px;
-    height: 17px;
-    display: block;
-    flex: none;
-}
-
-.btn-shoot:disabled {
-    opacity: 0.42;
-    cursor: default;
-}
-
-/* In range and on the ball: the whole control takes the aim colour. */
-.btn-shoot.ready {
-    color: var(--x-aim);
-    border-color: var(--x-aim);
-    background: var(--c-canvas-elevated);
-}
-
-.btn-shoot.ready:hover {
-    background: var(--c-hairline-soft);
-}
-
-.btn-shoot:focus-visible {
-    outline: 2px solid var(--x-aim);
-    outline-offset: 2px;
-}
-
 /* ============================================================================
-   RESPONSIVE — collapse toward a single column on mobile
+   RESPONSIVE
+   ----------------------------------------------------------------------------
+   The layout is anchored, not measured, so it degrades by *moving furniture*
+   rather than by shrinking the pitch: at narrow widths the shootout strip drops
+   below the corner HUD, and the sheet spans the full width.
    ========================================================================= */
 
-@media (max-width: 720px) {
+@media (max-width: 760px) {
 
-    /* The bottom dock stacks controls-first, so the banner ends up nearest the
-       thumb; the top dock keeps identity above controls. */
-    #hud-bottom .dock {
-        align-items: stretch;
-        flex-direction: column-reverse;
-        gap: var(--s-xs);
-    }
-
-    /* With the dock reversed the action cluster is the bottom-most band, so it
-       reads left-to-right from the thumb edge instead of being pushed right. */
-    .dock-actions {
-        justify-content: flex-start;
-    }
-
-    #log-panel {
-        max-width: 58vw;
-    }
-
-    #instruction {
-        max-width: 100%;
-    }
-
-    /* The shootout strip stacks too: score on one line, order and turn on the
-       next, so it never becomes a single unscrollable row. */
-    #hud-pens .dock {
-        flex-direction: column;
-        align-items: stretch;
+    /* The corners now want the whole top band, so the shootout strip moves down
+       to the empty space above the action row, where it has room to wrap. */
+    #hud-pens {
+        top: auto;
+        bottom: calc(var(--hud-pad) + var(--sa-b) + 108px);
     }
 }
 
-@media (max-width: 480px) {
-    #log-panel {
-        display: none;
-        /* the log is a luxury at this width; the pitch matters more */
-    }
+@media (max-width: 460px) {
 
-    /* At this width the pitch is the scarce resource, so the shootout dots drop
-       the "taken but missed" tint to one glyph each — the score line still
-       carries the exact state. */
-    .pens-dots .dot {
-        width: 7px;
-        height: 7px;
-    }
-
-    /* one cluster per line, and the bottom dock is already column-reversed, so
-       the controls end up as the bottom-most band — closest to the thumb */
-    #hud-bottom .cluster,
-    #hud-top .cluster,
-    #hud-pens .cluster {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        scrollbar-width: none;
-    }
-
-    /* …except the decision window. MOVES DONE is the one control that must never
-       be the item that scrolled off, so this cluster wraps instead of scrolling:
-       the plan clock takes the first line with the shoot button, and the commit
-       button rides the second. */
-    #hud-bottom .dock-actions {
-        flex-wrap: wrap;
-        overflow-x: visible;
-        width: 100%;
-    }
-
-    #hud-bottom .cluster::-webkit-scrollbar,
-    #hud-top .cluster::-webkit-scrollbar,
-    #hud-pens .cluster::-webkit-scrollbar {
-        display: none;
-    }
-
-    /* The icon alone is unambiguous at this width, and the word costs the
-       cluster ~46px of the horizontal room it scrolls through. */
+    /* At this width the shoot button loses its word: the icon is unambiguous and
+       the label costs the row ~64px it does not have. */
     .btn-shoot .ico-label {
         display: none;
     }
 
     .btn-shoot {
-        padding: 0 9px;
+        padding: 0 14px;
+    }
+
+    .hud-sheet {
+        left: calc(var(--hud-pad) + var(--sa-l));
+        right: calc(var(--hud-pad) + var(--sa-r));
+        width: auto;
+    }
+
+    .clock-half {
+        display: none;
+    }
+
+    .pens-dots .dot {
+        width: 7px;
+        height: 7px;
     }
 }
 
-/* On a touch device every control has to clear the 44px thumb target — the dock
-   can be the only thing between the player and a mis-tap on the pitch. This
-   costs the stage a few pixels of height, and it is worth it. */
+/* On a touch device every control has to clear the 44px thumb target — the
+   chrome can be the only thing between the player and a mis-tap on the pitch. */
 @media (pointer: coarse) {
-    .btn-icon {
+
+    .hud-icon-btn {
         width: var(--tap);
         height: var(--tap);
     }
 
-    .segmented button {
+    .btn-icon-xs {
+        width: 34px;
+        height: 34px;
+    }
+
+    .sheet-row {
         min-height: var(--tap);
     }
 
-    .btn-ghost-sm {
-        height: var(--tap);
-    }
-
-    .btn-shoot,
-    .btn-done {
-        height: var(--tap);
+    .segmented button {
+        min-height: 36px;
     }
 }
 
+/* The celebration and the pulses are the only things here that move; a player
+   who has asked for less motion still gets the signal, just not the sweep. */
 @media (prefers-reduced-motion: reduce) {
-    #banner {
+
+    #banner,
+    .hud-sheet,
+    #plan-panel {
         transition: none;
+        animation: none;
+    }
+
+    #goal-fx.show,
+    #goal-fx.show #goal-fx-word,
+    .hud-corner.hud-tr.low .clock-num,
+    #plan-panel.low .ring-fill {
+        animation: none;
+    }
+
+    #goal-fx.show {
+        opacity: 1;
+    }
+
+    #goal-fx::after {
+        display: none;
     }
 }
