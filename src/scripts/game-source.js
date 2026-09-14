@@ -964,7 +964,8 @@ import {
             yaw: team === 'you' ? Math.PI : 0, walk: 0, px: 50, py: 50,
             hasBall: false, selected: false, controlled: false, held: false,
             duty: null,          // 'interceptor' | 'marker' for the human's two
-            dive: null,          // keeper only: where this dive is going
+            dive: null,          // keeper only: active in-flight dive target
+            queuedDive: null,    // keeper only: user-queued dive target waiting for shot
             /* a shade under the base speed, so a defender has to get a head start
                rather than being able to simply outrun the player in possession */
             speed: PLAYER_SPEED * 0.9
@@ -2230,7 +2231,7 @@ import {
             const line = keeperHome(k.team);
             k.ax = line.x; k.ay = line.y;
             k.x = line.x; k.y = line.y; k.px = k.x; k.py = k.y;
-            k.dest = null; k.held = false; k.dive = null;
+            k.dest = null; k.held = false; k.dive = null; k.queuedDive = null;
         });
 
         /* §17.b — the phase flips to `restart` BEFORE the carrier is handed over,
@@ -3328,7 +3329,9 @@ import {
         const k = keeperOf(other(state.possession));
         if (k) {
             ball.keeperFrom = { x: k.x, y: k.y };
-            if (!k.held && !k.dive) {
+            if (k.queuedDive) {
+                k.dive = k.queuedDive;
+            } else if (!k.held && !k.dive) {
                 /* §0.d — the uncommanded keeper dives on a GUESS, and both teams get
                    the same guess.
 
@@ -3493,7 +3496,7 @@ import {
         const defTeam = other(turn);
         const k = keeperOf(defTeam);
         const keeperY = goal.y - PENALTY_LINE();
-        allPlayers.forEach(p => { p.controlled = false; p.dest = null; p.dive = null; p.held = false; });
+        allPlayers.forEach(p => { p.controlled = false; p.dest = null; p.dive = null; p.queuedDive = null; p.held = false; });
         /* Only the human's own bodies ever carry the "controlled" ring: the
            kicker on your own kick, your keeper on the CPU's. The ring is a
            promise that a drag will move that player, so painting it on the
@@ -3862,12 +3865,19 @@ import {
             runnerMarker.visible = true;
             runnerMarker.position.set(worldX(clamp(pt.x, 5, 95)), 0.09, worldZ(clamp(pt.y, 5, 95)));
         } else if (drag.kind === 'keeper' && drag.moved > TAP_SLOP) {
+            const isLiveShot = ball.mode === 'shot';
+            const target = { x: clamp(pt.x, 8, 92), y: drag.player.y };
             drag.player.held = true;
-            drag.player.dive = { x: clamp(pt.x, 8, 92), y: drag.player.y };
+            if (isLiveShot) {
+                drag.player.dive = target;
+            } else {
+                drag.player.queuedDive = target;
+                drag.player.dive = null;
+            }
             diveMarker.visible = true;
-            diveMarker.position.set(worldX(clamp(pt.x, 8, 92)), 0.09, worldZ(drag.player.y));
+            diveMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
             diveLine.visible = true;
-            diveLine.setEnds(drag.player, { x: clamp(pt.x, 8, 92), y: drag.player.y });
+            diveLine.setEnds(drag.player, target);
         } else if (drag.kind === 'so-aim' && drag.moved > TAP_SLOP * 0.5) {
             const t = { x: clamp(pt.x, 0, 100), y: soGoal().y };
             aimLine.visible = true;
@@ -4038,13 +4048,23 @@ import {
             player.selected = false;
             runnerMarker.visible = false;
         } else if (kind === 'keeper') {
+            const isLiveShot = ball.mode === 'shot';
             if (moved > TAP_SLOP) {
+                const target = { x: clamp(pt.x, 8, 92), y: player.y };
                 player.held = true;
-                player.dive = { x: clamp(pt.x, 8, 92), y: player.y };
-                log('Keeper set to ' + (player.dive.x < 50 ? 'their left' : 'their right') + '.', '');
+                if (isLiveShot) {
+                    player.dive = target;
+                } else {
+                    player.queuedDive = target;
+                    player.dive = null;
+                }
+                log('Keeper set to ' + (target.x < 50 ? 'their left' : 'their right') + '.', '');
             } else {
                 player.held = false;
-                player.dive = null;
+                player.queuedDive = null;
+                if (!isLiveShot) {
+                    player.dive = null;
+                }
             }
             diveLine.visible = false;
             diveMarker.visible = false;
@@ -4194,7 +4214,7 @@ import {
         clearIntents();
         /* A dive lives for exactly one execution, so both keepers start clean —
            this is what keeps a queued dive from leaking into the next window. */
-        [keeperOf('you'), keeperOf('cpu')].forEach(k => { if (k) { k.dive = null; k.held = false; } });
+        [keeperOf('you'), keeperOf('cpu')].forEach(k => { if (k) { k.dive = null; k.queuedDive = null; k.held = false; } });
         bus.emit('role');
         bus.emit('plan-markers');
     }
@@ -4675,11 +4695,12 @@ import {
         const planning = !!(PLAN && !PLAN.armed);
         const liveShot = ball.mode === 'shot' && PLAY.def === 'cpu';
         const k = (planning || liveShot) ? keeperOf('you') : null;
-        if (k && k.dive) {
+        const target = k ? (k.dive || k.queuedDive) : null;
+        if (k && target) {
             diveLine.visible = true;
-            diveLine.setEnds(k, k.dive);
+            diveLine.setEnds(k, target);
             diveMarker.visible = true;
-            diveMarker.position.set(worldX(k.dive.x), 0.09, worldZ(k.dive.y));
+            diveMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
         } else {
             diveLine.visible = false;
             diveMarker.visible = false;
