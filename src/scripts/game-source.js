@@ -1138,9 +1138,11 @@ import {
             /* up off the ground at the top of the dive, back down as it decays */
             p.mesh.position.y = runY * (1 - l) + 0.62 * Math.sin(Math.PI * clamp(da, 0, 1)) * l;
             /* the two kits are modelled facing opposite ways, so the same world
-               direction is the opposite sign of roll for each of them */
+               direction is the opposite sign of roll for each of them. The head
+               must lead the dive: diving right (dir=1) rolls right, diving left
+               (dir=-1) rolls left. */
             const rollSign = p.team === 'you' ? 1.15 : -1.15;
-            p.mesh.rotation.z = -dir * lat * rollSign * da;
+            p.mesh.rotation.z = dir * lat * rollSign * da;
         }
     }
 
@@ -3977,6 +3979,8 @@ import {
                     path.push({ x: drag.x, y: drag.y });
                 }
                 const mate = AIM.slot === 2 ? null : mateInDirection(drag.x0, drag.y0, drag.x, drag.y);
+                // Store the locked receiver candidate during the drag
+                drag.lockedReceiver = mate;
                 const line = AIM.slot === 2 ? moveCurve : strokeLine;
                 if (AIM.slot === 2) {
                     line.material.color.setHex(COL.ghost);
@@ -4069,7 +4073,8 @@ import {
         canvas.classList.remove('grabbing');
         const moved = Math.hypot(pt.x - drag.x0, pt.y - drag.y0);
         const kind = drag.kind, player = drag.player;
-        drag.kind = null; drag.player = null; drag.id = null;
+        const lockedReceiver = drag.lockedReceiver;
+        drag.kind = null; drag.player = null; drag.id = null; drag.lockedReceiver = null;
 
         if (kind === 'aim') {
             /* §12.d — release commits the line, and WHICH line it is was decided
@@ -4119,6 +4124,15 @@ import {
                     passCurve.visible = true;
                     strokeLine.visible = false;
                     const t = shotTargetFor(ballPoint(), landed.end);
+
+                    // If a teammate was locked during the pass, assign them as receiver and set run intent
+                    if (lockedReceiver && PLAY) {
+                        PLAY.receiver = lockedReceiver;
+                        lockedReceiver.duty = 'receiver';
+                        // Queue the locked receiver to run to the pass target
+                        setIntent(lockedReceiver, landed.end);
+                    }
+
                     /* §12.f — THE DRAWN LINE IS ALWAYS THE QUEUED BALL.
                        This is the whole of the "passing to my own half instead of
                        the forward line I drew" report. An angle that had a
@@ -4142,8 +4156,9 @@ import {
                             ? 'Angle set: the ball goes down the drawn line — SHOOT to strike it.'
                             : 'Angle set: the ball goes down the drawn line, heading wide of goal.', '');
                     } else if (queued) {
+                        const receiverMsg = lockedReceiver ? ' to ' + lockedReceiver.label : ' to space';
                         log('Queued: pass of power ' + Math.round(landed.power * 100) + '%'
-                            + (landed.air ? ', in the air.' : '.'), '');
+                            + (landed.air ? ', in the air' : '') + receiverMsg + '.', '');
                     } else {
                         log('Draw a line towards a teammate or the goal.', '');
                     }
@@ -4816,17 +4831,27 @@ import {
             const planning = !!(PLAN && !PLAN.armed);
             if (!planning) {
                 if (state.pendingHalf) {
-                    /* §3 — the whistle waits for the ball to become dead */
-                    if (ball.mode === 'held' || ball.mode === 'loose') endHalf();
+                    /* §3 — the whistle waits for the ball to become dead, but enforce
+                       a hard timeout to prevent match continuing 20-30 seconds past time.
+                       If pendingHalf has been active for more than 2 seconds or the ball
+                       is in a clearly resolvable state, force the half to end. */
+                    if (!state.pendingHalfT) state.pendingHalfT = 0;
+                    state.pendingHalfT += dt;
+
+                    if (ball.mode === 'held' || ball.mode === 'loose' || state.pendingHalfT >= 2.0) {
+                        state.pendingHalfT = 0;
+                        endHalf();
+                    }
                 } else {
                     state.halfT += dt;
-                    /* First half uses regulation + stoppage; second half is just regulation */
+                    /* First half uses regulation + stoppage (max 5s); second half is just regulation */
                     const limit = state.half === 1
                         ? halfLength + state.firstHalfStoppage
                         : halfLength;
                     if (state.halfT >= limit) {
                         state.halfT = limit;
                         state.pendingHalf = true;
+                        state.pendingHalfT = 0;
                     }
                 }
             }
@@ -5143,6 +5168,7 @@ import {
     }
 
     el('btn-start').addEventListener('click', () => { popScreen(); beginMatch(); });
+    el('btn-penalty').addEventListener('click', () => { popScreen(); beginShootout(); });
     el('btn-tutorial').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
     el('btn-tut-close').addEventListener('click', () => popScreen());
     /* Every row of the sheet does its one thing and then gets out of the way —
