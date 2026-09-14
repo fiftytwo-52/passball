@@ -262,12 +262,17 @@ import '../styles/global.css';
             <p class="body-lg">Two halves of continuous football. Every change of possession freezes the board —
                 stack your moves, then watch both sides play them out together.</p>
 
-            <!-- The three match settings, on the card where the match begins.
-                 The same controls live in the in-game menu sheet, and the two
-                 surfaces stay in step: the engine syncs every pill from the
-                 value, never from the click. -->
-            <div class="start-settings">
-                <div class="sheet-group">
+            <!-- The match settings — the SAME set the in-game menu sheet edits,
+                 drawn once here as a titled panel of rows so there is exactly one
+                 home for every option. The engine syncs every pill from the value,
+                 never from the click, so the two surfaces can never drift. -->
+            <section class="start-settings" aria-label="Match settings">
+                <div class="start-settings-head">
+                    <span class="hud-label">Match settings</span>
+                    <span class="start-settings-hint">Applies to your next match</span>
+                </div>
+
+                <div class="start-setting-row">
                     <span class="hud-label">Difficulty</span>
                     <div class="segmented segmented-num" id="difficulty-start" role="group" aria-label="Difficulty">
                         <button type="button" class="btn" data-diff="0.35" aria-pressed="false">LOW</button>
@@ -276,7 +281,8 @@ import '../styles/global.css';
                         <button type="button" class="btn" data-diff="1.85" aria-pressed="false">EXTREME</button>
                     </div>
                 </div>
-                <div class="sheet-group">
+
+                <div class="start-setting-row">
                     <span class="hud-label">Move timer</span>
                     <div class="segmented segmented-num" id="plan-window-start" role="group" aria-label="Move timer seconds">
                         <button type="button" class="btn" data-lock="3" aria-pressed="false">3s</button>
@@ -285,7 +291,8 @@ import '../styles/global.css';
                         <button type="button" class="btn" data-lock="20" aria-pressed="false">20s</button>
                     </div>
                 </div>
-                <div class="sheet-group">
+
+                <div class="start-setting-row">
                     <span class="hud-label">Match length</span>
                     <div class="segmented segmented-num" id="half-length-start" role="group" aria-label="Half length">
                         <button type="button" class="btn" data-half="60" aria-pressed="false">1:00</button>
@@ -293,11 +300,19 @@ import '../styles/global.css';
                         <button type="button" class="btn" data-half="180" aria-pressed="false">3:00</button>
                     </div>
                 </div>
-            </div>
+
+                <div class="start-setting-row">
+                    <span class="hud-label">Sound</span>
+                    <div class="segmented segmented-num" id="sound-start" role="group" aria-label="Sound">
+                        <button type="button" class="btn" data-sound="on" aria-pressed="true">ON</button>
+                        <button type="button" class="btn" data-sound="off" aria-pressed="false">OFF</button>
+                    </div>
+                </div>
+            </section>
 
             <div class="actions">
                 <button type="button" class="btn btn-primary btn-xl" id="btn-start">QUICK MATCH</button>
-                <button type="button" class="btn btn-secondary btn-xl" id="btn-penalty">PENALTY</button>
+                <button type="button" class="btn btn-secondary btn-xl" id="btn-penalty">PENALTY SHOOTOUT</button>
                 <button type="button" class="btn btn-ghost" id="btn-tutorial">TUTORIAL</button>
             </div>
 

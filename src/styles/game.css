@@ -1483,15 +1483,27 @@ body {
    surface: the dark-glass pill chrome has to be re-inked for it. The pressed
    pill inverts to an ink fill with white text, mirroring the sheet's white
    fill with dark text. */
+/* The single home for every match setting. The card is a LIGHT surface, so the
+   dark-glass pill chrome of the in-game sheet has to be re-inked for it; the
+   whole set is drawn as one titled panel of label + control rows. */
 .start-settings {
     display: flex;
     flex-direction: column;
-    gap: var(--s-md);
+    gap: 0;
     margin-top: var(--s-lg);
     background: rgba(0, 0, 0, 0.38);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: var(--r-md);
-    padding: var(--s-md);
+    padding: var(--s-sm) var(--s-md);
+}
+
+.start-settings-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s-sm);
+    padding: var(--s-sm) 0 var(--s-xs);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .start-settings .hud-label {
@@ -1501,6 +1513,40 @@ body {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+}
+
+.start-settings-head .hud-label {
+    color: #cfe3f5;
+    letter-spacing: 0.12em;
+}
+
+.start-settings-hint {
+    color: #6b7f97;
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: none;
+}
+
+/* One setting per row: the label anchors left, the control fills the rest, so
+   every row lines up down the panel at any width. */
+.start-setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-sm);
+    padding: var(--s-sm) 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.start-setting-row:last-child {
+    border-bottom: 0;
+    padding-bottom: var(--s-xs);
+}
+
+.start-setting-row .segmented {
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
 .start-settings .segmented {

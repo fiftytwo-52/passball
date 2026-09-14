@@ -485,6 +485,7 @@ import {
         humanScore: 0, cpuScore: 0,
         half: 1,              // 1 | 2
         halfT: 0,             // seconds elapsed in this half
+        matchMode: 'quick',   // quick | shootout (for context-aware RESTART)
         pendingHalf: false,   // clock expired; wait for the ball to die
         difficulty: 0.75,     // CPU reading of the game, 0.35 Low, 0.75 Mid, 1.25 Hard, 1.85 Extreme
         seed: 0,
@@ -770,7 +771,12 @@ import {
         function net(side) {
             const gw = GOAL_HALF_M * 2, depth = 2;      // metres — the mouth itself
             const x0 = -gw / 2, x1 = gw / 2;
-            const yIn = side < 0 ? -GL : GL, yOut = side < 0 ? -GL - depth : GL + depth;
+            /* the netting starts just behind the line — the same offset the 3D
+               frame carries — so the goal line, the posts and the net read as
+               three layers instead of printing on top of each other */
+            const back = 0.5;
+            const yIn = side < 0 ? -GL - back : GL + back;
+            const yOut = side < 0 ? -GL - back - depth : GL + back + depth;
             g.save();
             g.strokeStyle = 'rgba(255,255,255,.30)';
             g.lineWidth = Math.max(1, 0.06 * M);
@@ -839,7 +845,11 @@ import {
             m.position.set(x, y, z);
             grp.add(m);
         };
-        const zLine = worldZ(gy), zBack = worldZ(gy + (gy >= 50 ? depth : -depth));
+        /* the frame stands a touch BEHIND the painted goal line, so the line,
+           the posts and the netting are three separate layers on the eye */
+        const off = 0.5;
+        const zLine = worldZ(gy + (gy >= 50 ? off : -off));
+        const zBack = worldZ(gy + (gy >= 50 ? off + depth : -(off + depth)));
         post(-half, zLine); post(half, zLine); post(-half, zBack); post(half, zBack);
         bar(0, H, zLine, gw + 0.34);
         bar(0, H * .62, zBack, gw + 0.34);
@@ -1124,7 +1134,7 @@ import {
                the middle stays upright and reaches straight down the pitch —
                and `lat` is the honest ball-side component of the dive vector,
                nothing invented and nothing random. */
-            const lat = clamp(ddx * attackSide(p.team), 0, 1);
+            const lat = clamp(Math.abs(ddx), 0, 1);
             const dir = ddx >= 0 ? 1 : -1;
             const l = da;
             L.legL.rotation.x = s * (1 - l) + (-.34 - .24 * lat) * l;
@@ -2002,6 +2012,7 @@ import {
            keep both sets of pills pressed in step */
         difficultyStart: el('difficulty-start'), planWinStart: el('plan-window-start'),
         halfLen: el('half-length'), halfLenStart: el('half-length-start'),
+        soundStart: el('sound-start'),
         menuOpen: el('btn-menu-open'), menuClose: el('btn-menu-close'),
         menuRestart: el('btn-menu-restart'), menuQuit: el('btn-menu-quit'),
         sheet: el('menu-sheet'), scrim: el('sheet-scrim'),
@@ -2368,6 +2379,7 @@ import {
         state.half = 1; state.halfT = 0; state.pendingHalf = false;
         state.seed = (Math.random() * 1e9) | 0;
         state.phase = 'play';
+        state.matchMode = 'quick';
         /* a fresh match always opens with the coached kick-off */
         state.tutor = 0; state.tutorTargets = null; state.tutorClock = 0;
         state.tutorDone = false;
@@ -2426,7 +2438,8 @@ import {
         if (level) {
             banner('FULL TIME', CSS.warn);
             log('Full time: ' + state.humanScore + '–' + state.cpuScore + '. Straight to penalties.', '');
-            beginShootout();
+            /* the spot is settling THIS match, so PLAY AGAIN replays the match */
+            beginShootout(true);
             return;
         }
         state.phase = 'over';
@@ -2572,7 +2585,7 @@ import {
                     reach: dynReach,
                     diveSpeed: keeperDiveSpeed
                 });
-                if (r.outcome === 'SAVED' && ball.t >= r.t - 1e-6) return caughtByKeeper(k, atk);
+                if (r.outcome === 'SAVED' && ball.t >= r.t - 1e-6) return keeperContact(k, atk);
             } else if (!ball.air && (ball.mode !== 'pass' || ball.travel >= TOUCH_R) && ballPathDist(k, fromX, fromY) <= KEEPER_TOUCH_R) {
                 return caughtByKeeper(k, atk);
             }
@@ -2607,6 +2620,33 @@ import {
             log(k.team === 'you' ? 'Your keeper saves it!' : 'CPU keeper saves it!', k.team === 'you' ? 'good' : 'bad');
         }
         goalKick(k.team);
+    }
+
+    /** §12.h — what the keeper's body does with a saved ball is decided by his
+        posture at the moment of contact, not by the ball's height: ARC_SHOT
+        caps a struck ball below the humanoid's waist in open play, so there is
+        no "head-height" save to tell apart. The honest proxy is the dive
+        itself — a keeper who has left his feet has thrown
+        his legs at the ball and can only parry it back into play; one who is
+        set on his feet gets his body behind it and catches. The rulebook's
+        verdict is untouched either way: this only chooses what happens AFTER
+        the save. */
+    function keeperContact(k, atk) {
+        const dove = !!k.dive;
+        if (!dove) return caughtByKeeper(k, atk);
+        /* legs on it — a parried ball belongs to nobody. Bounce it back into
+           the pitch off a normal pointing away from the goal he defends, as
+           firm as a ball coming off the woodwork, and let the chase decide
+           who picks it up. */
+        const own = ownGoal(k.team);
+        const ny = Math.sign(50 - own.y) || 1;
+        ball.x = k.x; ball.y = k.y;
+        reboundBall(0, ny, BOUNCE_POST);
+        spillLoose();
+        Sfx.save(); shake(.3);
+        banner('PARRIED', CSS.warn);
+        log(k.team === 'you' ? 'Your keeper parries it away!' : 'CPU keeper parries it away!',
+            k.team === 'you' ? 'good' : 'bad');
     }
 
     function scoreGoal(team) {
@@ -3080,6 +3120,15 @@ import {
             moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED * KEEPER_SCALE, dt);
             return;
         }
+        /* the human's keeper is the player's alone: no sweep, no slide with
+           the ball. He holds his line unless a dive is drawn for him, and
+           walks back to it once the dive is spent. */
+        if (k.team !== 'cpu') {
+            if (dist(k.x, k.y, home.x, home.y) > 0.5) {
+                moveToward(k, home.x, home.y, DRILL_SPEED * 1.5 * KEEPER_SCALE, dt);
+            }
+            return;
+        }
         /* --- and the sweep --------------------------------------------------
            He comes off his line for a dead ball that is HIS to deal with, and
            only for that. Three things have to hold: the ball is nearer his own
@@ -3450,9 +3499,11 @@ import {
             ball.keeperFrom = { x: k.x, y: k.y };
             if (k.queuedDive) {
                 k.dive = k.queuedDive;
-            } else if (!k.held && !k.dive) {
-                /* §0.d — the uncommanded keeper dives on a GUESS, and both teams get
-                   the same guess.
+            } else if (k.team === 'cpu' && !k.held && !k.dive) {
+                /* §0.d — the CPU's uncommanded keeper dives on a GUESS. The
+                    human's own keeper never guesses: he holds his ground and
+                    the shot either finds him or it does not — his dive is the
+                    player's to draw, and nobody else's.
 
                    Everything that made him unbeatable ran through this branch. He
                    was handed the shot's true side (defaultDiveTarget) and then
@@ -3497,9 +3548,17 @@ import {
 
         One dive per window is enough — openPlan() clears both keepers' dives at
         the top of every window, so nothing here can leak into the next one. */
+    /** KEEPER_DIVE_MAX made real: a dive is lateral and short, measured from
+        the keeper's own feet. Every site that commits one clamps through
+        here, so no read, no guess and no drawn instruction can send a keeper
+        across the goal. */
+    function clampDiveX(x, fromX) {
+        return clamp(x, fromX - KEEPER_DIVE_MAX, fromX + KEEPER_DIVE_MAX);
+    }
+
     function applyAutoDive(k, target) {
         if (!k) return;
-        k.dive = { x: clamp(target.x, 8, 92), y: k.y };
+        k.dive = { x: clamp(clampDiveX(target.x, k.x), 8, 92), y: k.y };
     }
 
     /** §12.i — where the CPU aims a shot it has decided to take.
@@ -3547,7 +3606,10 @@ import {
         aim: null, dive: null,
         result: null,
         t: 0,
-        from: null, to: null
+        from: null, to: null,
+        /* true when the spot settles a level quick match, false when the player
+           picked PENALTY SHOOTOUT from the menu. Read by PLAY AGAIN only. */
+        fromMatch: false
     };
 
     const soGoal = () => GOAL.you;                       // one end, always
@@ -3561,7 +3623,7 @@ import {
     /* §10 timings. Every one of them is a countdown to zero, because soUpdate
        opens with `SO.t -= dt`. */
     const SO_FLIGHT = 0.55;        // ball in flight
-    const SO_KICK_BEAT = 0.75;     // the keeper sets off before the strike
+    const SO_KICK_BEAT = 0.75;     // the keeper sets, then the strike; the dive breaks on it
     const SO_DIVE_WINDOW = 4.5;    // the human's time to draw a dive
     const SO_RESULT_PAUSE = 1.2;   // the banner, before the next kicker
     const SO_AIM_WINDOW = 10;      // the human's time to draw the aim
@@ -3573,13 +3635,20 @@ import {
         fitView();
     }
 
-    function beginShootout() {
+    /* `fromMatch` says WHY the spot is being used, and it is the only thing that
+       decides what PLAY AGAIN does at the end. A shootout opened from the menu is
+       a mode in its own right, so replaying it replays the shootout. A shootout
+       that came out of a level quick match is a *tiebreak* — the evening's fixture
+       is the match, not the shootout — so replaying it replays the match. */
+    function beginShootout(fromMatch) {
         while (topScreen()) popScreen();
         SO.active = true;
         SO.you = 0; SO.cpu = 0;
         SO.takenYou = 0; SO.takenCpu = 0;
         SO.result = null;
+        SO.fromMatch = !!fromMatch;
         state.phase = 'shootout';
+        state.matchMode = SO.fromMatch ? 'quick' : 'shootout';
         /* §17.b — penalties are their own machine: no decision window survives it */
         PLAN = null;
         clearIntents();
@@ -3597,6 +3666,8 @@ import {
 
     function endShootout(silent) {
         SO.active = false;
+        /* Restore visibility of all players after shootout */
+        allPlayers.forEach(p => { if (p.mesh) p.mesh.visible = true; });
         if (!silent) return;
         /* the shootout's readouts are tear-down too, so leaving penalties never
            leaves a stale dots row behind in the regulation HUD */
@@ -3623,8 +3694,18 @@ import {
         const kicker = soKickerOf(turn);
         const defTeam = other(turn);
         const k = keeperOf(defTeam);
-        const keeperY = goal.y - PENALTY_LINE();
-        allPlayers.forEach(p => { p.controlled = false; p.dest = null; p.dive = null; p.queuedDive = null; p.held = false; });
+        const keeperY = goal.y;  // Set keeper on the goal line
+        allPlayers.forEach(p => {
+            p.controlled = false;
+            p.dest = null;
+            p.dive = null;
+            p.queuedDive = null;
+            p.held = false;
+            /* Hide all players except the kicker and keeper during shootout */
+            const isKicker = p === kicker;
+            const isKeeper = p === k;
+            if (p.mesh) p.mesh.visible = (isKicker || isKeeper);
+        });
         /* Only the human's own bodies ever carry the "controlled" ring: the
            kicker on your own kick, your keeper on the CPU's. The ring is a
            promise that a drag will move that player, so painting it on the
@@ -3692,12 +3773,20 @@ import {
             const readChance = clamp(0.22 + 0.45 * state.difficulty + (isExtreme ? 0.34 : (isHard ? 0.16 : 0)), 0, 0.97);
             const read = Math.random() < readChance;
             const side = Math.random() < 0.5 ? -1 : 1;
+            /* The guess is capped at KEEPER_DIVE_MAX from where the keeper
+               stands — even a perfect read cannot send him beyond his reach. */
+            const kx = k ? k.x : 50;
             const target = read
-                ? { x: SO.aim.x, y: k.y }
-                : { x: clamp(SO.aim.x + side * (GOAL_HALF_WIDTH * 1.35), 4, 96), y: k.y };
-            if (k) k.dive = target;
+                ? { x: clampDiveX(SO.aim.x, kx), y: k.y }
+                : { x: clamp(clampDiveX(SO.aim.x + side * (GOAL_HALF_WIDTH * 1.35), kx), 4, 96), y: k.y };
+            /* Held as a QUEUED dive, not a live one. The keeper has made his
+               read, but he does not break for the corner until the ball is
+               actually struck (soStrike). Setting k.dive here launched him
+               during the beat below, so he was airborne BEFORE the kick — a
+               keeper who dives before the shot. */
+            if (k) k.queuedDive = target;
             SO.dive = target;
-            /* a beat for the keeper to set off, then the strike itself */
+            /* a beat for the keeper to set, then the strike — the dive breaks on it */
             SO.t = off ? SO_KICK_BEAT * 0.6 : SO_KICK_BEAT;
             setPenaltyView(true);
         } else {
@@ -3708,9 +3797,15 @@ import {
 
     function soCommitDive(point) {
         if (SO.phase !== 'dive') return;
-        SO.dive = point;
         const k = soDefKeeper();
-        if (k) k.dive = point;
+        /* The drawn dive is capped at KEEPER_DIVE_MAX from the keeper's spot —
+           a drag to the far corner is pulled back to the furthest he can go. */
+        if (k && point) point = { x: clamp(clampDiveX(point.x, k.x), 4, 96), y: k.y };
+        SO.dive = point;
+        /* Queued, exactly like the CPU's read: the drawn dive is committed the
+           moment it is drawn, but the keeper only sets off when the strike
+           fires. */
+        if (k) k.queuedDive = point;
         soStrike();
     }
 
@@ -3721,6 +3816,12 @@ import {
         if (SO.phase !== 'dive') return;
         SO.phase = 'flight';
         SO.t = SO_FLIGHT;                 // a countdown, like every other phase
+        /* NOW the dive breaks. The keeper's committed point was held as
+           `queuedDive` for the whole pre-strike beat; promoting it to the live
+           `dive` on the exact frame the ball leaves is what makes him react to
+           the kick instead of guessing before it. */
+        const k = soDefKeeper();
+        if (k && k.queuedDive) { k.dive = k.queuedDive; k.queuedDive = null; }
         SO.from = { x: ball.x, y: ball.y };
         SO.to = { x: SO.aim ? SO.aim.x : soGoal().x, y: soGoal().y };
         SO.after = () => soResolve();
@@ -3730,7 +3831,10 @@ import {
         if (!SO.result) {
             SO.result = penaltyKickOutcome({
                 shotTarget: SO.aim,
-                divePoint: SO.dive || { x: SO.aim.x, y: 0 },
+                divePoint: SO.dive || { x: soGoal().x, y: soGoal().y },
+                /* a keeper who never left his line only stops what is within
+                   arm's reach — the full penalty reach belongs to the dive */
+                reach: SO.dive ? RULES.PENALTY_KEEPER_REACH : KEEPER_SAVE_REACH,
                 goalX: soGoal().x,
                 goalHalfWidth: GOAL_HALF_WIDTH
             });
@@ -3745,8 +3849,12 @@ import {
             shake(.5);
             banner('GOAL', kicker === 'you' ? CSS.you : CSS.cpu);
         } else if (SO.result.outcome === 'SAVED') {
+            /* posture picks the word, exactly as in open play: a keeper who
+               dove throws his legs at it and parries; one who stood his
+               ground gets his body behind it and catches */
+            const k = soDefKeeper();
             Sfx.save(); shake(.25);
-            banner('SAVED', CSS.warn);
+            banner(k && k.dive ? 'PARRIED' : 'SAVED', CSS.warn);
         } else {
             Sfx.bad();
             banner('MISS', CSS.bad);
@@ -3818,17 +3926,23 @@ import {
         } else if (SO.phase === 'dive') {
             if (SO.t <= 0) {
                 const k = soDefKeeper();
-                if (k && k.dive) {
+                if (k && (k.dive || k.queuedDive)) {
                     /* The keeper is already committed — the CPU's own read, or the
                        dive the human just drew. Strike without touching it: the
                        old fallback re-derived the dive here, which handed the CPU
                        keeper a second, better guess on every kick the human took
-                       and quietly turned an honest read into a free save. */
+                       and quietly turned an honest read into a free save. The
+                       commitment now lives in `queuedDive` until the strike, so it
+                       is checked here too — falling through would re-roll it. */
                     soStrike();
-                } else {
+                } else if (soDefTeam() === 'cpu') {
                     /* §7 — no input means the default dive, to the shot's side */
                     soCommitDive(k ? defaultDiveTarget(k, SO.aim, KEEPER_REACH)
                         : { x: SO.aim.x, y: soGoal().y });
+                } else {
+                    /* the human's keeper holds his line: no dive unless the
+                       player drew one, and the strike fires on his feet */
+                    soStrike();
                 }
             }
         } else if (SO.phase === 'flight') {
@@ -4002,7 +4116,7 @@ import {
             runnerMarker.position.set(worldX(clamp(pt.x, 5, 95)), 0.09, worldZ(clamp(pt.y, 5, 95)));
         } else if (drag.kind === 'keeper' && drag.moved > TAP_SLOP) {
             const isLiveShot = ball.mode === 'shot';
-            const target = { x: clamp(pt.x, 8, 92), y: drag.player.y };
+            const target = { x: clamp(clampDiveX(pt.x, drag.player.x), 8, 92), y: drag.player.y };
             drag.player.held = true;
             if (isLiveShot) {
                 drag.player.dive = target;
@@ -4010,31 +4124,21 @@ import {
                 drag.player.queuedDive = target;
                 drag.player.dive = null;
             }
-            diveMarker.visible = true;
-            diveMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
-            diveLine.visible = true;
-            diveLine.setEnds(drag.player, target);
+            /* no hint ring or line: the dive is the player's own instruction,
+               and the board does not announce where he is sending him */
         } else if (drag.kind === 'so-aim' && drag.moved > TAP_SLOP * 0.5) {
-            const t = { x: clamp(pt.x, 0, 100), y: soGoal().y };
-            aimLine.visible = true;
-            aimLine.material.color.setHex(isOnTarget(t.x, soGoal().x, GOAL_HALF_WIDTH) ? COL.aim : COL.bad);
-            aimLine.material.opacity = .85;
-            aimLine.setEnds(soSpot(), t);
-            shotLine.visible = true;
-            shotLine.setEnds(soSpot(), t);
+            /* no aim guide: the shot is the player's read, drawn blind */
+            aimLine.visible = false;
+            shotLine.visible = false;
         } else if (drag.kind === 'so-dive' && drag.moved > TAP_SLOP * 0.5) {
             /* The dive belongs to the keeper on the line — the defending side's,
                which is *your* keeper exactly because the shootout only opens this
                gesture when the CPU is the kicker. Taken from soDefKeeper() rather
                than hard-coded to 'you' so the two can never drift apart. */
-            const k = soDefKeeper();
-            if (k) {
-                const t = { x: clamp(pt.x, 4, 96), y: k.y };
-                diveLine.visible = true;
-                diveLine.setEnds(k, t);
-                diveMarker.visible = true;
-                diveMarker.position.set(worldX(t.x), 0.09, worldZ(t.y));
-            }
+            /* no dive guide: the drawn dive commits on release — the keeper's
+               feet stay put until the ball is actually struck */
+            diveLine.visible = false;
+            diveMarker.visible = false;
         }
     }
 
@@ -4197,7 +4301,7 @@ import {
         } else if (kind === 'keeper') {
             const isLiveShot = ball.mode === 'shot';
             if (moved > TAP_SLOP) {
-                const target = { x: clamp(pt.x, 8, 92), y: player.y };
+                const target = { x: clamp(clampDiveX(pt.x, player.x), 8, 92), y: player.y };
                 player.held = true;
                 if (isLiveShot) {
                     player.dive = target;
@@ -4885,23 +4989,12 @@ import {
             return;
         }
         if (!PLAY) return;
-        /* §17.b — the human's keeper dive line lives in two places now: while the
-           decision window is open it shows the dive that has been *stacked*, and
-           it still shows the live dive once a shot is in flight. */
-        if (drag.kind) return;
-        const planning = !!(PLAN && !PLAN.armed);
-        const liveShot = ball.mode === 'shot' && PLAY.def === 'cpu';
-        const k = (planning || liveShot) ? keeperOf('you') : null;
-        const target = k ? (k.dive || k.queuedDive) : null;
-        if (k && target) {
-            diveLine.visible = true;
-            diveLine.setEnds(k, target);
-            diveMarker.visible = true;
-            diveMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
-        } else {
-            diveLine.visible = false;
-            diveMarker.visible = false;
-        }
+        /* the keeper's dive is never previewed — not the stacked one while the
+           window is open, not the live one once the shot is in flight. Where
+           he is going is the player's instruction, and the board does not
+           announce it. */
+        diveLine.visible = false;
+        diveMarker.visible = false;
     }
 
     /* --- the shoot button ---------------------------------------------------
@@ -5144,12 +5237,33 @@ import {
     /* ==========================================================================
        § 19. WIRING
        ========================================================================== */
-    function toggleMute() {
-        const m = Sfx.toggle();
+    /* One sync for every surface that shows Sound. The sheet row prints its own
+       ON/OFF in a value slot; the start card draws it as a two-pill segmented
+       row. Both are decided by Sfx.muted, never by which control was touched, so
+       the two can never disagree. */
+    function syncSound() {
+        const m = Sfx.muted;
         const val = ui.mute && ui.mute.querySelector('.sheet-val');
         if (val) setText(val, m ? 'OFF' : 'ON');
         if (ui.mute) ui.mute.setAttribute('aria-pressed', String(m));
-        if (!m) Sfx.unlock();
+        if (ui.soundStart) {
+            Array.from(ui.soundStart.querySelectorAll('button[data-sound]')).forEach(b =>
+                b.setAttribute('aria-pressed', String((b.dataset.sound === 'off') === m)));
+        }
+    }
+    function toggleMute() {
+        Sfx.toggle();
+        syncSound();
+        if (!Sfx.muted) Sfx.unlock();
+    }
+    /* the start card's Sound pills are the same toggle, just drawn as a pair */
+    if (ui.soundStart) {
+        ui.soundStart.addEventListener('click', e => {
+            const b = e.target.closest('button[data-sound]');
+            if (!b) return;
+            const wantMuted = b.dataset.sound === 'off';
+            if (wantMuted !== Sfx.muted) toggleMute();
+        });
     }
 
     /* --- the floating menu (game-ui-ux: an overlay over the board) -----------
@@ -5211,7 +5325,14 @@ import {
     el('btn-resume').addEventListener('click', resumeGame);
     el('btn-restart').addEventListener('click', () => { state.paused = false; while (topScreen()) popScreen(); beginMatch(); });
     el('btn-quit').addEventListener('click', () => { state.paused = false; while (topScreen()) popScreen(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' }); });
-    el('btn-again').addEventListener('click', () => { popScreen(); beginMatch(); });
+    el('btn-again').addEventListener('click', () => {
+        popScreen();
+        if (state.matchMode === 'shootout') {
+            beginShootout();
+        } else {
+            beginMatch();
+        }
+    });
     el('btn-menu').addEventListener('click', () => { while (topScreen()) popScreen(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' }); });
     /* Halftime continue button — pops the halftime screen and starts the second half */
     const halfContinueBtn = el('btn-half-continue');
@@ -5224,7 +5345,9 @@ import {
         log('Second half — CPU kicks off.', '');
     });
     const pensBtn = el('btn-pens');
-    if (pensBtn) pensBtn.addEventListener('click', () => beginShootout());
+    /* the over screen's own route to the spot — it belongs to a finished match,
+       so it is the tiebreak path too */
+    if (pensBtn) pensBtn.addEventListener('click', () => beginShootout(true));
     const verifyBtn = el('btn-verify');
     if (verifyBtn) verifyBtn.addEventListener('click', () => {
         const r = runVerification(true);
@@ -5278,6 +5401,7 @@ import {
     /* the settings pills start pressed from their markup, but state is the
        truth — sync every surface from it before the first frame */
     syncDifficulty();
+    syncSound();
     setHalfLength(HALF_LENGTH_DEFAULT);
     allPlayers.forEach(p => { syncToMesh(p); refreshRings(); });
     setCarrier(teamOutfield('you')[0]);
