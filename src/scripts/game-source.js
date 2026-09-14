@@ -597,17 +597,12 @@ import {
        which is what let the touchlines run off the sides of a phone.) reqHH
        keeps its slightly roomier value so the vertical framing the HUD bands
        were tuned against does not move. */
-    /* §12.k — reqHW is the width the play itself needs: the touchlines plus
-       the run-off the ball can actually reach (OUT_PAD either side of the
-       grid), and no more. Containing the whole 96 m artwork instead spent a
-       quarter of a phone's screen width on run-off grass nobody can reach,
-       which is why the pitch read small in portrait. The reachable strip
-       fills the width instead, so the playable area is both wider and —
-       because the height is derived from it on a narrow screen — taller.
-       Landscape never reads reqHW except as the branch threshold below, so
-       the desktop framing does not move. */
-    const reqHW = (PITCH_M.x / 2 + OUT_PAD * M_X) * UPM + 2.5;   // ≈ 36.8
-    const reqHH = GROUND_M.y / 2 + 0.5;             // ≈ 67.0
+    /* §12.k — reqHW and reqHH frame the active match surface closely.
+       In mobile portrait, reqHW fills the phone screen right to the touchlines
+       so the playable pitch is maximally wide and tall without being cropped.
+       reqHH tightly frames the goals and hoardings for wider viewports. */
+    const reqHW = (PITCH_M.x / 2 + 0.6) * UPM;                   // ≈ 32.95 (touchlines at ~98% of width)
+    const reqHH = (PITCH_M.y / 2 + 5.5) * UPM;                   // ≈ 55.24 (tight goal-to-goal framing)
     /* §10 — the shootout magnifies one end, so the view carries a zoom and a
        pan (in game-y units) on top of the contain fit. */
     const view = { hw: reqHW, hh: reqHH, zoom: 1, panY: 50 };
