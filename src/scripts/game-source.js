@@ -2614,12 +2614,12 @@ import {
         if (ball.y >= 100 && inMouth && ball.dir && ball.dir.y > 0) {
             ball.y = 99.9; reboundBall(0, -1, BOUNCE_NET); Sfx.bounce(); return true;
         }
-        /* the hoardings behind each byline */
-        if (ball.y <= -OUT_PAD) { ball.y = -OUT_PAD; reboundBall(0, 1, BOUNCE_BOARD); Sfx.bounce(); return true; }
-        if (ball.y >= 100 + OUT_PAD) { ball.y = 100 + OUT_PAD; reboundBall(0, -1, BOUNCE_BOARD); Sfx.bounce(); return true; }
-        /* and the two touchlines */
-        if (ball.x <= -OUT_PAD) { ball.x = -OUT_PAD; reboundBall(1, 0, BOUNCE_BOARD); Sfx.bounce(); return true; }
-        if (ball.x >= 100 + OUT_PAD) { ball.x = 100 + OUT_PAD; reboundBall(-1, 0, BOUNCE_BOARD); Sfx.bounce(); return true; }
+        /* the bylines — ball bounces at the painted goal line, not the run-off */
+        if (ball.y <= 0) { ball.y = 0.1; reboundBall(0, 1, BOUNCE_BOARD); Sfx.bounce(); return true; }
+        if (ball.y >= 100) { ball.y = 99.9; reboundBall(0, -1, BOUNCE_BOARD); Sfx.bounce(); return true; }
+        /* the touchlines — ball bounces at the painted sideline */
+        if (ball.x <= 0) { ball.x = 0.1; reboundBall(1, 0, BOUNCE_BOARD); Sfx.bounce(); return true; }
+        if (ball.x >= 100) { ball.x = 99.9; reboundBall(-1, 0, BOUNCE_BOARD); Sfx.bounce(); return true; }
         return false;
     }
 
