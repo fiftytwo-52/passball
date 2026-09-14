@@ -967,9 +967,8 @@ import {
             duty: null,          // 'interceptor' | 'marker' for the human's two
             dive: null,          // keeper only: active in-flight dive target
             queuedDive: null,    // keeper only: user-queued dive target waiting for shot
-            /* a shade under the base speed, so a defender has to get a head start
-               rather than being able to simply outrun the player in possession */
-            speed: PLAYER_SPEED * 0.9
+            /* Standardized base speed for all players */
+            speed: PLAYER_SPEED
         };
         mesh.position.set(worldX(p.x), 0, worldZ(p.y));
         allPlayers.push(p);
@@ -1863,6 +1862,30 @@ import {
        ========================================================================== */
     const Sfx = (() => {
         let ctx = null, master = null, muted = false;
+        let bgm = null;
+        function initBgm() {
+            if (bgm) return bgm;
+            try {
+                bgm = new Audio('/background-audio.mp3');
+                bgm.loop = true;
+                bgm.volume = 0.3;
+            } catch (_e) {
+                bgm = null;
+            }
+            return bgm;
+        }
+        function syncBgm(screenName) {
+            const audio = initBgm();
+            if (!audio) return;
+            const currentScreen = screenName !== undefined ? screenName : (typeof topScreen === 'function' ? topScreen() : 'menu');
+            const shouldPlay = !muted && (currentScreen === 'menu' || currentScreen === 'pause');
+            if (shouldPlay) {
+                const p = audio.play();
+                if (p && p.catch) p.catch(() => { });
+            } else {
+                audio.pause();
+            }
+        }
         function ensure() {
             if (ctx) return ctx;
             const AC = window.AudioContext || window.webkitAudioContext;
@@ -1876,6 +1899,12 @@ import {
         function unlock() {
             const c = ensure();
             if (c && c.state === 'suspended') c.resume();
+            syncBgm();
+        }
+        if (typeof window !== 'undefined') {
+            ['pointerdown', 'keydown', 'touchstart', 'click'].forEach(evt => {
+                window.addEventListener(evt, () => unlock(), { passive: true, once: false });
+            });
         }
         function tone(freq, dur, type, vol, when) {
             const c = ensure();
@@ -1892,8 +1921,9 @@ import {
         }
         return {
             unlock,
+            syncBgm,
             get muted() { return muted; },
-            toggle() { muted = !muted; return muted; },
+            toggle() { muted = !muted; syncBgm(); return muted; },
             kick() { tone(150, .12, 'triangle', .4); tone(90, .16, 'sine', .3, .01); },
             pass() { tone(420, .07, 'triangle', .18); },
             good() { tone(660, .09, 'sine', .22); tone(880, .1, 'sine', .18, .07); },
@@ -2112,6 +2142,7 @@ import {
         /* A screen takes the whole viewport, so the floating sheet can never
            legitimately be open underneath one. */
         if (sheetOpen) setMenuOpen(false);
+        Sfx.syncBgm(name);
     });
 
     /* ==========================================================================
@@ -2506,6 +2537,28 @@ import {
         const k = keeperOf(def);
         if (k) {
             if (ball.mode === 'shot') {
+                const shotDist = ball.from ? Math.hypot(ball.from.x - PLAY.goal.x, ball.from.y - PLAY.goal.y) : 30;
+                const shotSpeed = Number.isFinite(ball.speed) ? ball.speed : SHOT_SPEED;
+
+                // Difficulty modifier applies exclusively to CPU opponent keeper
+                let keeperReach = KEEPER_SAVE_REACH;
+                let keeperDiveSpeed = DIVE_SPEED * RUN_SCALE;
+                if (def === 'cpu') {
+                    const isHard = state.difficulty >= 1.0;
+                    const isExtreme = state.difficulty >= 1.5;
+                    const diffMul = isExtreme ? 1.2 : (isHard ? 1.1 : 1.0);
+                    keeperReach *= diffMul;
+                    keeperDiveSpeed *= (KEEPER_SCALE * diffMul);
+                } else {
+                    keeperDiveSpeed *= KEEPER_SCALE;
+                }
+
+                // Balance save probability dynamically based on shot distance and speed:
+                // Long-range slow shots have high catch probability; fast/close-range shots have lower catch probability
+                const distFactor = clamp((shotDist - 10) / 28, 0.78, 1.35);
+                const speedFactor = clamp(SHOT_SPEED / Math.max(14, shotSpeed), 0.72, 1.28);
+                const dynReach = keeperReach * distFactor * speedFactor;
+
                 const r = shotOutcome({
                     from: { x: ball.from.x, y: ball.from.y },
                     target: ball.target,
@@ -2513,18 +2566,9 @@ import {
                     keeperTarget: k.dive || { x: k.x, y: k.y },
                     goalX: PLAY.goal.x,
                     goalHalfWidth: GOAL_HALF_WIDTH,
-                    shotSpeed: Number.isFinite(ball.speed) ? ball.speed : SHOT_SPEED,
-                    /* §0.d — his arms, and they are the engine's arms rather than
-                       the rulebook's: KEEPER_SAVE_REACH is shorter than
-                       RULES.KEEPER_REACH, which is what "decrease the keeper's
-                       diving length" means on the save side. rules.js is
-                       untouched and its own property tests still call
-                       shotOutcome() with no `reach` at all. */
-                    reach: KEEPER_SAVE_REACH,
-                    /* the dive is stepped through the §0.c pace dial AND the
-                       keeper dial like every other body, so the race he is
-                       judged by is the race he is actually running */
-                    diveSpeed: DIVE_SPEED * RUN_SCALE * KEEPER_SCALE
+                    shotSpeed: shotSpeed,
+                    reach: dynReach,
+                    diveSpeed: keeperDiveSpeed
                 });
                 if (r.outcome === 'SAVED' && ball.t >= r.t - 1e-6) return caughtByKeeper(k, atk);
             } else if (!ball.air && (ball.mode !== 'pass' || ball.travel >= TOUCH_R) && ballPathDist(k, fromX, fromY) <= KEEPER_TOUCH_R) {
@@ -2618,11 +2662,39 @@ import {
         has to stop at the net rather than carry on through the frame. */
     function bounceOffBoards() {
         const inMouth = Math.abs(ball.x - GOAL.you.x) <= GOAL_HALF_WIDTH + POST_R;
-        /* the two goal lines, between the posts: the netting */
+        /* the two goal lines, between the posts: scoring detection first */
         if (ball.y <= 0 && inMouth && ball.dir && ball.dir.y < 0) {
+            const post = postStruck(GOAL.cpu);
+            if (post) {
+                ball.x = post.x; ball.y = post.y;
+                reboundBall(post.nx, post.ny, BOUNCE_POST);
+                spillLoose();
+                Sfx.post(); shake(.34);
+                banner('POST', CSS.warn);
+                return true;
+            }
+            if (isOnTarget(ball.x, GOAL.cpu.x, GOAL_HALF_WIDTH)) {
+                ball.alive = false;
+                scoreGoal('you');
+                return true;
+            }
             ball.y = 0.1; reboundBall(0, 1, BOUNCE_NET); Sfx.bounce(); return true;
         }
         if (ball.y >= 100 && inMouth && ball.dir && ball.dir.y > 0) {
+            const post = postStruck(GOAL.you);
+            if (post) {
+                ball.x = post.x; ball.y = post.y;
+                reboundBall(post.nx, post.ny, BOUNCE_POST);
+                spillLoose();
+                Sfx.post(); shake(.34);
+                banner('POST', CSS.warn);
+                return true;
+            }
+            if (isOnTarget(ball.x, GOAL.you.x, GOAL_HALF_WIDTH)) {
+                ball.alive = false;
+                scoreGoal('cpu');
+                return true;
+            }
             ball.y = 99.9; reboundBall(0, -1, BOUNCE_NET); Sfx.bounce(); return true;
         }
         /* the bylines — ball bounces at the painted goal line, not the run-off */
@@ -2710,7 +2782,7 @@ import {
                back the drawn END of a line that has no byline answer, and a ball
                that stopped in the middle of the pitch is not a goal — it is a
                loose ball like any other. */
-            const atLine = Math.abs(ball.target.y - goal.y) <= 1.5;
+            const atLine = Math.abs(ball.target.y - goal.y) <= 1.5 || (goal.y === 0 ? ball.target.y <= 0 : ball.target.y >= 100);
             if (atLine && isOnTarget(ball.target.x, goal.x, GOAL_HALF_WIDTH)) {
                 ball.alive = false;
                 return scoreGoal(state.possession);
@@ -2747,7 +2819,7 @@ import {
                 log('Pass struck the post — ball is live.', '');
                 return;
             }
-            const atLine = Math.abs(ball.target.y - passGoal.y) <= 1.5;
+            const atLine = Math.abs(ball.target.y - passGoal.y) <= 1.5 || (passGoal.y === 0 ? ball.target.y <= 0 : ball.target.y >= 100);
             if (atLine && isOnTarget(ball.target.x, passGoal.x, GOAL_HALF_WIDTH)) {
                 ball.alive = false;
                 return scoreGoal(state.possession);
@@ -2890,6 +2962,23 @@ import {
             const inMouth = Math.abs(ball.x - goal.x) <= GOAL_HALF_WIDTH + POST_R;
             const atGoalLine = (ball.y <= 0 && ball.dir && ball.dir.y < 0) || (ball.y >= 100 && ball.dir && ball.dir.y > 0);
             const isGoalMouthEntry = (ball.mode === 'shot' || ball.mode === 'pass') && inMouth && atGoalLine;
+
+            if (isGoalMouthEntry) {
+                const post = postStruck(goal);
+                if (post) {
+                    ball.x = post.x; ball.y = post.y;
+                    reboundBall(post.nx, post.ny, BOUNCE_POST);
+                    spillLoose();
+                    Sfx.post(); shake(.34);
+                    banner('POST', CSS.warn);
+                    return;
+                }
+                if (isOnTarget(ball.x, goal.x, GOAL_HALF_WIDTH)) {
+                    ball.alive = false;
+                    scoreGoal(state.possession);
+                    return;
+                }
+            }
 
             if (!isGoalMouthEntry && (ball.x <= 0 || ball.x >= 100 || ball.y <= 0 || ball.y >= 100)) {
                 bounceOffBoards();
@@ -3120,14 +3209,16 @@ import {
             }
 
             /* --- defending: hold the half in front of the own goal --- */
-            const isHard = state.difficulty >= 1.0;
-            const isExtreme = state.difficulty >= 1.5;
+            const isCpu = p.team === 'cpu';
+            const isHard = isCpu && state.difficulty >= 1.0;
+            const isExtreme = isCpu && state.difficulty >= 1.5;
             const c = PLAY.carrier;
             if (p.duty === 'interceptor' && c) {
                 /* with the ball loose there is no lane to intercept: the ball
                    IS the objective, and it is still moving */
                 if (loose) {
-                    moveToward(p, ball.x, ownHalf(p.team, ball.y), PLAYER_SPEED * (isExtreme ? 1.05 : (isHard ? 0.98 : 0.9)), dt);
+                    const interceptSpeed = isCpu ? (PLAYER_SPEED * (isExtreme ? 1.05 : (isHard ? 0.98 : 0.9))) : (PLAYER_SPEED * 0.88);
+                    moveToward(p, ball.x, ownHalf(p.team, ball.y), interceptSpeed, dt);
                     return;
                 }
                 /* §12.e — press the MAN, not a guess at his receiver. This is
@@ -3135,19 +3226,21 @@ import {
                    planner fixed, a single `PLAY.threat` here meant the shape was
                    re-reading the human's intention sixty times a second. */
                 const s = interceptTarget(p, c, pressPoint(c, mine));
-                moveToward(p, s.x, ownHalf(p.team, s.y), PLAYER_SPEED * (isExtreme ? 1.05 : (isHard ? 0.98 : 0.9)), dt);
+                const interceptSpeed = isCpu ? (PLAYER_SPEED * (isExtreme ? 1.05 : (isHard ? 0.98 : 0.9))) : (PLAYER_SPEED * 0.88);
+                moveToward(p, s.x, ownHalf(p.team, s.y), interceptSpeed, dt);
                 return;
             }
             if (p.duty === 'marker' && c) {
                 /* stand goal-side of the carrier, where "goal" means the one
                    being defended — so the marker drops off towards its own end
                    rather than being pulled towards the other one */
-                const markTight = isExtreme ? 0.04 : (isHard ? 0.08 : 0.12);
+                const markTight = isCpu ? (isExtreme ? 0.04 : (isHard ? 0.08 : 0.12)) : 0.18;
                 const s = {
                     x: clamp(c.x - (mine.x - c.x) * markTight, 6, 94),
                     y: clamp(lerp(c.y, mine.y, markTight), 6, 94)
                 };
-                moveToward(p, s.x, ownHalf(p.team, s.y), PLAYER_SPEED * (isExtreme ? 1.0 : (isHard ? 0.94 : 0.88)), dt);
+                const markSpeed = isCpu ? (PLAYER_SPEED * (isExtreme ? 1.0 : (isHard ? 0.94 : 0.88))) : (PLAYER_SPEED * 0.85);
+                moveToward(p, s.x, ownHalf(p.team, s.y), markSpeed, dt);
                 return;
             }
             const s = defendingSpot(anchor, mine, i);
@@ -3170,7 +3263,8 @@ import {
               goal and leaves the human's half alone. */
         chasers.forEach(p => {
             const chaseY = p.team === def ? ownHalf(p.team, ball.y) : ball.y;
-            moveToward(p, ball.x, chaseY, PLAYER_SPEED, dt);
+            const chaseSpeed = (p.team === 'you' && !p.dest) ? PLAYER_SPEED * 0.92 : PLAYER_SPEED;
+            moveToward(p, ball.x, chaseY, chaseSpeed, dt);
         });
 
         /* a keeper who is running for a loose ball keeps his own line out of it */
@@ -4539,7 +4633,11 @@ import {
         };
         const options = ahead.length ? ahead.concat([spot]) : [spot];
         const pick = options[Math.floor(rng() * options.length)];
-        if (pick) passTo(c, pick, BALL_SPEED);
+        if (pick) {
+            const jitterX = (rng() - 0.5) * 8;
+            const jitterY = (rng() - 0.5) * 6;
+            passTo(c, { x: clamp(pick.x + jitterX, 6, 94), y: clamp(pick.y + jitterY, 6, 94) }, BALL_SPEED * 0.92);
+        }
     }
 
     /** True when the human has said nothing at all this window — no pass, no
@@ -4590,11 +4688,12 @@ import {
         teamOutfield('you').forEach((p, i) => {
             if (c && i === 0) {
                 const s = interceptTarget(p, c, pressPoint(c, mine));
-                setIntent(p, { x: s.x, y: ownHalf('you', s.y) });
+                // Looser unguided human teammate intent
+                setIntent(p, { x: clamp(s.x + (i % 2 === 0 ? 3 : -3), 6, 94), y: ownHalf('you', s.y) });
             } else if (c && i === 1) {
                 setIntent(p, {
-                    x: clamp(c.x - (mine.x - c.x) * 0.12, 6, 94),
-                    y: ownHalf('you', clamp(lerp(c.y, mine.y, 0.12), 6, 94))
+                    x: clamp(c.x - (mine.x - c.x) * 0.18, 6, 94),
+                    y: ownHalf('you', clamp(lerp(c.y, mine.y, 0.18), 6, 94))
                 });
             } else {
                 const s = defendingSpot(c || bound, mine, i);
