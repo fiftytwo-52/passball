@@ -486,7 +486,7 @@ import {
         half: 1,              // 1 | 2
         halfT: 0,             // seconds elapsed in this half
         pendingHalf: false,   // clock expired; wait for the ball to die
-        difficulty: 0.6,      // CPU reading of the game, 0 silly … 1 ruthless
+        difficulty: 0.75,     // CPU reading of the game, 0.35 Low, 0.75 Mid, 1.25 Hard, 1.85 Extreme
         seed: 0,
         paused: false,
         phaseT: 0,            // seconds in the current dead-ball beat
@@ -3087,12 +3087,14 @@ import {
             }
 
             /* --- defending: hold the half in front of the own goal --- */
+            const isHard = state.difficulty >= 1.0;
+            const isExtreme = state.difficulty >= 1.5;
             const c = PLAY.carrier;
             if (p.duty === 'interceptor' && c) {
                 /* with the ball loose there is no lane to intercept: the ball
                    IS the objective, and it is still moving */
                 if (loose) {
-                    moveToward(p, ball.x, ownHalf(p.team, ball.y), PLAYER_SPEED * 0.9, dt);
+                    moveToward(p, ball.x, ownHalf(p.team, ball.y), PLAYER_SPEED * (isExtreme ? 1.05 : (isHard ? 0.98 : 0.9)), dt);
                     return;
                 }
                 /* §12.e — press the MAN, not a guess at his receiver. This is
@@ -3100,18 +3102,19 @@ import {
                    planner fixed, a single `PLAY.threat` here meant the shape was
                    re-reading the human's intention sixty times a second. */
                 const s = interceptTarget(p, c, pressPoint(c, mine));
-                moveToward(p, s.x, ownHalf(p.team, s.y), PLAYER_SPEED * 0.9, dt);
+                moveToward(p, s.x, ownHalf(p.team, s.y), PLAYER_SPEED * (isExtreme ? 1.05 : (isHard ? 0.98 : 0.9)), dt);
                 return;
             }
             if (p.duty === 'marker' && c) {
                 /* stand goal-side of the carrier, where "goal" means the one
                    being defended — so the marker drops off towards its own end
                    rather than being pulled towards the other one */
+                const markTight = isExtreme ? 0.04 : (isHard ? 0.08 : 0.12);
                 const s = {
-                    x: clamp(c.x - (mine.x - c.x) * 0.12, 6, 94),
-                    y: clamp(lerp(c.y, mine.y, 0.12), 6, 94)
+                    x: clamp(c.x - (mine.x - c.x) * markTight, 6, 94),
+                    y: clamp(lerp(c.y, mine.y, markTight), 6, 94)
                 };
-                moveToward(p, s.x, ownHalf(p.team, s.y), PLAYER_SPEED * 0.88, dt);
+                moveToward(p, s.x, ownHalf(p.team, s.y), PLAYER_SPEED * (isExtreme ? 1.0 : (isHard ? 0.94 : 0.88)), dt);
                 return;
             }
             const s = defendingSpot(anchor, mine, i);
@@ -3179,76 +3182,63 @@ import {
     function cpuChoosePass(rng, spots) {
         const from = { x: PLAY.carrier.x, y: PLAY.carrier.y };
         const cands = teamOutfield('cpu').filter(p => p !== PLAY.carrier);
-        /* The defending keeper is a defender too — it is the one body that can
-           take a pass out of the air for free inside its own reach. Guarded,
-           because this is on the hot path of a live frame: an undefined keeper
-           here would throw out of cpuThink(), and frame() re-arms itself at the
-           *top* of the callback, so the throw would skip simPlayers(), stepBall()
-           and the render — the match would appear to lock up the instant the CPU
-           tried to pass. */
         const gk = keeperOf('you');
         const defenders = defenderInputs('you').concat(gk ? [{ x: gk.x, y: gk.y, speed: PLAYER_SPEED }] : []);
+        const isHard = state.difficulty >= 1.0;
+        const isExtreme = state.difficulty >= 1.5;
+
         const scored = cands.map(m => {
-            /* Score the race to where the mate will actually be when the ball
-               arrives, because that is where the ball is going and therefore the
-               race that will really be run. Falls back to his current feet for
-               the safety-net pass in cpuThink(), which has no plan to read. */
             const s = spots ? spots.get(m) : null;
             const to = s ? leadSpot(from, m, s) : { x: m.x, y: m.y };
-            /* §12.b — score the race with the radius the engine actually
-               enforces (TOUCH_R), not the rulebook's collection radius. The
-               default used to be CATCH_RADIUS, which made the CPU's own model
-               three times stricter than the pitch it was standing on: it
-               refused passes the engine would have let run, and the whole side
-               read as timid. Model and engine now measure the same thing. */
             const race = resolvePassRace({ from, to, defenders, radius: TOUCH_R });
-            const safe = race.outcome === 'COMPLETE' ? 1 : 0.15;
-            const progress = clamp((dist(from, PLAY.goal) - dist(to, PLAY.goal)) / 60, 0, 1);
-            const shot = dist(to, PLAY.goal) <= SHOT_RANGE ? 0.45 : 0;
-            const v = 0.5 * safe + 0.32 * progress + shot + 0.06;
-            /* blend toward the deliberately naive baseline as difficulty → 0 */
-            return lerp(0.3, v, state.difficulty);
+            const groundSafe = race.outcome === 'COMPLETE' ? 1.0 : 0.15;
+            
+            // Hard and Extreme AI evaluates aerial / chipped balls over defender blocks
+            let safe = groundSafe;
+            if (isHard && groundSafe < 0.7 && dist(to, PLAY.goal) < dist(from, PLAY.goal) + 10) {
+                m._preferAir = true;
+                safe = 0.92;
+            } else {
+                m._preferAir = false;
+            }
+
+            const progress = clamp((dist(from, PLAY.goal) - dist(to, PLAY.goal)) / 50, -0.2, 1.2);
+            const shot = dist(to, PLAY.goal) <= SHOT_RANGE ? 0.65 : (dist(to, PLAY.goal) <= SHOT_RANGE * 1.3 ? 0.35 : 0);
+            const v = 0.45 * safe + 0.35 * progress + shot + 0.1;
+            return isExtreme ? v * v : (isHard ? Math.pow(v, 1.5) : lerp(0.3, v, state.difficulty));
         });
-        if (rng() > 0.15 + 0.85 * state.difficulty) return cands[Math.floor(rng() * cands.length)] || cands[0];
+
+        if (!isHard && rng() > 0.15 + 0.85 * state.difficulty) {
+            return cands[Math.floor(rng() * cands.length)] || cands[0];
+        }
         return weightedPick(cands, scored, rng).item || cands[0];
     }
 
     function cpuThink(dt) {
         if (state.possession !== 'cpu') return;
-        /* §17.b — the CPU's choices are made inside the decision window now
-           (planForCpu) and fired by beginExecution(). This is only a safety net
-           for a possession that somehow arrived without a window: it must never
-           fire a second, unplanned pass on top of a queued one. */
         if (!PLAN || PLAN.armed) return;
         if (ball.mode !== 'held' || ball.holder !== PLAY.carrier) return;
         cpuAssignDuties();
-        /* §12.e — the write that used to be here fed nothing: cpuThink() never
-           read it back, so it was a leak with no consumer. Gone with the rest. */
         PLAY.cpuThink -= dt;
         if (PLAY.cpuThink > 0) return;
 
         const c = PLAY.carrier;
         const rng = mulberry32(hashSeed(state.seed, state.half, Math.floor(state.halfT * 60)));
 
-        /* §5 / §12.i — inside range it goes for goal, and the closer to goal he
-           is the more often he goes. It used to be a flat
-           `0.25 + 0.5 × difficulty` on one instantaneous reading of the
-           distance, which is a strange way to weigh the single best action on
-           the pitch: the dice are now scaled by how good the spot actually is,
-           so the front edge of the range is usually a shot and the outer edge is
-           a nibble. This is the safety-net path — the real decision is made in
-           planForCpu() and fired by beginExecution() — so it reads the same
-           distance and stacks the same shot. */
         const toGoal = dist(c, PLAY.goal);
+        const isHard = state.difficulty >= 1.0;
+        const isExtreme = state.difficulty >= 1.5;
+        const pwr = isExtreme ? 1.0 : (isHard ? 0.92 : 0.7);
+
         if (toGoal <= SHOT_RANGE &&
-            rng() < (0.5 + 0.5 * state.difficulty) * (1 - 0.5 * (toGoal / SHOT_RANGE))) {
-            shoot(c, cpuShotAim(0.85));
+            (isHard || rng() < (0.5 + 0.5 * state.difficulty) * (1 - 0.5 * (toGoal / SHOT_RANGE)))) {
+            shoot(c, cpuShotAim(isExtreme ? 0.18 : (isHard ? 0.32 : 0.85)), pwr);
             return;
         }
 
         const target = cpuChoosePass(rng);
         if (!target) return;
-        passTo(c, target);
+        passTo(c, target, BALL_SPEED, { air: isHard && target._preferAir === true, pace: isExtreme ? 1.0 : (isHard ? 0.9 : 0.65) });
     }
 
     /* ==========================================================================
@@ -3352,9 +3342,12 @@ import {
                    which keeps his read the one that decides his own keeper. */
                 const gx = PLAY.goal.x;
                 const trueSide = target.x === gx ? 1 : Math.sign(target.x - gx);
-                const diveChance = 0.2 + 0.35 * state.difficulty;
+                const isHard = state.difficulty >= 1.0;
+                const isExtreme = state.difficulty >= 1.5;
+                const diveChance = clamp(0.2 + 0.35 * state.difficulty + (isExtreme ? 0.38 : (isHard ? 0.18 : 0)), 0, 0.96);
                 const readSide = Math.random() < diveChance ? trueSide : -trueSide;
-                applyAutoDive(k, { x: gx + readSide * KEEPER_STEP, y: k.y });
+                const diveStep = isExtreme ? KEEPER_STEP * 1.3 : (isHard ? KEEPER_STEP * 1.15 : KEEPER_STEP);
+                applyAutoDive(k, { x: gx + readSide * diveStep, y: k.y });
             }
         }
         Sfx.kick(); shake(.12);
@@ -3398,9 +3391,15 @@ import {
         const gx = PLAY.goal.x;
         const k = keeperOf('you');
         const away = (k && k.x > gx) ? -1 : 1;
-        const mid = clamp(gx + away * GOAL_HALF_WIDTH * 0.42, 2, 98);
+        const isHard = state.difficulty >= 1.0;
+        const isExtreme = state.difficulty >= 1.5;
+        const cornerBias = isExtreme ? 0.78 : (isHard ? 0.65 : 0.42);
+        const mid = clamp(gx + away * GOAL_HALF_WIDTH * cornerBias, 2, 98);
+        const effSpread = spread !== undefined
+            ? spread * (isExtreme ? 0.28 : (isHard ? 0.5 : 1))
+            : (isExtreme ? 0.18 : (isHard ? 0.32 : 0.55));
         return {
-            x: clamp(mid + (Math.random() - 0.5) * 2 * GOAL_HALF_WIDTH * spread, 0, 100),
+            x: clamp(mid + (Math.random() - 0.5) * 2 * GOAL_HALF_WIDTH * effSpread, 0, 100),
             y: PLAY.goal.y
         };
     }
@@ -3558,9 +3557,11 @@ import {
         SO.t = 0;
         const k = soDefKeeper();
         if (soDefTeam() === 'cpu') {
-            /* the CPU's keeper reads the kick with probability = difficulty,
-               and carries a committed dive to the wrong side when it does not */
-            const read = Math.random() < 0.22 + 0.78 * state.difficulty;
+            /* the CPU's keeper reads the kick with probability scaled by difficulty */
+            const isHard = state.difficulty >= 1.0;
+            const isExtreme = state.difficulty >= 1.5;
+            const readChance = clamp(0.22 + 0.45 * state.difficulty + (isExtreme ? 0.34 : (isHard ? 0.16 : 0)), 0, 0.97);
+            const read = Math.random() < readChance;
             const side = Math.random() < 0.5 ? -1 : 1;
             const target = read
                 ? { x: SO.aim.x, y: k.y }
@@ -3667,12 +3668,16 @@ import {
         if (SO.phase === 'aim' && SO.t <= 0) {
             if (SO.turn === 'cpu') {
                 const rng = mulberry32(hashSeed(state.seed, 7, SO.takenYou + SO.takenCpu));
-                const spread = GOAL_HALF_WIDTH * (0.55 + 0.5 * state.difficulty);
+                const isExtreme = state.difficulty >= 1.5;
+                const isHard = state.difficulty >= 1.0;
+                const spread = GOAL_HALF_WIDTH * (isExtreme ? 0.88 : (isHard ? 0.78 : (0.55 + 0.5 * state.difficulty)));
                 /* miss the target occasionally, more often on the lower settings */
-                const wild = rng() < 0.18 * (1 - state.difficulty);
+                const wild = rng() < 0.18 * Math.max(0, 1 - state.difficulty);
                 const aim = wild
                     ? clamp(soGoal().x + (rng() < .5 ? -1 : 1) * (GOAL_HALF_WIDTH + randRange(rng, 1, 9)), 2, 98)
-                    : clamp(soGoal().x + randRange(rng, -spread, spread), 2, 98);
+                    : (isExtreme
+                        ? clamp(soGoal().x + (rng() < .5 ? -1 : 1) * randRange(rng, spread * 0.85, spread), 2, 98)
+                        : clamp(soGoal().x + randRange(rng, -spread, spread), 2, 98));
                 soSetAim({ x: aim, y: soGoal().y });
                 soCommitAim();
             } else {
@@ -4311,107 +4316,138 @@ import {
             cpuAssignDuties();
             const c = PLAY.carrier;
             const mates = teamOutfield('cpu').filter(m => m !== c);
-            /* §12.c — settle WHERE everybody is going FIRST, then aim the ball at
-               that spot. The pass is struck from the ball and the receiver breaks
-               at the same instant, so a ball aimed at his boots is aimed at a
-               place he is leaving: it lands at his marker's feet and the only
-               thing waiting at the end of it is a defender running the other way.
-               Leading the receiver here is not a nicety, it is the difference
-               between a pass and a turnover. */
             const spots = new Map();
-            mates.forEach((m, i) => spots.set(m, attackingSpot(c, PLAY.goal, i)));
 
-            /* §12.i — THE AI MUST TAKE THE SHOT THAT IS ON.
+            const isHard = state.difficulty >= 1.0;
+            const isExtreme = state.difficulty >= 1.5;
 
-               Two things stood between a good shooting spot and a shot, and the
-               report named the symptom exactly.
+            if (isHard) {
+                // Coordinated Attacking System for Hard & Extreme:
+                // Assign dynamic tactical forward runs: striker box penetration, wing width, playmaker pockets
+                const goalY = PLAY.goal.y;
+                const carrierY = c.y;
+                const sortedByX = mates.slice().sort((a, b) => a.x - b.x);
+                const leftWinger = sortedByX[0];
+                const rightWinger = sortedByX[sortedByX.length - 1];
+                const central = sortedByX.slice(1, -1).sort((a, b) => dist(a, PLAY.goal) - dist(b, PLAY.goal));
+                const striker = central[0] || mates[0];
+                const amf = central[1] || mates[1];
+                const channelRunner = central[2] || mates[2];
+                const anchor = central[3] || mates[3];
 
-                 1. THE AIM. Every shot was aimed at the middle of the goal — the
-                    centre of the mouth, which is where the keeper already is
-                    (keeperHome() parks him on x = 50, half a unit from dead
-                    centre). The one shot the CPU did take was therefore the one
-                    shot no keeper has ever had to move for, and it was saved
-                    almost every time it was struck. It now aims into the half of
-                    the mouth the keeper is NOT standing in, read live at this
-                    instant (cpuShotAim) — the same half §0.d makes him gamble on,
-                    so the shot stops handing the guess back to him.
-                 2. THE DICE. The shot was one instantaneous reading of the
-                    distance against a flat `0.25 + 0.5 × difficulty`, so a man
-                    camped on the edge of the box for ten seconds almost never
-                    fired while a man who clipped the edge for one frame fired on
-                    that frame's roll. The dice are weighted by how good the spot
-                    actually is now: the front half of the range shoots more
-                    often than it passes.
+                const fwdT = isExtreme ? 0.86 : 0.74;
 
-               The range test is read live here, at the moment the plan is made,
-               and read AGAIN in beginExecution() when the ball is actually
-               struck, so the shot cannot be planned and then lost — and the
-               carrier is pinned in place below, so the shape never walks him out
-               of the range over the window either. */
+                if (striker) {
+                    spots.set(striker, {
+                        x: clamp(PLAY.goal.x + (rng() - 0.5) * (isExtreme ? 16 : 24), 22, 78),
+                        y: clamp(lerp(carrierY, goalY, fwdT), 8, 92)
+                    });
+                }
+                if (leftWinger) {
+                    spots.set(leftWinger, {
+                        x: clamp(Math.min(c.x - 24, 14 + rng() * 8), 8, 30),
+                        y: clamp(lerp(carrierY, goalY, isExtreme ? 0.78 : 0.66), 10, 90)
+                    });
+                }
+                if (rightWinger) {
+                    spots.set(rightWinger, {
+                        x: clamp(Math.max(c.x + 24, 86 - rng() * 8), 70, 92),
+                        y: clamp(lerp(carrierY, goalY, isExtreme ? 0.78 : 0.66), 10, 90)
+                    });
+                }
+                if (amf) {
+                    spots.set(amf, {
+                        x: clamp(50 + (rng() - 0.5) * 20, 26, 74),
+                        y: clamp(lerp(carrierY, goalY, isExtreme ? 0.56 : 0.46), 12, 88)
+                    });
+                }
+                if (channelRunner) {
+                    spots.set(channelRunner, {
+                        x: clamp(c.x + (rng() < 0.5 ? -18 : 18), 15, 85),
+                        y: clamp(lerp(carrierY, goalY, isExtreme ? 0.68 : 0.56), 10, 90)
+                    });
+                }
+                if (anchor) {
+                    spots.set(anchor, {
+                        x: clamp(lerp(c.x, 50, 0.4) + (rng() - 0.5) * 16, 18, 82),
+                        y: clamp(lerp(carrierY, ownGoal('cpu').y, 0.32), 8, 92)
+                    });
+                }
+                mates.forEach((m, i) => {
+                    if (!spots.has(m)) spots.set(m, attackingSpot(c, PLAY.goal, i));
+                });
+            } else {
+                mates.forEach((m, i) => spots.set(m, attackingSpot(c, PLAY.goal, i)));
+            }
+
             const inRange = dist(c, PLAY.goal) <= SHOT_RANGE;
             const quality = inRange ? 1 - 0.5 * (dist(c, PLAY.goal) / SHOT_RANGE) : 0;
-            if (inRange && rng() < (0.55 + 0.45 * state.difficulty) * quality) {
-                PLAN.shot.cpu = cpuShotAim(0.55);
+            const shotPwr = isExtreme ? 1.0 : (isHard ? 0.92 : 0.7);
+            const aimSpread = isExtreme ? 0.18 : (isHard ? 0.32 : 0.55);
+
+            const shootProb = isExtreme ? 0.98 : (isHard ? 0.85 : (0.55 + 0.45 * state.difficulty) * quality);
+            if (inRange && (isHard || rng() < shootProb)) {
+                PLAN.shot.cpu = { ...cpuShotAim(aimSpread), power: shotPwr };
             } else {
-                /* §12.c — the ball is aimed at where the chosen receiver WILL BE,
-                   never at the receiver himself. Handing the plan the live player
-                   object is what let the ball follow him; and because the carrier
-                   was then also given that same object as a run, it is what made
-                   the CPU look like it was dribbling the length of the pitch
-                   single-handed. */
                 const target = cpuChoosePass(rng, spots);
                 if (target) {
-                    /* §12.i — and if the LINE TO GOAL IS CLEAR, the shot wins over
-                       the pass. This is read with the very race the CPU scores its
-                       own passes with, against the defenders between it and the
-                       goal; the defending keeper is deliberately left out of it,
-                       because a shot is not a pass to his feet — his save is
-                       settled by the read in shoot(), the moment the ball is
-                       struck, and guessing at it from here would only be a worse
-                       copy of the same answer. */
                     const lane = resolvePassRace({
                         from: { x: c.x, y: c.y },
-                        to: cpuShotAim(0.55),
+                        to: cpuShotAim(aimSpread),
                         defenders: defenderInputs('you'),
                         radius: TOUCH_R
                     });
-                    if (lane.outcome === 'COMPLETE') {
-                        PLAN.shot.cpu = cpuShotAim(0.55);
+                    if (inRange && lane.outcome === 'COMPLETE') {
+                        PLAN.shot.cpu = { ...cpuShotAim(aimSpread), power: shotPwr };
                     } else {
                         const s = leadSpot(c, target, spots.get(target));
-                        PLAN.pass.cpu = { x: s.x, y: s.y };
+                        const race = resolvePassRace({
+                            from: { x: c.x, y: c.y },
+                            to: s,
+                            defenders: defenderInputs('you'),
+                            radius: TOUCH_R
+                        });
+                        const useAir = isHard && (target._preferAir || race.outcome !== 'COMPLETE');
+                        const passPwr = isExtreme ? 1.0 : (isHard ? 0.9 : 0.65);
+                        PLAN.pass.cpu = {
+                            x: s.x,
+                            y: s.y,
+                            air: useAir,
+                            power: passPwr
+                        };
                     }
                 } else {
-                    /* nobody to pass to at all: a shot is the only forward option */
-                    PLAN.shot.cpu = cpuShotAim(0.55);
+                    PLAN.shot.cpu = { ...cpuShotAim(aimSpread), power: shotPwr };
                 }
             }
             mates.forEach(m => setIntent(m, spots.get(m)));
-            /* the carrier is told to stand exactly where he is: he holds the
-               ball, he does not carry it upfield on his own */
             setIntent(c, { x: c.x, y: c.y });
             return;
         }
 
-        /* --- the CPU is defending: hold the half in front of its own goal and
-               press the carrier. Both keepers are deliberately left alone: shoot()
-               reads the real flight at execution time, which is a better keeper
-               than any guess made from here would be. --- */
+        /* --- the CPU is defending: hold the half in front of its own goal and press --- */
         cpuDefendDuties();
-        /* §12.e — `mine` is read BEFORE anything is written now. It is the CPU's
-           own goal, and it is the only steering this planner gets. */
         const mine = ownGoal('cpu');
+        const isHard = state.difficulty >= 1.0;
+        const isExtreme = state.difficulty >= 1.5;
+        const markTight = isExtreme ? 0.04 : (isHard ? 0.08 : 0.12);
+
         teamOutfield('cpu').forEach((p, i) => {
             if (p.duty === 'interceptor') {
-                /* the same blindfold as holdShape(): press the carrier himself */
                 const s = interceptTarget(p, PLAY.carrier, pressPoint(PLAY.carrier, mine));
                 setIntent(p, { x: s.x, y: ownHalf('cpu', s.y) });
             } else if (p.duty === 'marker') {
                 const c = PLAY.carrier;
                 setIntent(p, {
-                    x: clamp(c.x - (mine.x - c.x) * 0.12, 6, 94),
-                    y: ownHalf('cpu', clamp(lerp(c.y, mine.y, 0.12), 6, 94))
+                    x: clamp(c.x - (mine.x - c.x) * markTight, 6, 94),
+                    y: ownHalf('cpu', clamp(lerp(c.y, mine.y, markTight), 6, 94))
                 });
+            } else if (isHard && i === 2) {
+                // Dual press / cutoff on Hard & Extreme
+                const c = PLAY.carrier;
+                const cutX = clamp(c.x + (mine.x > 50 ? -14 : 14), 10, 90);
+                const cutY = ownHalf('cpu', clamp(lerp(c.y, mine.y, isExtreme ? 0.18 : 0.25), 6, 94));
+                setIntent(p, { x: cutX, y: cutY });
             } else {
                 const s = defendingSpot(PLAY.carrier, mine, i);
                 setIntent(p, { x: s.x, y: ownHalf('cpu', s.y) });
@@ -5085,7 +5121,7 @@ import {
             beginMatch, kickoff, goalKick, beginShootout, soSetupKick,
             passTo, shoot, pauseGame, resumeGame, toggleMute,
             humanDone, openPlan, beginExecution, queuePass, queueShot,
-            setDifficulty: d => { state.difficulty = clamp(d, 0, 1); },
+            setDifficulty: d => { state.difficulty = clamp(d, 0, 2); },
             setPlanWindow, setHalfLength,
             get planWindow() { return planWindow; },
             /** Pin the clock, for testing full time without playing the half out. */
