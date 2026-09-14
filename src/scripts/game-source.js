@@ -754,8 +754,8 @@ import {
            the part outside the penalty area is drawn */
         const SPOT = GL - 11, a = Math.acos(5.5 / 9.15);
         spot(0, SPOT); spot(0, -SPOT);
-        circle(0, SPOT, 9.15, a - Math.PI / 2, Math.PI * 1.5 - a);
-        circle(0, -SPOT, 9.15, a - Math.PI * 1.5, Math.PI / 2 - a);
+        circle(0, SPOT, 9.15, Math.PI / 2 - a, Math.PI / 2 + a);
+        circle(0, -SPOT, 9.15, Math.PI * 1.5 - a, Math.PI * 1.5 + a);
 
         /* corner arcs — canvas angles run clockwise from +x, and canvas +y is
            toward halfway, so each quarter opens inward */
