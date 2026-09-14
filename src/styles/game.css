@@ -339,10 +339,8 @@ body {
     height: 22px;
     padding: 0 10px;
     border-radius: var(--r-pill-category);
-    background: var(--glass-xthin);
-    border: 1px solid var(--glass-line-soft);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background: none;
+    border: none;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
     font-family: var(--f-mono);
     font-size: 10px;
@@ -375,10 +373,8 @@ body {
     height: 22px;
     padding: 0 10px 0 8px;
     border-radius: var(--r-pill-category);
-    background: var(--glass-xthin);
-    border: 1px solid var(--glass-line-soft);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background: none;
+    border: none;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
     font-family: var(--f-mono);
     font-size: 10px;
