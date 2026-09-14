@@ -497,7 +497,8 @@ import {
         tutor: 0,
         tutorTargets: null,
         tutorClock: 0,
-        tutorDone: false
+        tutorDone: false,
+        firstHalfStoppage: 0
     };
 
     /* Tiny event bus so the HUD is event-driven, not polled. */
@@ -1956,7 +1957,7 @@ import {
            whole element, so there is no inner <strong> to reach for. */
         scoreYou: el('score-you'),
         scoreCpu: el('score-cpu'),
-        halfLabel: el('half-label'), clock: el('clock'), clockBar: el('clock-bar'),
+        halfLabel: el('half-label'), clock: el('clock'), clockBar: el('clock-bar'), clockExtra: el('clock-extra'),
         instruction: el('instruction'),
         mute: el('btn-mute'), pause: el('btn-pause'), help: el('btn-help'),
         shoot: el('btn-shoot'),
@@ -2070,7 +2071,7 @@ import {
     /* --- screen stack (game-ui-ux: push/pop, focus handed to the top screen) --- */
     const SCREENS = {
         menu: el('screen-menu'), tutorial: el('screen-tutorial'),
-        pause: el('screen-pause'), over: el('screen-over')
+        pause: el('screen-pause'), over: el('screen-over'), halftime: el('screen-halftime')
     };
     const stack = [];
     let focusMemory = [];
@@ -2337,6 +2338,13 @@ import {
         /* a fresh match always opens with the coached kick-off */
         state.tutor = 0; state.tutorTargets = null; state.tutorClock = 0;
         state.tutorDone = false;
+        /* §3 — weighted random stoppage time for the first half:
+           +1s 40%, +2s 30%, +3s 18%, +4s 8%, +5s 4% */
+        state.firstHalfStoppage = weightedPick(
+            [1, 2, 3, 4, 5],
+            [40, 30, 18, 8, 4],
+            Math.random
+        );
         endShootout(true);
         bus.emit('score'); bus.emit('half');
         Sfx.unlock(); Sfx.whistle();
@@ -2350,17 +2358,19 @@ import {
     function endHalf() {
         state.pendingHalf = false;
         if (state.half === 1) {
-            state.half = 2;
-            state.halfT = 0;
-            /* Half time pushes no screen, so the screen handler's force-close
-               never fires — close the sheet here or it would sit over the
-               second half's kick-off. */
+            /* Half time pushes the halftime screen — the match pauses until
+               the player clicks CONTINUE TO SECOND HALF. */
             if (sheetOpen) setMenuOpen(false);
             bus.emit('half');
             Sfx.whistle();
-            banner('HALF TIME', CSS.warn);
             log('Half time. ' + state.humanScore + '–' + state.cpuScore + '.', '');
-            kickoff(other(state.possession));
+            /* populate the halftime card */
+            setText(el('half-score-you'), String(state.humanScore));
+            setText(el('half-score-cpu'), String(state.cpuScore));
+            /* hide the stoppage badge now that the half is over */
+            const extraEl = el('clock-extra');
+            if (extraEl) extraEl.hidden = true;
+            pushScreen('halftime', { focus: '#btn-half-continue' });
         } else {
             finishMatch();
         }
@@ -2721,6 +2731,29 @@ import {
             return;
         }
 
+        /* §26 — PASS INTO GOAL: a pass whose target is at the goal line and
+           between the posts is awarded as a goal, exactly like a shot. The
+           woodwork is checked first so a pass that clips the post rebounds
+           instead of being given. */
+        if (ball.mode === 'pass') {
+            const passGoal = goalFor(state.possession);
+            const post = postStruck(passGoal);
+            if (post) {
+                ball.x = post.x; ball.y = post.y;
+                reboundBall(post.nx, post.ny, BOUNCE_POST);
+                spillLoose();
+                Sfx.post(); shake(.34);
+                banner('POST', CSS.warn);
+                log('Pass struck the post — ball is live.', '');
+                return;
+            }
+            const atLine = Math.abs(ball.target.y - passGoal.y) <= 1.5;
+            if (atLine && isOnTarget(ball.target.x, passGoal.x, GOAL_HALF_WIDTH)) {
+                ball.alive = false;
+                return scoreGoal(state.possession);
+            }
+        }
+
         ball.alive = false;
         /* §17.b — a pass is only *completed* if a team-mate is actually ON the
            ball when it arrives.
@@ -2856,7 +2889,7 @@ import {
             const goal = PLAY ? PLAY.goal : (state.possession === 'you' ? GOAL.cpu : GOAL.you);
             const inMouth = Math.abs(ball.x - goal.x) <= GOAL_HALF_WIDTH + POST_R;
             const atGoalLine = (ball.y <= 0 && ball.dir && ball.dir.y < 0) || (ball.y >= 100 && ball.dir && ball.dir.y > 0);
-            const isGoalMouthEntry = ball.mode === 'shot' && inMouth && atGoalLine;
+            const isGoalMouthEntry = (ball.mode === 'shot' || ball.mode === 'pass') && inMouth && atGoalLine;
 
             if (!isGoalMouthEntry && (ball.x <= 0 || ball.x >= 100 || ball.y <= 0 || ball.y >= 100)) {
                 bounceOffBoards();
@@ -3192,7 +3225,7 @@ import {
             const to = s ? leadSpot(from, m, s) : { x: m.x, y: m.y };
             const race = resolvePassRace({ from, to, defenders, radius: TOUCH_R });
             const groundSafe = race.outcome === 'COMPLETE' ? 1.0 : 0.15;
-            
+
             // Hard and Extreme AI evaluates aerial / chipped balls over defender blocks
             let safe = groundSafe;
             if (isHard && groundSafe < 0.7 && dist(to, PLAY.goal) < dist(from, PLAY.goal) + 10) {
@@ -4688,8 +4721,12 @@ import {
                     if (ball.mode === 'held' || ball.mode === 'loose') endHalf();
                 } else {
                     state.halfT += dt;
-                    if (state.halfT >= halfLength) {
-                        state.halfT = halfLength;
+                    /* First half uses regulation + stoppage; second half is just regulation */
+                    const limit = state.half === 1
+                        ? halfLength + state.firstHalfStoppage
+                        : halfLength;
+                    if (state.halfT >= limit) {
+                        state.halfT = limit;
                         state.pendingHalf = true;
                     }
                 }
@@ -4825,6 +4862,15 @@ import {
         refreshShootButton();
         refreshPlanHud();
         if (SO.active) return;
+        if (ui.clockExtra) {
+            if (state.half === 1 && state.halfT > halfLength) {
+                const extra = Math.ceil(state.halfT - halfLength);
+                setText(ui.clockExtra, '+' + extra);
+                ui.clockExtra.style.display = 'block';
+            } else {
+                ui.clockExtra.style.display = 'none';
+            }
+        }
         const left = Math.max(0, halfLength - state.halfT);
         const secs = Math.ceil(left - 1e-6);
         if (secs !== lastClock) {
@@ -5042,6 +5088,16 @@ import {
     el('btn-quit').addEventListener('click', () => { state.paused = false; while (topScreen()) popScreen(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' }); });
     el('btn-again').addEventListener('click', () => { popScreen(); beginMatch(); });
     el('btn-menu').addEventListener('click', () => { while (topScreen()) popScreen(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' }); });
+    /* Halftime continue button — pops the halftime screen and starts the second half */
+    const halfContinueBtn = el('btn-half-continue');
+    if (halfContinueBtn) halfContinueBtn.addEventListener('click', () => {
+        popScreen();
+        state.half = 2; state.halfT = 0; state.pendingHalf = false;
+        bus.emit('half');
+        Sfx.whistle();
+        kickoff('cpu');
+        log('Second half — CPU kicks off.', '');
+    });
     const pensBtn = el('btn-pens');
     if (pensBtn) pensBtn.addEventListener('click', () => beginShootout());
     const verifyBtn = el('btn-verify');

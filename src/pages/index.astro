@@ -87,7 +87,10 @@ import '../styles/global.css';
                         <span class="clock-half" id="half-label">HALF 1</span>
                         <!-- role=timer implies aria-live=off: the countdown ticks every
                              second and must not be announced each tick. -->
-                        <span id="clock" role="timer" class="clock-num">2:00</span>
+                        <div class="clock-row">
+                            <span id="clock" role="timer" class="clock-num">2:00</span>
+                            <span id="clock-extra" class="clock-extra" hidden>+1s</span>
+                        </div>
                         <span class="clock-line"><span id="clock-bar"></span></span>
                     </div>
 
@@ -366,6 +369,23 @@ import '../styles/global.css';
                 <button type="button" class="btn btn-primary" id="btn-resume">RESUME</button>
                 <button type="button" class="btn btn-secondary" id="btn-restart">RESTART MATCH</button>
                 <button type="button" class="btn btn-ghost-sm" id="btn-quit">QUIT TO MENU</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="screen" id="screen-halftime" hidden>
+        <div class="card card-halftime" role="dialog" aria-modal="true" aria-labelledby="half-title">
+            <div class="eyebrow">Interval</div>
+            <h2 id="half-title">Halftime</h2>
+            <div class="halftime-score-banner" aria-label="Current score">
+                <span class="sc sc-you" id="half-score-you">0</span>
+                <span class="sc-dash" aria-hidden="true">–</span>
+                <span class="sc sc-cpu" id="half-score-cpu">0</span>
+            </div>
+            <p id="half-detail">First half concluded. Ready for the second half?</p>
+
+            <div class="actions">
+                <button type="button" class="btn btn-primary btn-xl" id="btn-half-continue">CONTINUE TO SECOND HALF</button>
             </div>
         </div>
     </div>

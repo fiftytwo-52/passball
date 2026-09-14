@@ -1,0 +1,30 @@
+**Audio Implementation**
+
+* Add the background audio file to the main menu.
+* Add the background audio file to the paused game menu.
+
+**Difficulty Scaling & AI Behavior**
+
+* Restrict game level difficulty adjustments exclusively to opponent computer-controlled players, ensuring human players experience standard gameplay mechanics.
+* Revamp opponent computer AI behavior to dynamically scale with difficulty (e.g., implementing structured long passing, tactical planning, and coordinated movement at extreme difficulty instead of relying solely on powerful shots).
+
+**Player Physics & Balancing**
+
+* Equalize running speeds so that all human and computer players move at the exact same base speed.
+
+**Teammate AI & Uncontrolled Player Logic**
+
+* Nerf the autonomous behavior of user-controlled players when left unguided so they play noticeably worse and less intelligently than they currently do.
+
+**Goalkeeper Mechanics**
+
+* Program the user-side goalkeeper to execute dive catches when the ball comes close, specifically targeting long shots.
+* Balance goalkeeper catch success based on distance and speed: allow successful catches for close-range balls, but ensure fast, distant shots bypass the dive and beat the keeper.
+
+**Match Rules & Goal Detection**
+
+* Implement a strict goal-line rule where any instance of the ball fully crossing the line—whether via a shot, a pass, or any other method—is instantly awarded as a goal.
+
+**Main Menu UI & Design**
+
+* Redesign the main menu with a modern gaming aesthetic featuring stylized gaming-grade buttons, glowing accents, and an immersive dark-mode layout.
