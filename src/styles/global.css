@@ -35,12 +35,20 @@ body {
 }
 
 /* ============================================================================
-   LAYOUT — the top HUD is now two corner groups (score left, clock right) that
-   never need to scroll or wrap: each corner is a fixed-width column of short
-   read-outs, so on a phone they simply sit closer together. The old
-   `#hud-top .dock` / `.cluster` stack-and-scroll rules went with the dock they
-   described. The bottom bar's only responsive move left is spacing, and
-   `game.css` already owns that in its own media queries.
+   LAYOUT — the top HUD is ONE capsule: scoreline, situation, clock and the menu
+   button share a single turf-lined pill, the same chrome the START SCREEN's nav
+   capsule wears. It is not two corner groups any more, and nothing here needs to
+   scroll.
+
+   Its responsive move is a single wrap: the scoreline, the clock and the menu
+   stay on the first row and the situation field drops to a second line with a
+   hairline above it. `game.css` owns when that happens (`flex-wrap` plus the
+   `max-width: 460px` rule that pins `#role-strip` to its own row) and it also
+   owns the `--hud-bar-h` clearance that keeps the menu sheet and the shootout
+   strip from landing on top of the capsule. The old `#hud-top .dock` /
+   `.cluster` stack-and-scroll rules went with the dock they described. The
+   bottom bar's only responsive move left is spacing, and `game.css` already owns
+   that in its own media queries.
    ========================================================================= */
 
 /* The app is a full-viewport surface, so nothing about it should rubber-band.
@@ -61,12 +69,24 @@ body {
 }
 
 /* ============================================================================
-   SCREENS — the menu is a landing surface, so its card is allowed a little
-   more room than the utility screens.
+   SCREENS — the menu is a landing surface, not a utility dialog: it fills the
+   viewport with turf and lays its own three zones out with flex (see the START
+   SCREEN block in game.css). The old `#screen-menu .card` width override went
+   with the centred card; all that is left to say at this layer is how wide the
+   frame is allowed to breathe.
+
+   This MUST stay inside the wide query. Unqualified it is the last-loaded
+   `(1,1,0)` rule on the element and would silently beat `game.css`'s
+   `.menu-frame { max-width: 560px }` at EVERY width — including a phone, where
+   a 1120px frame stretches the capsules across the pitch. Wide is the only case
+   that needs the relaxation: at >=860px the three zones flatten into rows and
+   the frame becomes the page's full measure.
    ========================================================================= */
 
-#screen-menu .card {
-    width: min(600px, 100%);
+@media (min-width: 860px) {
+    #screen-menu .menu-frame {
+        max-width: 1120px;
+    }
 }
 
 /* ============================================================================

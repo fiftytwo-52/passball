@@ -28,8 +28,12 @@ import '../styles/global.css';
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Anton is the start screen's display face and Rajdhani its body face —
+         the match-day-programme voice the landing surface speaks in. The rest of
+         the app stays on Geist, so these two load alongside it rather than
+         replacing it. -->
     <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+        href="https://fonts.googleapis.com/css2?family=Anton&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Rajdhani:wght@500;600;700&display=swap">
 </head>
 
 <body>
@@ -67,11 +71,30 @@ import '../styles/global.css';
             <canvas id="scene" aria-label="Football pitch, top-down view with 3D players"></canvas>
 
             <!-- ============================== HUD (TOP) ==============================
-                 Two corners, plus the role strip pinned to the top centre. Nothing
-                 here is ever polled per frame: the score is written on the `score`
-                 event, the clock only when the displayed second changes. -->
+                 One capsule, borrowed whole from the START SCREEN's nav: the
+                 scoreline, the role + possession pair, the half clock and the
+                 menu all sit inside the same turf-lined pill, so the top band
+                 reads as ONE object instead of three flotillas sharing a row.
+
+                 The capsule is the only child of #hud-top, because the two halves
+                 of the anchoring are split between them: the header owns the safe
+                 area and the gutter, the capsule owns the chrome. That is what
+                 makes the capsule line up exactly with the two things that drop
+                 below it — the shootout strip and the menu sheet, both offset
+                 from the stage by `--hud-bar-h`.
+
+                 Nothing here is ever polled per frame: the score is written on
+                 the `score` event, the clock only when the displayed second
+                 changes.
+
+                 NOTE: `#role-strip` is engine-bound — `game-source.js` owns its
+                 `.hidden`, and the shootout swap is the only thing that flips it
+                 — so it moved inside the capsule rather than being replaced by
+                 it. And `#clock` must stay EXACTLY two levels above the element
+                 that receives `.low`: the engine writes that class to
+                 `#clock.parentElement.parentElement`, which here is `.clock-wrap`. -->
             <header id="hud-top" hidden>
-                <div class="hud-corner hud-tl">
+                <div class="hud-capsule">
                     <!-- NOTE: the engine assigns `.textContent` on #score-you and
                          #score-cpu outright, so neither may wrap a <strong>. The
                          team colour is carried by the span itself instead. -->
@@ -80,9 +103,27 @@ import '../styles/global.css';
                         <span class="sc-dash" aria-hidden="true">–</span>
                         <span class="sc sc-cpu" id="score-cpu">0</span>
                     </div>
-                </div>
 
-                <div class="hud-corner hud-tr">
+                    <!-- Which end you are playing toward, and whose ball it is —
+                         the two facts that decide the next prompt. It sits
+                         between the scoreline and the clock so the eye reads
+                         score · situation · time straight across the capsule.
+
+                         NOTE: the engine assigns #role-badge.className and
+                         #possession-chip.className outright, so neither carries
+                         any other class — `.attack`/`.defend` and
+                         `.chip you`/`.chip cpu` are the only states they can be
+                         in. -->
+                    <div id="role-strip" hidden>
+                        <div class="status-row">
+                            <span id="role-badge" class="attack">ATTACK</span>
+                            <span id="possession-chip" class="chip you"><i class="dot"></i>YOU</span>
+                        </div>
+                    </div>
+
+                    <!-- The half, the clock, and the hairline that drains as the
+                         half runs out — three lines inside one field, because the
+                         capsule has the height for it. -->
                     <div class="clock-wrap" id="clock-wrap">
                         <span class="clock-half" id="half-label">HALF 1</span>
                         <!-- role=timer implies aria-live=off: the countdown ticks every
@@ -101,25 +142,6 @@ import '../styles/global.css';
                         aria-controls="menu-sheet" title="Menu" aria-label="Open menu">☰</button>
                 </div>
             </header>
-
-            <!-- ========================= HUD (ROLE STRIP) =========================
-                 Which end you are playing toward, and whose ball it is. Those two
-                 facts are what decide the next prompt, so the pair hangs on the
-                 band behind the far goal — the mirror of the guide line, which
-                 reads from the strip behind the near goal. It is positioned
-                 against #stage rather than parked in a corner, so it stays on
-                 that band at every viewport.
-
-                 NOTE: the engine assigns #role-badge.className and
-                 #possession-chip.className outright, so neither carries any
-                 other class — `.attack`/`.defend` and `.chip you`/`.chip cpu`
-                 are the only states they can be in. -->
-            <div id="role-strip" hidden>
-                <div class="status-row">
-                    <span id="role-badge" class="attack">ATTACK</span>
-                    <span id="possession-chip" class="chip you"><i class="dot"></i>YOU</span>
-                </div>
-            </div>
 
             <!-- ===================== HUD (SHOOTOUT STRIP) =====================
                  §8/§10 — while a shootout is live the HUD swaps into this view:
@@ -243,81 +265,188 @@ import '../styles/global.css';
         </section>
     </div>
 
-    <!-- ============================== START SCREEN ============================== -->
-    <div class="screen" id="screen-menu">
-        <div class="card card-start" role="dialog" aria-modal="true" aria-labelledby="menu-title">
-            <div class="mesh mesh-wash" aria-hidden="true"></div>
+    <!-- ============================== START SCREEN ==============================
+         The landing surface is the pitch itself, dressed as a match-day
+         programme in the app's own kit: a nav capsule (brand, the two tags the
+         match is played under, and the utility row), a hero carrying the side's
+         2:3:1 shape, and a control capsule that ends in the kick-off CTA. Those
+         are three flex zones inside one frame — never absolute pixels — so at a
+         wide width the same components flatten into rows (game-ui-ux: anchors +
+         containers).
 
-            <div class="start-mark" aria-hidden="true">
-                <svg viewBox="0 0 64 64" focusable="false">
-                    <circle cx="32" cy="32" r="29" fill="none" stroke="currentColor" stroke-width="2" />
-                    <circle cx="32" cy="32" r="9" fill="currentColor" />
-                    <path d="M32 3v13M32 48v13M3 32h13M48 32h13" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" />
-                </svg>
+         The engine binds every id below; read the DOM contract note at the top
+         of `game.css` before renaming anything:
+           #btn-start    → beginMatch()            (focused on every menu entry)
+           #btn-penalty  → beginShootout()
+           #btn-tutorial → pushScreen('tutorial')
+           #btn-verify   → the rulebook self-test, mirrored into #verify-out
+           #difficulty-start / #plan-window-start / #half-length-start /
+           #sound-start  → the four `.segmented` groups the engine syncs.
+         #menu-title is the dialog's accessible name.
+
+         The quick strip is those same four groups drawn as one scrollable row of
+         chips instead of four labelled rows: the engine still owns every pill and
+         every aria-pressed, so there is no second copy of a setting to drift. -->
+    <div class="screen" id="screen-menu">
+        <!-- Weathering: a vignette to settle the turf at its edges, and fine grain so
+             the large flat fills do not band on a wide-gamut panel. Both are
+             decorative, so neither may take a pointer event. -->
+        <div class="vignette" aria-hidden="true"></div>
+        <div class="grain" aria-hidden="true"></div>
+
+        <div class="menu-frame" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+            <div class="navbar">
+                <div class="top-capsule">
+                    <div class="brand-row">
+                        <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="1.8" aria-hidden="true" focusable="false">
+                            <circle cx="12" cy="12" r="9" />
+                            <path d="M12 6l3.5 2.6-1.3 4h-4.4l-1.3-4z" />
+                        </svg>
+                        <span class="brand-name">Passball</span>
+                    </div>
+
+                    <div class="caps-row primary">
+                        <span class="cap tag">Guess & Pass</span>
+                        <span class="cap">6-a-side</span>
+                    </div>
+
+                    <!-- The utility row. Tutorial and the rulebook self-test open a
+                         real in-app surface; the three pills that *describe* the
+                         project have no screen to open, so they hand the player to
+                         the browser rather than pretending to be one. -->
+                    <div class="caps-row utility">
+                        <button type="button" class="btn cap" id="btn-tutorial">Tutorial</button>
+                        <a class="cap" href="https://passball.pages.dev/">About us</a>
+                        <a class="cap" href="mailto:ganeshkhatiwada071@gmail.com">Contact</a>
+                        <a class="cap" href="https://passball.pages.dev/">Privacy policy</a>
+                        <button type="button" class="btn cap" id="btn-verify">Rulebook tests</button>
+                    </div>
+                </div>
             </div>
 
-            <div class="eyebrow">Versus CPU · 6-a-side</div>
-            <h1 id="menu-title">Guess & Pass</h1>
-            <p class="body-lg">Two halves of continuous football. Every change of possession freezes the board —
-                stack your moves, then watch both sides play them out together.</p>
+            <section class="hero" aria-label="About the match">
+                <div class="vs">Your shape · 2 : 3 : 1</div>
 
-            <!-- The match settings — the SAME set the in-game menu sheet edits,
-                 drawn once here as a titled panel of rows so there is exactly one
-                 home for every option. The engine syncs every pill from the value,
-                 never from the click, so the two surfaces can never drift. -->
-            <section class="start-settings" aria-label="Match settings">
-                <div class="start-settings-head">
-                    <span class="hud-label">Match settings</span>
-                    <span class="start-settings-hint">Applies to your next match</span>
-                </div>
+                <!-- The shape the side actually lines up in: six amber outfielders
+                     in their own half, three sage opponents in theirs. -->
+                <svg class="pitch" viewBox="0 0 160 240" aria-hidden="true" focusable="false">
+                    <rect x="4" y="4" width="152" height="232" rx="8" fill="none" stroke="#3A5C46" stroke-width="2" />
+                    <line x1="4" y1="120" x2="156" y2="120" stroke="#3A5C46" stroke-width="2" />
+                    <circle cx="80" cy="120" r="22" fill="none" stroke="#3A5C46" stroke-width="2" />
+                    <rect x="45" y="4" width="70" height="28" fill="none" stroke="#3A5C46" stroke-width="2" />
+                    <rect x="45" y="208" width="70" height="28" fill="none" stroke="#3A5C46" stroke-width="2" />
+                    <circle cx="80" cy="205" r="6" fill="#F2A63C" />
+                    <circle cx="40" cy="170" r="6" fill="#F2A63C" />
+                    <circle cx="120" cy="170" r="6" fill="#F2A63C" />
+                    <circle cx="28" cy="132" r="6" fill="#F2A63C" />
+                    <circle cx="132" cy="132" r="6" fill="#F2A63C" />
+                    <circle cx="80" cy="142" r="6" fill="#F2A63C" />
+                    <circle cx="80" cy="34" r="6" fill="#8CA394" />
+                    <circle cx="45" cy="66" r="6" fill="#8CA394" />
+                    <circle cx="115" cy="66" r="6" fill="#8CA394" />
+                </svg>
 
-                <div class="start-setting-row">
-                    <span class="hud-label">Difficulty</span>
-                    <div class="segmented segmented-num" id="difficulty-start" role="group" aria-label="Difficulty">
-                        <button type="button" class="btn" data-diff="0.35" aria-pressed="false">LOW</button>
-                        <button type="button" class="btn" data-diff="0.75" aria-pressed="true">MID</button>
-                        <button type="button" class="btn" data-diff="1.25" aria-pressed="false">HARD</button>
-                        <button type="button" class="btn" data-diff="1.85" aria-pressed="false">EXTREME</button>
-                    </div>
-                </div>
-
-                <div class="start-setting-row">
-                    <span class="hud-label">Move timer</span>
-                    <div class="segmented segmented-num" id="plan-window-start" role="group" aria-label="Move timer seconds">
-                        <button type="button" class="btn" data-lock="3" aria-pressed="false">3s</button>
-                        <button type="button" class="btn" data-lock="5" aria-pressed="false">5s</button>
-                        <button type="button" class="btn" data-lock="10" aria-pressed="true">10s</button>
-                        <button type="button" class="btn" data-lock="20" aria-pressed="false">20s</button>
-                    </div>
-                </div>
-
-                <div class="start-setting-row">
-                    <span class="hud-label">Match length</span>
-                    <div class="segmented segmented-num" id="half-length-start" role="group" aria-label="Half length">
-                        <button type="button" class="btn" data-half="60" aria-pressed="false">1:00</button>
-                        <button type="button" class="btn" data-half="120" aria-pressed="true">2:00</button>
-                        <button type="button" class="btn" data-half="180" aria-pressed="false">3:00</button>
-                    </div>
-                </div>
-
-                <div class="start-setting-row">
-                    <span class="hud-label">Sound</span>
-                    <div class="segmented segmented-num" id="sound-start" role="group" aria-label="Sound">
-                        <button type="button" class="btn" data-sound="on" aria-pressed="true">ON</button>
-                        <button type="button" class="btn" data-sound="off" aria-pressed="false">OFF</button>
-                    </div>
+                <div class="hero-copy">
+                    <div class="eyebrow">Your shape · 2 : 3 : 1</div>
+                    <h1 id="menu-title">Guess & Pass</h1>
+                    <p>Freeze the board on every change of possession, stack your moves, then watch both sides play
+                        them out.</p>
                 </div>
             </section>
 
-            <div class="actions">
-                <button type="button" class="btn btn-primary btn-xl" id="btn-start">QUICK MATCH</button>
-                <button type="button" class="btn btn-secondary btn-xl" id="btn-penalty">PENALTY SHOOTOUT</button>
-                <button type="button" class="btn btn-ghost" id="btn-tutorial">TUTORIAL</button>
+            <div class="bottom-area">
+                <section class="settings-capsule" aria-label="Match settings">
+                    <!-- Read-out, not a control. The engine plays the CPU and has no
+                         second human seat, so the pair reports which mode is live and
+                         marks PvP SOON rather than offering a switch that would do
+                         nothing when pressed. -->
+                    <div class="mode-switch">
+                        <div class="mode active" aria-current="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                                aria-hidden="true" focusable="false">
+                                <rect x="4" y="4" width="16" height="12" rx="1.5" />
+                                <path d="M9 20h6M12 16v4" />
+                            </svg>
+                            Vs computer
+                        </div>
+                        <div class="mode" title="Two-player is not built yet">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                                aria-hidden="true" focusable="false">
+                                <circle cx="8" cy="8" r="3" />
+                                <circle cx="16" cy="8" r="3" />
+                                <path d="M3 20c0-3 2.5-5 5-5s5 2 5 5M11 20c0-3 2.5-5 5-5s5 2 5 5" />
+                            </svg>
+                            PvP <span class="soon">soon</span>
+                        </div>
+                    </div>
+
+                    <!-- The four groups the in-game menu sheet also edits, drawn once
+                         here as one scrollable strip of chips. Each chip carries its
+                         own group, so the pressed pill is the value and the engine's
+                         sync keeps both surfaces identical. -->
+                    <div class="quick">
+                        <div class="qchip">
+                            <span class="qchip-label">Difficulty</span>
+                            <div class="segmented segmented-num" id="difficulty-start" role="group"
+                                aria-label="Difficulty">
+                                <button type="button" class="btn" data-diff="0.35" aria-pressed="false">LOW</button>
+                                <button type="button" class="btn" data-diff="0.75" aria-pressed="true">MID</button>
+                                <button type="button" class="btn" data-diff="1.25" aria-pressed="false">HARD</button>
+                                <button type="button" class="btn" data-diff="1.85" aria-pressed="false">EXTREME</button>
+                            </div>
+                        </div>
+
+                        <div class="qchip">
+                            <span class="qchip-label">Timer</span>
+                            <div class="segmented segmented-num" id="plan-window-start" role="group"
+                                aria-label="Move timer seconds">
+                                <button type="button" class="btn" data-lock="3" aria-pressed="false">3s</button>
+                                <button type="button" class="btn" data-lock="5" aria-pressed="false">5s</button>
+                                <button type="button" class="btn" data-lock="10" aria-pressed="true">10s</button>
+                                <button type="button" class="btn" data-lock="20" aria-pressed="false">20s</button>
+                            </div>
+                        </div>
+
+                        <div class="qchip">
+                            <span class="qchip-label">Length</span>
+                            <div class="segmented segmented-num" id="half-length-start" role="group"
+                                aria-label="Half length">
+                                <button type="button" class="btn" data-half="60" aria-pressed="false">1:00</button>
+                                <button type="button" class="btn" data-half="120" aria-pressed="true">2:00</button>
+                                <button type="button" class="btn" data-half="180" aria-pressed="false">3:00</button>
+                            </div>
+                        </div>
+
+                        <div class="qchip">
+                            <span class="qchip-label">Sound</span>
+                            <div class="segmented segmented-num" id="sound-start" role="group" aria-label="Sound">
+                                <button type="button" class="btn" data-sound="on" aria-pressed="true">ON</button>
+                                <button type="button" class="btn" data-sound="off" aria-pressed="false">OFF</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="cta-stack">
+                    <button type="button" class="btn kickoff" id="btn-start">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"
+                            aria-hidden="true" focusable="false">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 7l4 3-1.5 4.5h-5L8 10z" />
+                            <path d="M12 2v5M2.5 9l4 1.5M4 18l4-3M20 18l-4-3M21.5 9l-4 1.5" />
+                        </svg>
+                        Kick off
+                    </button>
+                    <button type="button" class="btn kickoff-alt" id="btn-penalty">Penalty shootout</button>
+                </div>
+
+                <div class="test-result" id="verify-out" aria-live="polite" hidden></div>
             </div>
 
-            <button type="button" class="btn btn-ghost-sm verify-link" id="btn-verify">RUN RULEBOOK TESTS</button>
-            <div class="test-result" id="verify-out" aria-live="polite" hidden></div>
+            <!-- The phone's home-indicator stand-in: it gives the bottom of a tall
+                 screen a floor. Hidden once the layout is a desktop row. -->
+            <div class="homebar" aria-hidden="true"></div>
         </div>
     </div>
 

@@ -24,16 +24,26 @@
    fills the stage, and the chrome sits in the margins the camera already
    leaves around the painted ground.
 
+   The top band is ONE object, not three: the scoreline, the role +
+   possession pair, the half clock and the menu all live inside a single
+   `.hud-capsule`, borrowing the chrome of the START SCREEN's nav capsule so the
+   landing surface and the match speak the same visual language. See the TOP HUD
+   section below.
+
    NOTE on the engine's DOM contract — read before renaming anything:
      · `#role-badge` has its `className` assigned outright (so it carries no
        class but `.attack` / `.defend`);
      · `#score-you` / `#score-cpu` have their `textContent` assigned outright
        (so they must not wrap a <strong>);
-     · `#clock`'s *grandparent* receives `.low` — the chain is
-       `#clock` → `.clock-wrap` → `.hud-corner.hud-tr`, and it must stay two
-       levels deep;
+     · `#clock`'s *grandparent* receives `.low`. The engine computes it as
+       `#clock.parentElement.parentElement`, so with `#clock` inside
+       `.clock-row` inside `.clock-wrap` the class lands on `.clock-wrap` — the
+       chain is `#clock` → `.clock-row` → `.clock-wrap`, and it must stay
+       exactly two levels deep or the low-clock state dies silently;
      · `#clock-bar` and `#plan-bar` are the two state fills, written by the
-       engine on change only (never per frame).
+       engine on change only (never per frame);
+     · `#role-strip` is gatekept by the engine (`.hidden`, flipped by the
+       shootout swap), so it must keep its id and its single `.status-row` child.
    ========================================================================= */
 
 :root {
@@ -58,6 +68,39 @@
 
     --hud-pad: clamp(10px, 1.6vmin, 18px);
     --tap: 44px;
+
+    /* The measured height of the top capsule, as a length. It is not used to
+       size the capsule — the capsule is a content-sized flex box, exactly like
+       the menu's — but to clear the two layers that drop *under* it: the menu
+       sheet and the shootout strip both start one capsule plus a gutter below
+       the top edge. Declared here rather than measured in JS so the whole top
+       band stays a pure CSS contract, and overridden per breakpoint because a
+       wrapped capsule is taller than a single row. */
+    --hud-bar-h: 52px;
+
+    /* The menu's palette, hoisted to the root so the in-game capsule can be
+       built from the same turf tokens the START SCREEN uses. They began life
+       scoped to #screen-menu; the HUD needs the identical ink, and `var()`
+       inside a declaration is all-or-nothing — an unresolved `--turf-line`
+       would silently drop the border to `currentColor` instead of failing
+       loudly. #screen-menu re-declares the same values, which is harmless. */
+    --turf-0: #081C13;
+    --turf-1: #0E2A1D;
+    --turf-2: #143824;
+    --turf-line: #2A4B37;
+    --chalk: #EEF1E6;
+    --sage: #8CA394;
+    --sage-dim: #5C7266;
+    --amber: #F2A63C;
+    --amber-ink: #40260A;
+
+    /* The capsule's fill densities. These are a *tint*, not a solid: the blur
+       behind them is what carries the legibility, so the alpha is free to stay
+       low and let the pitch read through the chrome. Three densities of one
+       colour, matching the menu's shell-then-nested-pill structure. */
+    --cap-fill: rgba(8, 20, 13, 0.42);
+    --cap-fill-2: rgba(8, 20, 13, 0.3);
+    --cap-fill-3: rgba(8, 20, 13, 0.62);
 
     /* The decision ring is sized to the *painted* centre circle. The engine
        measures it in `fitView()` from the camera fit and writes it here, so the
@@ -220,9 +263,19 @@ body {
 }
 
 /* ============================================================================
-   HUD — TOP: SCORE (left) · ROLE STRIP (centre) · CLOCK + MENU (right)
+   HUD — TOP: ONE CAPSULE — SCORE · SITUATION · CLOCK · MENU
    ----------------------------------------------------------------------------
-   The whole match state, in two corners and one centred strip, in minimal text.
+   The whole match state in a single object. The scoreline, the role + possession
+   pair, the half clock and the menu all sit inside one turf-lined pill — the
+   same chrome as the START SCREEN's nav capsule — so the landing surface and the
+   match speak one language.
+
+   Two pieces of chrome used to float up here, each with its own fill and its own
+   anchoring: the scoreline's ink pill, the role strip parked on the top-centre
+   band, and the clock's bare column. The fields still exist — they stopped being
+   *pills* and became fields of the capsule, which is now the only thing on this
+   band that carries a border, a fill, a blur or a shadow.
+
    Nothing here is ever polled per frame: the score is written on the `score`
    event and the clock only when the displayed second changes.
    ========================================================================= */
@@ -231,11 +284,46 @@ body {
     position: absolute;
     inset: 0 0 auto 0;
     z-index: 4;
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--s-sm);
+    /* The header is the *anchoring* half of the band and the capsule is the
+       chrome half. Splitting them is what lets the capsule span exactly the
+       measure the shootout strip and the menu sheet are offset by — one gutter,
+       three layers, no clamp() repeated three times. */
     padding: calc(var(--hud-pad) + var(--sa-t)) calc(var(--hud-pad) + var(--sa-r)) 0 calc(var(--hud-pad) + var(--sa-l));
+}
+
+.hud-capsule {
+    display: flex;
+    align-items: center;
+    /* `space-between` only ever bites when #role-strip is hidden (during a
+       shootout): the slack-absorbing situation field is gone, so the scoreline
+       and the clock fall to the two ends instead of bunching left. */
+    justify-content: space-between;
+    /* The wrappable row IS the responsive strategy. Nothing shrinks and no field
+       is ever clipped: when the four stop fitting, the situation field drops to
+       a second line with a hairline above it. Same move the menu's capsule
+       makes, so the two read as one family at every width. */
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    width: 100%;
+    padding: 7px 9px;
+    border-radius: 26px;
+    /* Turf-tinted, but see-through: the blur does the work of separating the
+       chrome from the pitch, so the fill only has to nudge the hue. */
+    background: var(--cap-fill);
+    border: 1px solid var(--turf-line);
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+    box-shadow: 0 12px 28px -16px rgba(0, 0, 0, 0.7);
+    color: var(--chalk);
+}
+
+/* The tint is only this light because the blur is doing the separating. Where
+   there is no blur to lean on, the fill has to carry it alone. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+
+    .hud-capsule {
+        background: rgba(8, 20, 13, 0.82);
+    }
 }
 
 #hud-top[hidden],
@@ -245,59 +333,38 @@ body {
     display: none;
 }
 
-/* The role + possession read-out. It is the last thing to leave a corner: the
-   pair moved out of the top-left to the top-centre band, which is the strip
-   behind the far (computer's) goal — the exact mirror of the guide line reading
-   from the strip behind the near one. It borrows #hud-pens' anchoring contract
-   (a child of #stage, pinned to the top centre) because the two share this band
-   and never show at once. */
-#role-strip {
-    position: absolute;
-    z-index: 3;
-    top: calc(var(--hud-pad) + var(--sa-t) + 4px);
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    justify-content: center;
-    max-width: min(calc(100% - 2 * var(--hud-pad)), 420px);
-}
+/* --- field 2: the situation read-out -------------------------------------
+   Which end you are playing toward, and whose ball it is — the two facts that
+   decide the next prompt. `flex: 1 1 auto` makes this the slack-absorber of the
+   row: it soaks up whatever the scoreline and the clock leave, which parks the
+   pair dead centre between them without a single margin being pinned. It is the
+   one field that may drop to its own line, and it takes the hairline with it —
+   the same divider the menu uses between its tag row and its utility row.
 
-.hud-corner {
+   The engine owns this element's `.hidden` (the shootout swap flips it), so it
+   keeps its id and its single `.status-row` child. */
+#role-strip {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex: 1 1 auto;
+    justify-content: center;
     min-width: 0;
 }
 
-/* The scoreline stands alone in this corner — the role + possession pair lives
-   on the top-centre band now (#role-strip). */
-.hud-tl {
-    align-items: flex-start;
-}
-
-.hud-tr {
-    flex: none;
-}
-
-/* --- the scoreline -------------------------------------------------------
-   The one number you must never have to hunt for. It sits on its own, bare on
-   an ink pill so it survives a bright pitch behind it. */
+/* --- field 1: the scoreline ----------------------------------------------
+   The one number you must never have to hunt for. It is no longer an ink pill
+   of its own — the capsule is the pill now — so it keeps only its two kit
+   colours and a shadow strong enough to hold the numerals off a bright pitch. */
 .score-mini {
     display: inline-flex;
     align-items: baseline;
-    gap: 7px;
-    padding: 4px 12px;
-    border-radius: var(--r-pill-category);
-    background: var(--glass);
-    border: 1px solid var(--glass-line-soft);
-    backdrop-filter: blur(10px) saturate(120%);
-    -webkit-backdrop-filter: blur(10px) saturate(120%);
-    box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.6);
+    gap: 6px;
+    flex: none;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 .sc {
     font-family: var(--f-mono);
-    font-size: clamp(1.05rem, 3.6vmin, 1.5rem);
+    font-size: clamp(1rem, 3.4vmin, 1.35rem);
     font-weight: 600;
     line-height: 1;
     letter-spacing: -0.02em;
@@ -319,35 +386,41 @@ body {
     color: var(--on-glass-mute);
 }
 
-/* --- attack / defend + possession ---------------------------------------
-   Two small pills, deliberately quiet: they answer "which end am I playing
-   toward" and "whose ball is it" without competing with the scoreline. */
+/* --- field 2's two pills -------------------------------------------------
+   Deliberately quiet: they answer "which end am I playing toward" and "whose
+   ball is it" without competing with the scoreline. They wear the menu's `.cap`
+   recipe — an inset dark pill inside a turf hairline — so the nested chrome
+   reads as one material as the capsule it sits in. */
 .status-row {
     display: flex;
     align-items: center;
+    justify-content: center;
     flex-wrap: wrap;
     gap: 6px;
     min-width: 0;
 }
 
 /* The engine assigns `className` outright, so this element carries no other
-   class — `.attack` and `.defend` are the only two states it can be in. */
-#role-badge {
+   class — `.attack` and `.defend` are the only two states it can be in. Both
+   selectors are kept with the same body on purpose: they are two spellings of
+   one pill, and the engine's outright `className` write means neither may ever
+   gain a third class to share. */
+#role-badge,
+.chip {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     height: 22px;
-    padding: 0 10px;
-    border-radius: var(--r-pill-category);
-    background: none;
-    border: none;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+    padding: 0 9px;
+    border-radius: 999px;
+    background: var(--cap-fill-2);
+    border: 1px solid var(--turf-line);
     font-family: var(--f-mono);
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--on-glass);
+    color: var(--sage);
     white-space: nowrap;
 }
 
@@ -360,29 +433,16 @@ body {
     flex: none;
 }
 
-/* defending is the "read it" verb, so it gets the accent; attacking stays neutral */
+/* defending is the "read it" verb, so it gets the accent; attacking stays quiet */
 #role-badge.defend {
-    color: var(--x-aim);
+    border-color: rgba(242, 166, 60, 0.5);
+    color: var(--amber);
 }
 
 /* --- possession chip ---------------------------------------------------- */
 .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 22px;
-    padding: 0 10px 0 8px;
-    border-radius: var(--r-pill-category);
-    background: none;
-    border: none;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
-    font-family: var(--f-mono);
-    font-size: 10px;
-    font-weight: 600;
+    padding: 0 9px 0 8px;
     letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--on-glass);
-    white-space: nowrap;
 }
 
 .chip .dot {
@@ -410,30 +470,44 @@ body {
    15 seconds turn it warm — the one moment the chrome is allowed to go amber.
    ========================================================================= */
 
+/* --- field 3: the half clock ---------------------------------------------
+   The right end of the capsule, still a stacked read-out: half label over the
+   numerals over the draining hairline. It is a *field* now, not a floating
+   column with padding of its own, so it is narrow, centred, and carries no fill —
+   the capsule is the pill.
+
+   It deliberately keeps its own inks (sage + chalk + amber) instead of
+   inheriting the capsule's, because the low-clock state has to stay legible
+   against the turf fill. It also keeps its own width: the line's drain is a
+   proportion, and a field that shrank as the digits changed would make the bar
+   crawl sideways every second.
+
+   DOM CONTRACT: #clock must stay exactly two levels below this element — the
+   engine toggles `.low` on `#clock.parentElement.parentElement`, i.e. here. */
 .clock-wrap {
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
-    gap: 5px;
-    min-width: clamp(74px, 16vmin, 108px);
-    padding: 5px 10px;
+    align-items: center;
+    gap: 3px;
+    flex: none;
+    min-width: clamp(58px, 13vmin, 86px);
+    padding: 0 2px;
 }
 
 .clock-half {
     font-family: var(--f-mono);
     font-size: 9px;
-    font-weight: 500;
+    font-weight: 600;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--sage);
     line-height: 1;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 .clock-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
 }
 
 .clock-num {
@@ -442,9 +516,8 @@ body {
     font-weight: 600;
     line-height: 1;
     letter-spacing: -0.01em;
-    color: var(--on-glass);
+    color: var(--chalk);
     font-variant-numeric: tabular-nums;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 .clock-extra {
@@ -474,7 +547,7 @@ body {
     width: 100%;
     height: 3px;
     border-radius: var(--r-full);
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.18);
     overflow: hidden;
 }
 
@@ -488,22 +561,20 @@ body {
     transform-origin: 0 50%;
     transform: scaleX(1);
     will-change: transform;
-    background: var(--on-glass);
+    background: var(--chalk);
     border-radius: var(--r-full);
 }
 
-/* The engine toggles `.low` on #clock's *grandparent*, which is this corner —
-   so both the numerals and the fill respond to it. */
-.hud-corner.hud-tr.low .clock-num {
+/* The engine toggles `.low` on #clock's *grandparent* — this element — so both
+   the numerals and the fill respond to it. This is the only place the match
+   chrome is allowed to go warm, and it is a one-off class write, never a poll. */
+.clock-wrap.low .clock-num {
     color: var(--x-aim);
-}
-
-.hud-corner.hud-tr.low #clock-bar {
-    background: var(--x-aim);
-}
-
-.hud-corner.hud-tr.low .clock-num {
     animation: clock-pulse 1s ease-in-out infinite;
+}
+
+.clock-wrap.low #clock-bar {
+    background: var(--x-aim);
 }
 
 @keyframes clock-pulse {
@@ -518,33 +589,50 @@ body {
     }
 }
 
-/* --- the floating menu button ------------------------------------------ */
+/* --- field 4: the menu button -------------------------------------------
+   The capsule's right cap. It wears the nested `.cap` recipe rather than the
+   glass chrome it used to carry, because it is now *inside* the glass — a pill
+   within a pill, exactly like the START SCREEN's utility row. It is the last
+   child of the row, so it also serves as the visual close of the capsule.
+
+   It is one of only two interactive things on the pitch band (the shootout strip
+   is the other), and #hud-top is pointer-events:none, so this must re-enable
+   its own events — done by the #app button rule, not here. */
 .hud-icon-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
     flex: none;
-    border-radius: var(--r-sm);
-    background: var(--glass);
-    border: 1px solid var(--glass-line);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    color: var(--on-glass);
-    font-size: 15px;
+    border-radius: 999px;
+    background: var(--cap-fill-2);
+    border: 1px solid var(--turf-line);
+    color: var(--sage);
+    font-size: 14px;
     line-height: 1;
-    transition: background-color 0.15s ease, transform 0.1s ease;
+    transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
 }
 
+/* Hover and open are the same shelf of the tint at two steps, so the button
+   darkens within the capsule's own colour instead of going grey. */
 .hud-icon-btn:hover {
-    background: rgba(255, 255, 255, 0.16);
+    background: var(--cap-fill);
+    color: var(--chalk);
 }
 
 .hud-icon-btn:active {
     transform: scale(0.94);
 }
 
+.hud-icon-btn[aria-expanded='true'] {
+    background: var(--cap-fill-3);
+    border-color: var(--sage-dim);
+    color: var(--chalk);
+}
+
+/* global.css owns the shared focus ring; this only has to out-specify the
+   nested fill so the ring is not swallowed by the capsule's blur layer. */
 .hud-icon-btn:focus-visible {
     outline: 2px solid var(--x-you);
     outline-offset: 2px;
@@ -573,7 +661,10 @@ body {
 .hud-sheet {
     position: absolute;
     z-index: 9;
-    top: calc(var(--hud-pad) + var(--sa-t) + 44px);
+    /* Cleared below the capsule, not below a hard-coded guess: --hud-bar-h is the
+       measured height of the top band (it grows when the capsule wraps), so the
+       sheet can never land on top of the chrome that opens it. */
+    top: calc(var(--hud-pad) + var(--sa-t) + var(--hud-bar-h) + 8px);
     right: calc(var(--hud-pad) + var(--sa-r));
     width: min(258px, calc(100% - 2 * var(--hud-pad)));
     display: flex;
@@ -735,7 +826,9 @@ body {
 #hud-pens {
     position: absolute;
     z-index: 3;
-    top: calc(var(--hud-pad) + var(--sa-t) + 4px);
+    /* Same clearance as the sheet: the shootout strip is the other resident of
+       this band, and both read the one variable so they can never disagree. */
+    top: calc(var(--hud-pad) + var(--sa-t) + var(--hud-bar-h) + 4px);
     left: 50%;
     transform: translateX(-50%);
     display: flex;
@@ -1339,91 +1432,646 @@ body {
     color: var(--c-mute);
 }
 
-/* the start card carries the brand mark above the wordmark */
-.card-start {
-    width: min(480px, 94vw);
-    text-align: left;
-    background: rgba(10, 14, 22, 0.92);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(0, 240, 255, 0.32);
-    box-shadow: 0 0 40px rgba(0, 240, 255, 0.2), 0 24px 48px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-    border-radius: var(--r-xl, 24px);
-    position: relative;
-    overflow: hidden;
+/* ============================================================================
+   START SCREEN (§1) — the landing surface
+   ----------------------------------------------------------------------------
+   The menu is not a dialog floating over the app: it is the first thing anybody
+   sees, so it is dressed as the pitch itself. Three zones — the nav capsule, the
+   hero, and the settings strip with its kick-off — sit in one flex frame; the
+   turf is painted by `#screen-menu` itself and weathered by two decorative
+   layers on top of it, never by an image.
+
+   Everything is a layout-flow length (clamp()/vmin or a percentage), so the same
+   three zones hold together on a 320px phone and on a 2560px display; at 860px
+   they simply flatten into rows (game-ui-ux: anchors + containers, never
+   absolute pixels).
+   ========================================================================= */
+
+#screen-menu {
+    --turf-0: #081C13;
+    --turf-1: #0E2A1D;
+    --turf-2: #143824;
+    --turf-line: #2A4B37;
+    --chalk: #EEF1E6;
+    --sage: #8CA394;
+    --sage-dim: #5C7266;
+    --amber: #F2A63C;
+    --amber-ink: #40260A;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    /* The safe-area insets belong to the zones that carry a gutter, not here:
+       the frame stays full-bleed so the turf reaches every edge. */
+    padding: 0;
+    overflow: hidden auto;
+    font-family: 'Rajdhani', var(--f-sans);
+    color: var(--chalk);
+    background:
+        radial-gradient(ellipse 620px 420px at 50% -8%, rgba(242, 166, 60, 0.16), transparent 66%),
+        repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 4px),
+        repeating-linear-gradient(115deg, var(--turf-1) 0 46px, var(--turf-2) 46px 92px),
+        var(--turf-0);
+    /* The turf is opaque, so the app behind it must not also show through. */
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
 
-.card-start::before {
-    content: '';
+/* `.screen[hidden]` is (0,2,0) and loses to the id rule above, so hiding has to
+   be restated at that weight — without this the menu would never close. */
+#screen-menu[hidden] {
+    display: none;
+}
+
+/* --- weathering: a vignette and a film of grain --------------------------
+   The vignette sits the turf down at its edges; the grain keeps the large flat
+   fills from banding on a wide-gamut panel. Both are decorative, so neither may
+   take a pointer event. */
+#screen-menu .vignette {
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, #00f0ff, #00ff87, #0070f3);
-    box-shadow: 0 0 14px rgba(0, 240, 255, 0.9);
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse 340px 600px at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.35) 100%);
 }
 
-.card-start .start-mark {
-    width: 44px;
-    height: 44px;
-    margin-bottom: var(--s-md);
-    color: #00f0ff;
-    filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.7));
-    animation: pulse-glow 3s infinite alternate ease-in-out;
-}
-
-@keyframes pulse-glow {
-    0% {
-        transform: scale(1);
-        filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.5));
-    }
-
-    100% {
-        transform: scale(1.05);
-        filter: drop-shadow(0 0 16px rgba(0, 255, 135, 0.85));
-    }
-}
-
-.card-start .start-mark svg {
-    display: block;
-    width: 100%;
-    height: 100%;
-}
-
-.card-start .eyebrow {
-    color: #00ff87;
-    font-family: var(--f-mono);
-    font-size: var(--t-caption-size);
-    font-weight: 700;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    text-shadow: 0 0 10px rgba(0, 255, 135, 0.5);
-}
-
-.card-start h1 {
-    font-size: clamp(2.1rem, 5.5vmin, 2.85rem);
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    background: linear-gradient(135deg, #ffffff 30%, #a0e9ff 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: var(--s-xs);
-    text-shadow: 0 0 20px rgba(0, 240, 255, 0.25);
-}
-
-.card-start p.body-lg {
-    color: #a0aec0;
-    font-size: var(--t-body-md-size);
-    line-height: 1.6;
-}
-
-/* menu card only: the mesh gradient, washed to near-nothing behind the copy */
-.card .mesh-wash {
+#screen-menu .grain {
     position: absolute;
-    inset: -40% -20% auto -20%;
-    height: 150%;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
     opacity: 0.5;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
+/* `.grain` is also a generic helper in tokens.css, which draws its own ::after
+   film for the light sheets. This layer paints its own, so the helper's is
+   switched off here rather than restyled. */
+#screen-menu .grain::after {
+    content: none;
+    display: none;
+}
+
+/* The frame holds all three zones. `1 0 auto` lets it fill a tall viewport (so
+   the hero can centre) while never squeezing the zones together — a short
+   viewport scrolls instead. The frame's own max-width is relaxed to the full
+   1120px measure at 860px, in global.css, which loads last. */
+.menu-frame {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
+    width: 100%;
+    max-width: 560px;
+    margin-inline: auto;
+}
+
+/* --- the two grouping capsules: one chrome, borrowed twice --------------- */
+#screen-menu .top-capsule,
+#screen-menu .settings-capsule {
+    background: rgba(8, 20, 13, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--turf-line);
+    border-radius: 26px;
+}
+
+/* Nav zone: the capsule owns the vertical rhythm, the zone owns the safe area. */
+#screen-menu .navbar {
+    position: relative;
+    padding: calc(var(--sa-t) + 20px) calc(var(--sa-r) + 16px) 0 calc(var(--sa-l) + 16px);
+}
+
+#screen-menu .top-capsule {
+    padding: 14px 16px 12px;
+}
+
+#screen-menu .brand-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+#screen-menu .brand-mark {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    color: var(--amber);
+}
+
+#screen-menu .brand-name {
+    font-family: 'Anton', var(--f-sans);
+    font-size: 19px;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    color: var(--chalk);
+    text-transform: uppercase;
+}
+
+#screen-menu .caps-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+/* The utility row is a separate band: a hairline separates the two pills that
+   describe the match from the five that leave it. */
+#screen-menu .caps-row.utility {
+    margin-top: 8px;
+    padding-top: 9px;
+    border-top: 1px solid var(--turf-line);
+}
+
+/* --- pills ---------------------------------------------------------------
+   One recipe for the two brand tags, the three outbound links and the two
+   buttons that open a real screen. Anchors and buttons have to render
+   identically, so the reset the `.btn` base applies is restated for both. */
+#screen-menu .cap {
+    padding: 6px 12px;
+    border: 1px solid var(--turf-line);
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.22);
+    font-family: 'Rajdhani', var(--f-sans);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    color: var(--sage);
+    text-decoration: none;
+}
+
+#screen-menu .cap.tag {
+    background: var(--amber);
+    border-color: var(--amber);
+    color: var(--amber-ink);
+}
+
+/* Everything under the hairline is quieter than the tags above it: those pills
+   leave the match rather than describing how it is played. */
+#screen-menu .caps-row.utility .cap {
+    padding: 5px 11px;
+    background: transparent;
+    font-size: 10.5px;
+    color: var(--sage-dim);
+    transition: color 0.16s ease, border-color 0.16s ease;
+}
+
+#screen-menu .caps-row.utility .cap:hover {
+    border-color: var(--sage-dim);
+    color: var(--chalk);
+}
+
+/* --- hero: the shape, drawn --------------------------------------------
+   The drawing is the slack-absorber of the whole screen, so a tall phone
+   centres it and a short one simply scrolls. */
+#screen-menu .hero {
+    position: relative;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 20px;
+    text-align: center;
+}
+
+#screen-menu .hero .vs {
+    margin-bottom: 2px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--sage-dim);
+}
+
+#screen-menu .hero .pitch {
+    flex: none;
+    width: min(210px, 46vmin);
+    height: auto;
+    margin-bottom: 6px;
+}
+
+/* Narrow: `.vs` already says the shape, so the copy's duplicate eyebrow stays
+   down until the wide layout has room for it. */
+#screen-menu .hero-copy .eyebrow {
+    display: none;
+}
+
+#screen-menu #menu-title {
+    margin: 0;
+    font-family: 'Anton', var(--f-sans);
+    font-size: clamp(2rem, 7.4vmin, 3rem);
+    font-weight: 400;
+    line-height: 0.96;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--chalk);
+}
+
+#screen-menu .hero-copy p {
+    max-width: 42ch;
+    margin: 10px auto 0;
+    font-size: clamp(13px, 1.9vmin, 15px);
+    line-height: 1.55;
+    color: var(--sage);
+}
+
+/* --- the bottom zone: settings strip, then the kick-offs ----------------
+   Stacked on a phone: the capsule, the CTAs, and the self-test well if it has
+   anything to say. */
+#screen-menu .bottom-area {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 0 calc(var(--sa-r) + 16px) 22px calc(var(--sa-l) + 16px);
+}
+
+#screen-menu .settings-capsule {
+    padding: 16px 16px 6px;
+}
+
+/* --- the mode pair -------------------------------------------------------
+   A read-out, not a switch: the engine plays the CPU and has no second human
+   seat, so the live mode is marked and the other carries a SOON tag instead of
+   offering a control that would do nothing when pressed. */
+#screen-menu .mode-switch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+#screen-menu .mode {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 11px 8px;
+    border: 1px solid var(--turf-line);
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    font-size: 13.5px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--sage);
+}
+
+#screen-menu .mode svg {
+    flex: none;
+    width: 15px;
+    height: 15px;
+}
+
+#screen-menu .mode.active {
+    background: var(--amber);
+    border-color: var(--amber);
+    color: var(--amber-ink);
+}
+
+#screen-menu .mode .soon {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.28);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--sage-dim);
+}
+
+/* --- the quick strip -----------------------------------------------------
+   One horizontally scrollable row of chips. Each chip carries the engine's own
+   `.segmented` group, so the pressed pill *is* the value and the strip never
+   keeps a second copy of a setting that could drift. */
+#screen-menu .quick {
+    display: flex;
+    gap: 8px;
+    padding-bottom: 12px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+}
+
+#screen-menu .quick::-webkit-scrollbar {
+    display: none;
+}
+
+#screen-menu .qchip {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--turf-line);
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+#screen-menu .qchip-label {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    color: var(--sage);
+}
+
+/* The engine's segmented control, re-inked for turf. These are the same nodes
+   the in-game sheet edits, so they keep `.segmented`; only the skin changes —
+   a flat pill row inside the chip, with the pressed pill in amber. */
+#screen-menu .qchip .segmented {
+    gap: 2px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+}
+
+#screen-menu .qchip .segmented button {
+    min-height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    font-family: 'Rajdhani', var(--f-sans);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--sage);
+}
+
+#screen-menu .qchip .segmented button:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: var(--chalk);
+}
+
+#screen-menu .qchip .segmented button[aria-pressed='true'] {
+    background: var(--amber);
+    color: var(--amber-ink);
+}
+
+/* --- the kick-off CTA --------------------------------------------------- */
+#screen-menu .cta-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#screen-menu .kickoff,
+#screen-menu .kickoff-alt {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    width: 100%;
+}
+
+#screen-menu .kickoff {
+    min-height: 52px;
+    padding: 16px 18px 14px;
+    border: 0;
+    border-radius: 18px;
+    background: var(--amber);
+    font-family: 'Anton', var(--f-sans);
+    font-size: clamp(17px, 2.6vmin, 19px);
+    font-weight: 400;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #3B2408;
+    transition: transform 0.16s ease-out, filter 0.16s ease;
+}
+
+#screen-menu .kickoff svg {
+    flex: none;
+    width: 18px;
+    height: 18px;
+}
+
+#screen-menu .kickoff:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+}
+
+#screen-menu .kickoff:active {
+    transform: translateY(1px);
+}
+
+/* The shootout is the other way in, so it is an outline rather than a second
+   amber slab competing with the first. */
+#screen-menu .kickoff-alt {
+    min-height: 44px;
+    padding: 12px 18px;
+    border: 1px solid var(--turf-line);
+    border-radius: 14px;
+    background: rgba(0, 0, 0, 0.22);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--sage);
+    transition: color 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
+}
+
+#screen-menu .kickoff-alt:hover {
+    border-color: var(--sage-dim);
+    background: rgba(0, 0, 0, 0.34);
+    color: var(--chalk);
+}
+
+/* --- focus + the self-test well ---------------------------------------- */
+#screen-menu :focus-visible {
+    outline: 2px solid var(--chalk);
+    outline-offset: 2px;
+    box-shadow: none;
+}
+
+/* On the amber fill a chalk ring would vanish, so the ring moves inside it. */
+#screen-menu .kickoff:focus-visible {
+    outline-color: #3B2408;
+    outline-offset: -4px;
+}
+
+#screen-menu .test-result {
+    margin-top: 0;
+    border-color: var(--turf-line);
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--sage);
+}
+
+/* The phone's home-indicator stand-in. It exists only to give the bottom of a
+   tall screen a floor, so it is hidden the moment the layout is a wide row. */
+#screen-menu .homebar {
+    width: 120px;
+    height: 4px;
+    margin: 14px auto var(--sa-b);
+    border-radius: 3px;
+    background: rgba(238, 241, 230, 0.3);
+}
+
+/* --- wide: the same three zones flatten into rows ----------------------
+   Nothing here changes a component — it only relaxes the three zones onto one
+   line each, which is the same move the phone layout makes in reverse. */
+@media (min-width: 860px) {
+    #screen-menu .navbar {
+        padding: calc(var(--sa-t) + 26px) 40px 0;
+    }
+
+    /* Nav: brand left, pills right, one capsule-shaped row. */
+    #screen-menu .top-capsule {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 12px 12px 12px 22px;
+        border-radius: 999px;
+    }
+
+    #screen-menu .brand-row {
+        flex: none;
+        margin-bottom: 0;
+    }
+
+    #screen-menu .caps-row.primary {
+        gap: 8px;
+    }
+
+    #screen-menu .caps-row.utility {
+        margin-top: 0;
+        padding-top: 0;
+        border-top: 0;
+        gap: 4px;
+    }
+
+    #screen-menu .caps-row.utility .cap {
+        font-size: 12px;
+        padding: 8px 14px;
+    }
+
+    /* Hero: the drawing beside the copy, which can now be left-aligned. */
+    #screen-menu .hero {
+        flex-direction: row;
+        justify-content: center;
+        gap: clamp(32px, 5vw, 60px);
+        padding: 0 40px;
+        text-align: left;
+    }
+
+    #screen-menu .hero .vs {
+        display: none;
+    }
+
+    #screen-menu .hero .pitch {
+        width: min(300px, 30vw);
+        margin-bottom: 0;
+    }
+
+    #screen-menu .hero-copy {
+        max-width: 340px;
+    }
+
+    #screen-menu .hero-copy .eyebrow {
+        display: block;
+        margin-bottom: 8px;
+        font-family: 'Rajdhani', var(--f-sans);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        color: var(--sage-dim);
+    }
+
+    #screen-menu #menu-title {
+        margin: 0 0 14px;
+        font-size: clamp(2.4rem, 4.6vw, 2.9rem);
+        line-height: 0.95;
+    }
+
+    #screen-menu .hero-copy p {
+        max-width: 34ch;
+        margin: 0;
+    }
+
+    /* Bottom: the settings strip and the kick-offs sit on one line. */
+    #screen-menu .bottom-area {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 0 40px calc(var(--sa-b) + 40px);
+    }
+
+    #screen-menu .settings-capsule {
+        display: flex;
+        flex: 1 1 auto;
+        align-items: center;
+        gap: 18px;
+        min-width: 0;
+        padding: 14px 18px;
+    }
+
+    #screen-menu .mode-switch {
+        flex: 0 0 auto;
+        width: 220px;
+        margin-bottom: 0;
+    }
+
+    #screen-menu .quick {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding-bottom: 0;
+    }
+
+    #screen-menu .cta-stack {
+        flex: 0 0 auto;
+        flex-direction: row;
+        gap: 12px;
+    }
+
+    #screen-menu .kickoff,
+    #screen-menu .kickoff-alt {
+        width: 200px;
+    }
+
+    #screen-menu .kickoff {
+        min-height: 48px;
+        padding: 14px 0;
+        border-radius: 14px;
+    }
+
+    #screen-menu .kickoff-alt {
+        min-height: 44px;
+        padding: 12px 0;
+        border-radius: 12px;
+    }
+
+    /* The self-test well is the only read-out; it takes a row of its own. */
+    #screen-menu .test-result {
+        flex: 1 1 100%;
+    }
+
+    #screen-menu .homebar {
+        display: none;
+    }
+}
+
+/* A short landscape phone has no vertical room for the drawing; the copy and
+   the kick-off carry the screen on their own. */
+@media (max-height: 560px) and (max-width: 859px) {
+    #screen-menu .hero .pitch {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    #screen-menu .kickoff:hover,
+    #screen-menu .kickoff:active {
+        transform: none;
+    }
 }
 
 .card>* {
@@ -1478,168 +2126,12 @@ body {
     display: none;
 }
 
-/* --- the start card's settings block -------------------------------------
-   The same three settings as the in-game sheet, but the card is a LIGHT
-   surface: the dark-glass pill chrome has to be re-inked for it. The pressed
-   pill inverts to an ink fill with white text, mirroring the sheet's white
-   fill with dark text. */
-/* The single home for every match setting. The card is a LIGHT surface, so the
-   dark-glass pill chrome of the in-game sheet has to be re-inked for it; the
-   whole set is drawn as one titled panel of label + control rows. */
-.start-settings {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    margin-top: var(--s-lg);
-    background: rgba(0, 0, 0, 0.38);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: var(--r-md);
-    padding: var(--s-sm) var(--s-md);
-}
-
-.start-settings-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--s-sm);
-    padding: var(--s-sm) 0 var(--s-xs);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.start-settings .hud-label {
-    color: #8fa3bf;
-    font-family: var(--f-mono);
-    font-size: var(--t-label-sm-size);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-}
-
-.start-settings-head .hud-label {
-    color: #cfe3f5;
-    letter-spacing: 0.12em;
-}
-
-.start-settings-hint {
-    color: #6b7f97;
-    font-family: var(--f-mono);
-    font-size: 10px;
-    letter-spacing: 0.04em;
-    text-transform: none;
-}
-
-/* One setting per row: the label anchors left, the control fills the rest, so
-   every row lines up down the panel at any width. */
-.start-setting-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--s-sm);
-    padding: var(--s-sm) 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.start-setting-row:last-child {
-    border-bottom: 0;
-    padding-bottom: var(--s-xs);
-}
-
-.start-setting-row .segmented {
-    flex: 0 1 auto;
-    min-width: 0;
-}
-
-.start-settings .segmented {
-    background: rgba(10, 14, 20, 0.75);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: var(--r-sm);
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
-}
-
-.start-settings .segmented button {
-    color: #a0aec0;
-    font-family: var(--f-mono);
-    font-weight: 600;
-    transition: all 0.18s ease;
-}
-
-.start-settings .segmented button:hover {
-    color: #ffffff;
-    background: rgba(255, 255, 255, 0.08);
-}
-
-.start-settings .segmented button[aria-pressed='true'] {
-    background: linear-gradient(135deg, #00f0ff 0%, #0070f3 100%);
-    color: #020b14;
-    font-weight: 800;
-    box-shadow: 0 0 14px rgba(0, 240, 255, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.4);
-}
-
-/* Modern Gaming Action Buttons */
-.card-start #btn-start {
-    height: 56px;
-    background: linear-gradient(135deg, #00ff87 0%, #00d2ff 100%);
-    color: #04121a;
-    font-family: var(--f-sans);
-    font-size: var(--t-body-lg-size);
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    border: none;
-    border-radius: var(--r-md);
-    box-shadow: 0 0 24px rgba(0, 255, 135, 0.45), 0 4px 12px rgba(0, 0, 0, 0.4);
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.card-start #btn-start:hover {
-    transform: translateY(-2px) scale(1.02);
-    box-shadow: 0 0 34px rgba(0, 255, 135, 0.75), 0 6px 18px rgba(0, 0, 0, 0.5);
-}
-
-.card-start #btn-start:active {
-    transform: translateY(1px) scale(0.99);
-}
-
-.card-start #btn-tutorial {
-    background: rgba(255, 255, 255, 0.06);
-    color: #e2e8f0;
-    font-family: var(--f-sans);
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: var(--r-md);
-    transition: all 0.2s ease;
-}
-
-.card-start #btn-tutorial:hover {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(0, 240, 255, 0.5);
-    color: #00f0ff;
-    box-shadow: 0 0 16px rgba(0, 240, 255, 0.25);
-}
-
 /* The one true marketing pill in the app: the kick-off CTA. It is a deliberate
    exception because the menu is the landing surface, and the landing surface is
    where the system's marketing voice lives. */
 .btn-xl {
     height: 52px;
     font-size: var(--t-button-lg-size);
-}
-
-/* The rulebook self-test is a developer affordance, so it is demoted to a quiet
-   text link below the real actions rather than competing with them. */
-.verify-link {
-    width: 100%;
-    margin-top: var(--s-md);
-    color: var(--c-mute);
-    font-family: var(--f-mono);
-    font-size: 10px;
-    letter-spacing: 0.1em;
-}
-
-.verify-link:hover {
-    color: var(--c-ink);
 }
 
 /* A hairline-divided spec list, in place of bullets, for the tutorial */
@@ -1715,8 +2207,9 @@ body {
 
 @media (max-width: 760px) {
 
-    /* The corners now want the whole top band, so the shootout strip moves down
-       to the empty space above the action row, where it has room to wrap. */
+    /* The capsule wants the whole top band on a phone, so the shootout strip
+       moves down to the empty space above the action row, where it has room to
+       wrap. */
     #hud-pens {
         top: auto;
         bottom: calc(var(--hud-pad) + var(--sa-b) + 108px);
@@ -1741,8 +2234,25 @@ body {
         width: auto;
     }
 
-    .clock-half {
-        display: none;
+    /* The capsule's wrap, made deliberate. Left to itself flex-wrap would drop
+       whichever field happened to overflow — usually the clock — onto a line with
+       the scoreline, which reads as a bug. Pinning the situation field to the
+       second row instead gives the break a job: the numbers stay on top, the
+       "which end / whose ball" prompt gets its own full-width line and the same
+       hairline divider the menu uses between its two rows.
+
+       The half label is deliberately NOT hidden here. It is half of "timer/half",
+       and it is the only place the half number is ever shown. */
+    #role-strip {
+        order: 9;
+        flex-basis: 100%;
+        padding-top: 6px;
+        border-top: 1px solid var(--turf-line);
+    }
+
+    /* the capsule stops being a pill once it is two storeys tall */
+    .hud-capsule {
+        border-radius: 20px;
     }
 
     .pens-dots .dot {
@@ -1755,9 +2265,21 @@ body {
    chrome can be the only thing between the player and a mis-tap on the pitch. */
 @media (pointer: coarse) {
 
+    /* A 44px cap in a 7px-padded pill adds ~26px to the band on every touch
+       device, and the sheet and the shootout strip are both cleared against this
+       one number — so it moves here, with the button, not with the layout. */
+    :root {
+        --hud-bar-h: 64px;
+    }
+
     .hud-icon-btn {
         width: var(--tap);
         height: var(--tap);
+        font-size: 17px;
+    }
+
+    .hud-capsule {
+        padding: 7px 10px;
     }
 
     .btn-icon-xs {
@@ -1774,6 +2296,16 @@ body {
     }
 }
 
+/* Narrow AND touch: the capsule is two storeys tall, so the clearance has to be
+   the sum of both, not either. This block sits after the coarse one on purpose —
+   at equal specificity the later rule wins, which is what makes a phone get the
+   taller value instead of the 44px-button value. */
+@media (max-width: 460px) {
+    :root {
+        --hud-bar-h: 104px;
+    }
+}
+
 /* The celebration and the pulses are the only things here that move; a player
    who has asked for less motion still gets the signal, just not the sweep. */
 @media (prefers-reduced-motion: reduce) {
@@ -1787,9 +2319,14 @@ body {
 
     #goal-fx.show,
     #goal-fx.show #goal-fx-word,
-    .hud-corner.hud-tr.low .clock-num,
+    .clock-wrap.low .clock-num,
     #plan-panel.low .ring-fill {
         animation: none;
+    }
+
+    /* the low-clock state then has to be carried by colour alone */
+    .clock-wrap.low .clock-num {
+        color: var(--x-aim);
     }
 
     #goal-fx.show {
