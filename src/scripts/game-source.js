@@ -673,15 +673,19 @@ import {
        screen; half a unit of slack keeps the plane's own edge from ever landing
        exactly on the canvas edge. (Reading the metres as game-x units and
        compressing by KX alone — the old reqHW — asked for only ±25.1 across,
-       which is what let the touchlines run off the sides of a phone.) reqHH
-       keeps its slightly roomier value so the vertical framing the HUD bands
-       were tuned against does not move. */
+       which is what let the touchlines run off the sides of a phone.) */
     /* §12.k — reqHW and reqHH frame the active match surface closely.
        In mobile portrait, reqHW fills the phone screen right to the touchlines
        so the playable pitch is maximally wide and tall without being cropped.
-       reqHH tightly frames the goals and hoardings for wider viewports. */
+       reqHH is the other half of that bargain. Whenever the frame is wider than
+       about 0.61 (which is every phone in portrait) the contain fit takes
+       `hh = reqHH` outright, so the visible height is exactly 2 × reqHH units:
+       the pitch claims 100 of them and the apron gets whatever is left. The only
+       depth the ground owes behind a goal line is enough to show the net standing
+       on it (≈ 3.6m). At 6.5m of hoarding reqHH was paying for air, and on a
+       phone every unit of that air came straight off the pitch's height. */
     const reqHW = (PITCH_M.x / 2 + 0.6) * UPM;                   // ≈ 32.95 (touchlines at ~98% of width)
-    const reqHH = (PITCH_M.y / 2 + 6.5) * UPM;                   // ≈ 56.39 (extra headroom above top goal)
+    const reqHH = (PITCH_M.y / 2 + 4) * UPM;                     // ≈ 53.81 (clear of the net behind each goal line)
     /* §10 — the shootout magnifies one end, so the view carries a zoom and a
        pan (in game-y units) on top of the contain fit. */
     const view = { hw: reqHW, hh: reqHH, zoom: 1, panY: 50 };
@@ -4110,21 +4114,33 @@ import {
         return land;
     }
 
-    /* Which edge is this box docked to? A box spanning most of the width is a
-       bar (top or bottom, by the edge it hugs); one spanning most of the height
-       is a side rail; anything else belongs to whichever edge is nearest. */
+    /* Which edge is this box docked to?
+
+       A box spanning most of the width is a bar: top or bottom, by which half of
+       the screen its centre falls in. A box spanning a good part of the height —
+       or hanging in the vertical middle, where neither band is anywhere near it —
+       is railed to a side; the desktop in-match guide card is the only one of
+       those. Every other box is a corner chip, and this match's corner chips (the
+       menu button, the two action buttons, the outcome banner) are all furniture
+       of the top and bottom bands, so that is where they dock.
+
+       That last rule is load-bearing, and it is why this no longer simply takes
+       the nearest edge. The menu button is a 44px square sitting `--hud-pad` from
+       the top and `--hud-pad` from the right of a top bar that is taller than it
+       is, so the button's own box is two or three pixels nearer the RIGHT edge
+       than the top one. Read as "nearest edge" it docked 'r', reserved 45% of the
+       screen width as a right-hand rail, and squeezed the whole board into the
+       left half of a phone, at a bit over half its width. A corner chip sits in
+       the top (or bottom) band already, so reserving that band is all it needs. */
     function dockOf(r, w, h) {
         const wFrac = r.width / Math.max(1, w);
         const hFrac = r.height / Math.max(1, h);
-        if (wFrac >= 0.5) return (r.top + r.height / 2) < h / 2 ? 't' : 'b';
-        if (hFrac >= 0.5) return (r.left + r.width / 2) < w / 2 ? 'l' : 'r';
-        const dT = Math.max(0, r.bottom), dB = Math.max(0, h - r.top);
-        const dL = Math.max(0, r.right), dR = Math.max(0, w - r.left);
-        const m = Math.min(dT, dB, dL, dR);
-        if (m === dT) return 't';
-        if (m === dB) return 'b';
-        if (m === dL) return 'l';
-        return 'r';
+        const cy = r.top + r.height / 2;
+        if (wFrac >= 0.5) return cy < h / 2 ? 't' : 'b';
+        const gT = Math.max(0, r.top), gB = Math.max(0, h - r.bottom);
+        const gL = Math.max(0, r.left), gR = Math.max(0, w - r.right);
+        if (hFrac >= 0.4 || (gT > h * 0.25 && gB > h * 0.25)) return gL < gR ? 'l' : 'r';
+        return cy < h / 2 ? 't' : 'b';
     }
 
     /* The top bar and the bottom bar are full-bleed boxes: their own rect covers
