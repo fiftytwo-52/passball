@@ -568,6 +568,11 @@ import {
     const other = team => (team === 'you' ? 'cpu' : 'you');
     /** A team's own goal — the one goalFor() does *not* return. */
     const ownGoal = team => goalFor(other(team));
+    /** Own-goal law: scoring is decided only by the net the ball entered. */
+    const scorerForEnteredGoal = goal => (goal === GOAL.cpu ? 'you' : 'cpu');
+    const targetEntersGoal = (target, goal) => !!target
+        && isOnTarget(target.x, goal.x, GOAL_HALF_WIDTH)
+        && (Math.abs(target.y - goal.y) <= 1.5 || (goal.y === 0 ? target.y <= 0 : target.y >= 100));
     /** The half a team attacks (+) or defends (−), as a y coordinate. */
     const attackSide = team => (team === 'you' ? 1 : -1);
 
@@ -2717,7 +2722,7 @@ import {
             }
             if (isOnTarget(ball.x, GOAL.cpu.x, GOAL_HALF_WIDTH)) {
                 ball.alive = false;
-                scoreGoal('you');
+                scoreGoal(scorerForEnteredGoal(GOAL.cpu));
                 return true;
             }
             ball.y = 0.1; reboundBall(0, 1, BOUNCE_NET); Sfx.bounce(); return true;
@@ -2734,7 +2739,7 @@ import {
             }
             if (isOnTarget(ball.x, GOAL.you.x, GOAL_HALF_WIDTH)) {
                 ball.alive = false;
-                scoreGoal('cpu');
+                scoreGoal(scorerForEnteredGoal(GOAL.you));
                 return true;
             }
             ball.y = 99.9; reboundBall(0, -1, BOUNCE_NET); Sfx.bounce(); return true;
@@ -2824,11 +2829,11 @@ import {
                back the drawn END of a line that has no byline answer, and a ball
                that stopped in the middle of the pitch is not a goal — it is a
                loose ball like any other. */
-            const atLine = Math.abs(ball.target.y - goal.y) <= 1.5 || (goal.y === 0 ? ball.target.y <= 0 : ball.target.y >= 100);
-            if (atLine && isOnTarget(ball.target.x, goal.x, GOAL_HALF_WIDTH)) {
+            if (targetEntersGoal(ball.target, goal)) {
                 ball.alive = false;
-                return scoreGoal(state.possession);
+                return scoreGoal(scorerForEnteredGoal(goal));
             }
+            const atLine = !!ball.target && (Math.abs(ball.target.y - goal.y) <= 1.5 || (goal.y === 0 ? ball.target.y <= 0 : ball.target.y >= 100));
             /* Wide, over, or short of the line. The ball keeps the line it was
                struck on and carries into the run-off, where the hoardings send it
                back; nobody is awarded anything, and the keeper who wants it has
@@ -2861,10 +2866,9 @@ import {
                 log('Pass struck the post — ball is live.', '');
                 return;
             }
-            const atLine = Math.abs(ball.target.y - passGoal.y) <= 1.5 || (passGoal.y === 0 ? ball.target.y <= 0 : ball.target.y >= 100);
-            if (atLine && isOnTarget(ball.target.x, passGoal.x, GOAL_HALF_WIDTH)) {
+            if (targetEntersGoal(ball.target, passGoal)) {
                 ball.alive = false;
-                return scoreGoal(state.possession);
+                return scoreGoal(scorerForEnteredGoal(passGoal));
             }
         }
 
@@ -3017,7 +3021,7 @@ import {
                 }
                 if (isOnTarget(ball.x, goal.x, GOAL_HALF_WIDTH)) {
                     ball.alive = false;
-                    scoreGoal(state.possession);
+                    scoreGoal(scorerForEnteredGoal(goal));
                     return;
                 }
             }
@@ -4632,19 +4636,23 @@ import {
             const aimSpread = isExtreme ? 0.18 : (isHard ? 0.32 : 0.55);
 
             const shootProb = isExtreme ? 0.98 : (isHard ? 0.85 : (0.55 + 0.45 * state.difficulty) * quality);
+            const cpuOwnGoal = scorerForEnteredGoal(GOAL.cpu) === 'you' ? GOAL.cpu : GOAL.you;
+            const safeCpuTarget = target => !targetEntersGoal(target, cpuOwnGoal);
             if (inRange && (isHard || rng() < shootProb)) {
-                PLAN.shot.cpu = { ...cpuShotAim(aimSpread), power: shotPwr };
+                const aim = cpuShotAim(aimSpread);
+                if (safeCpuTarget(aim)) PLAN.shot.cpu = { ...aim, power: shotPwr };
             } else {
                 const target = cpuChoosePass(rng, spots);
                 if (target) {
+                    const shotAim = cpuShotAim(aimSpread);
                     const lane = resolvePassRace({
                         from: { x: c.x, y: c.y },
-                        to: cpuShotAim(aimSpread),
+                        to: shotAim,
                         defenders: defenderInputs('you'),
                         radius: TOUCH_R
                     });
-                    if (inRange && lane.outcome === 'COMPLETE') {
-                        PLAN.shot.cpu = { ...cpuShotAim(aimSpread), power: shotPwr };
+                    if (inRange && lane.outcome === 'COMPLETE' && safeCpuTarget(shotAim)) {
+                        PLAN.shot.cpu = { ...shotAim, power: shotPwr };
                     } else {
                         const s = leadSpot(c, target, spots.get(target));
                         const race = resolvePassRace({
@@ -4655,15 +4663,18 @@ import {
                         });
                         const useAir = isHard && (target._preferAir || race.outcome !== 'COMPLETE');
                         const passPwr = isExtreme ? 1.0 : (isHard ? 0.9 : 0.65);
-                        PLAN.pass.cpu = {
-                            x: s.x,
-                            y: s.y,
-                            air: useAir,
-                            power: passPwr
-                        };
+                        if (safeCpuTarget(s)) {
+                            PLAN.pass.cpu = {
+                                x: s.x,
+                                y: s.y,
+                                air: useAir,
+                                power: passPwr
+                            };
+                        }
                     }
                 } else {
-                    PLAN.shot.cpu = { ...cpuShotAim(aimSpread), power: shotPwr };
+                    const aim = cpuShotAim(aimSpread);
+                    if (safeCpuTarget(aim)) PLAN.shot.cpu = { ...aim, power: shotPwr };
                 }
             }
             mates.forEach(m => setIntent(m, spots.get(m)));
