@@ -551,6 +551,23 @@ import '../styles/global.css';
 
     <div id="err" role="alert"></div>
 
+    <!-- Portrait gate (mobile/touch only): shown over everything — game and
+         menus alike — when a touch device is held in landscape. The engine
+         owns its `hidden`; see the orientation guard in game-source.js. -->
+    <div id="rotate-gate" hidden role="alertdialog" aria-modal="true" aria-labelledby="rotate-title"
+        aria-describedby="rotate-detail">
+        <div class="rotate-card">
+            <svg class="rotate-phone" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+                <rect class="rg-body" x="22" y="10" width="20" height="36" rx="4" />
+                <line class="rg-home" x1="29" y1="41" x2="35" y2="41" />
+                <path class="rg-arc" d="M47 14 A22 22 0 0 1 52 38" fill="none" />
+                <path class="rg-arrow" d="M52 31 L52 39 L45 37 Z" />
+            </svg>
+            <h2 id="rotate-title">Rotate your device</h2>
+            <p id="rotate-detail">This match is portrait-only. Turn your phone upright to keep playing.</p>
+        </div>
+    </div>
+
     <!-- Three.js is bundled from node_modules by Vite (no CDN dependency). -->
     <script>
         import '../scripts/game-source.js';

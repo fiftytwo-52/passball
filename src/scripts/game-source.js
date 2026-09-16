@@ -42,6 +42,78 @@ import {
         }
         console.error(msg);
     }
+
+    /* ----------------------------------------------------------------------
+       PORTRAIT GATE — touch/mobile devices play portrait-only.
+       ----------------------------------------------------------------------
+       Desktop/PC is exempt entirely: a resized narrow desktop window must
+       never trigger this, so detection is NOT viewport width. A device
+       counts as mobile only when touch is its primary input (a coarse
+       pointer with no fine pointer — touch laptops keep their mouse, so
+       they stay exempt) or when it reports a mobile touch surface
+       (navigator.maxTouchPoints > 0) AND a phone/tablet user-agent token.
+       Either signal alone over-triggers (coarse covers big touch screens
+       poorly; UA tokens miss hybrids), so the pair is AND/OR'd
+       conservatively: coarse-primary alone is enough, otherwise both the
+       touch surface and the UA token must agree.
+
+       While the gate is up, `rotateHold` freezes the simulation exactly
+       like a pause — update(dt) is never called, so no match time, plan
+       countdown, or move advances — but it is NOT the pause screen: it
+       sits above every screen (menus included), pushes nothing onto the
+       screen stack, and resumes by simply clearing the flag. The OS-level
+       portrait lock (screen.orientation.lock, PWA/fullscreen only) is
+       attempted as a best-effort extra; the overlay is the fallback that
+       works in a plain mobile browser tab.
+       ---------------------------------------------------------------------- */
+    const rotateGate = document.getElementById('rotate-gate');
+    let rotateHold = false;
+    function isTouchDevice() {
+        try {
+            const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+            const fine = window.matchMedia && window.matchMedia('(pointer: fine)').matches;
+            /* A coarse primary pointer with no fine pointer is a phone or a
+               tablet: touch-first with no mouse to fall back on. A touch
+               laptop reports BOTH (touchscreen + trackpad/mouse), so it
+               stays desktop-exempt here. */
+            if (coarse && !fine) return true;
+            const touchPoints = (navigator.maxTouchPoints || 0) > 0;
+            const ua = (navigator.userAgent || '') + ' ' + (navigator.vendor || '');
+            const mobileUA = /Android|iPhone|iPad|iPod|Mobile|Tablet|Touch/i.test(ua) ||
+                (navigator.userAgentData && navigator.userAgentData.mobile === true);
+            /* Touch surface + mobile UA together: catches tablets whose
+               pointer query reports hybrid capabilities. Neither signal
+               alone is trusted — a desktop touchscreen has touch points
+               but no mobile UA, and a UA string alone can be spoofed. */
+            if (touchPoints && mobileUA) return true;
+        } catch (e) { /* matchMedia unavailable (old browser): stay desktop. */ }
+        return false;
+    }
+    function isLandscapeShape() {
+        const w = window.innerWidth || 0, h = window.innerHeight || 0;
+        return w > 0 && h > 0 && w > h;
+    }
+    function syncRotateGate() {
+        if (!rotateGate) return;
+        /* Desktop/PC: skip everything — no detection, no prompt, no lock. */
+        const want = isTouchDevice() && isLandscapeShape();
+        if (want === rotateHold) { rotateGate.hidden = !want; return; }
+        rotateHold = want;
+        rotateGate.hidden = !want;
+        if (want) tryRequestPortraitLock();
+    }
+    function tryRequestPortraitLock() {
+        /* PWA/TWA + fullscreen only: plain mobile tabs reject this, which is
+           exactly why the overlay above is the real gate and this is just a
+           best-effort extra so an installed app never rotates at all. */
+        try {
+            const orient = window.screen && window.screen.orientation;
+            if (orient && typeof orient.lock === 'function') {
+                const p = orient.lock('portrait');
+                if (p && typeof p.catch === 'function') p.catch(() => {});
+            }
+        } catch (e) { /* NotAllowedError outside fullscreen/install: ignore. */ }
+    }
     /* ----------------------------------------------------------------------
        § 0.a RULEBOOK ALIASES — the tunables live in ./rules.js. Nothing here
        may be tuned independently of the property tests.
@@ -4017,7 +4089,7 @@ import {
     const humanDefending = () => PLAY && PLAY.atk === 'cpu';
 
     function onDown(e) {
-        if (topScreen() || state.paused) return;
+        if (rotateHold || topScreen() || state.paused) return;
         if (e.button !== undefined && e.button !== 0) return;
         const pt = canvasPoint(e);
         drag.x0 = pt.x; drag.y0 = pt.y; drag.x = pt.x; drag.y = pt.y; drag.moved = 0; drag.id = e.pointerId;
@@ -4365,11 +4437,12 @@ import {
     window.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
             e.preventDefault();
+            if (rotateHold) return;
             if (topScreen() && topScreen() !== 'menu' && topScreen() !== 'over') popScreen();
             else if (!topScreen() && state.phase !== 'idle' && state.phase !== 'over') pauseGame();
             return;
         }
-        if (topScreen()) return;
+        if (rotateHold || topScreen()) return;
         if (e.key === 'm' || e.key === 'M') toggleMute();
         if (e.key === 'r' || e.key === 'R') { if (state.phase !== 'idle') beginMatch(); }
         if (e.key === 'h' || e.key === 'H') pushScreen('tutorial', { focus: '#btn-tut-close' });
@@ -4730,7 +4803,7 @@ import {
 
     /** MOVES DONE — the human's half of the window is closed and the board runs. */
     function humanDone() {
-        if (!PLAN || PLAN.armed) return;
+        if (rotateHold || !PLAN || PLAN.armed) return;
         /* the CPU has to be ready too, and then a silent human side gets its own
            automatic plan — done in that order, so the auto-plan can read where
            the CPU's ball is going before it reacts to it */
@@ -5015,7 +5088,7 @@ import {
        open. The ball actually leaves the boot when both sides execute. */
     let lastShootOn = null;
     function canShootNow() {
-        if (SO.active || state.paused) return false;
+        if (rotateHold || SO.active || state.paused) return false;
         if (state.phase !== 'play' || !PLAN || PLAN.armed) return false;
         if (PLAN.shot.you) return false;
         if (!topScreen() && PLAY && PLAY.atk === 'you' && PLAY.carrier) {
@@ -5144,8 +5217,11 @@ import {
             app.style.setProperty('--ring-d', ringPx.toFixed(2) + 'px');
         }
     }
-    window.addEventListener('resize', fitView);
-    window.addEventListener('orientationchange', () => setTimeout(fitView, 120));
+    window.addEventListener('resize', () => { syncRotateGate(); fitView(); });
+    window.addEventListener('orientationchange', () => {
+        syncRotateGate();
+        setTimeout(() => { syncRotateGate(); fitView(); }, 120);
+    });
     /* A mobile URL bar sliding in and out fires resize several times a second,
        and each one rebuilt the projection. Only act when the box changed. */
     const viewBox = { w: 0, h: 0 };
@@ -5155,7 +5231,7 @@ import {
         viewBox.w = w; viewBox.h = h;
         fitView();
     }
-    if (window.visualViewport) window.visualViewport.addEventListener('resize', resizeIfChanged);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { syncRotateGate(); resizeIfChanged(); });
 
     /** Where the camera sits this frame. Fixed: the ground never moves. */
     function placeCamera() {
@@ -5189,7 +5265,12 @@ import {
         requestAnimationFrame(frame);
         const dt = Math.min(0.05, (now - last) / 1000);
         last = now;
-        if (!state.paused && !topScreen() && state.phase !== 'idle') update(dt);
+        /* The portrait gate freezes the world exactly like a pause: while a
+           touch device is held sideways no match time, plan countdown, or
+           move advances, and resuming is just clearing the flag — nothing
+           stored, nothing replayed. `last` is still refreshed above, so no
+           backlog of wall time leaks into the first portrait frame. */
+        if (!rotateHold && !state.paused && !topScreen() && state.phase !== 'idle') update(dt);
         /* Two things pulse, and neither of them is the ball's brightness — that
            has no room left to move (see the ball's material). A small breath in
            size with the rim tightening as it swells, and the beacon ring, which
@@ -5408,6 +5489,22 @@ import {
         window.addEventListener(evt, () => Sfx.unlock(), { once: true, passive: true }));
 
     /* --- boot --- */
+    syncRotateGate();
+    if (window.matchMedia) {
+        /* A touch laptop docking/undocking a mouse flips its primary pointer,
+           which can promote or demote it across the touch-device line without
+           any resize firing — re-check so it never gets (or keeps) the gate
+           wrongly. Desktop without touch never matches, so this is a no-op
+           there. */
+        try {
+            const pointerQuery = window.matchMedia('(pointer: coarse)');
+            if (pointerQuery && typeof pointerQuery.addEventListener === 'function') {
+                pointerQuery.addEventListener('change', syncRotateGate);
+            } else if (pointerQuery && typeof pointerQuery.addListener === 'function') {
+                pointerQuery.addListener(syncRotateGate);
+            }
+        } catch (e) { /* old browser: the resize/orientation hooks still cover rotation. */ }
+    }
     fitView();
     /* the settings pills start pressed from their markup, but state is the
        truth — sync every surface from it before the first frame */
@@ -5433,6 +5530,8 @@ import {
         get plan() { return PLAN; },
         get shootout() { return SO; },
         get ball() { return ball; },
+        get rotateHold() { return rotateHold; },
+        orientation: { isTouchDevice, isLandscapeShape, syncRotateGate },
         api: {
             beginMatch, kickoff, goalKick, beginShootout, soSetupKick,
             passTo, shoot, pauseGame, resumeGame, toggleMute,

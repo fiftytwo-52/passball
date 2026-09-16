@@ -2058,13 +2058,9 @@ body {
     }
 }
 
-/* A short landscape phone has no vertical room for the drawing; the copy and
-   the kick-off carry the screen on their own. */
-@media (max-height: 560px) and (max-width: 859px) {
-    #screen-menu .hero .pitch {
-        display: none;
-    }
-}
+/* Portrait is the only mobile shape: the start screen's hero stacks on a
+   narrow viewport and never needs a short-landscape branch (a touch device
+   held sideways gets the rotate gate instead of a reflowed menu). */
 
 @media (prefers-reduced-motion: reduce) {
 
@@ -2198,11 +2194,102 @@ body {
 }
 
 /* ============================================================================
+   ROTATE GATE — portrait lock for touch/mobile devices.
+   ----------------------------------------------------------------------------
+   Mobile is portrait-only: when a touch device is held in landscape the
+   engine unhides #rotate-gate (see game-source.js) and freezes the
+   simulation until portrait returns. Desktop/PC never shows this — the
+   engine skips the whole check there, so no media query gates it here;
+   visibility is owned by JS via [hidden], never by viewport width.
+   ========================================================================= */
+
+#rotate-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: calc(24px + var(--sa-t, 0px)) 24px calc(24px + var(--sa-b, 0px));
+    background: var(--pitch-turf);
+    text-align: center;
+}
+
+#rotate-gate[hidden] {
+    display: none;
+}
+
+.rotate-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    max-width: 320px;
+    color: var(--on-glass);
+}
+
+.rotate-card h2 {
+    font-family: var(--f-sans);
+    font-size: 22px;
+    line-height: 28px;
+    letter-spacing: -0.4px;
+    margin: 0;
+    color: var(--on-glass);
+}
+
+.rotate-card p {
+    font-size: var(--t-body-md-size);
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.78);
+    margin: 0;
+}
+
+.rotate-phone {
+    width: 72px;
+    height: 72px;
+    animation: rotate-nudge 1.8s ease-in-out infinite;
+    transform-origin: 50% 50%;
+}
+
+.rotate-phone .rg-body {
+    fill: none;
+    stroke: var(--x-you);
+    stroke-width: 3;
+}
+
+.rotate-phone .rg-home {
+    stroke: rgba(255, 255, 255, 0.7);
+    stroke-width: 2.4;
+    stroke-linecap: round;
+}
+
+.rotate-phone .rg-arc {
+    stroke: rgba(255, 255, 255, 0.7);
+    stroke-width: 2.4;
+    stroke-linecap: round;
+}
+
+.rotate-phone .rg-arrow {
+    fill: rgba(255, 255, 255, 0.85);
+}
+
+@keyframes rotate-nudge {
+    0%, 100% { transform: rotate(0deg); }
+    30% { transform: rotate(-90deg); }
+    60% { transform: rotate(-90deg); }
+}
+
+/* ============================================================================
    RESPONSIVE
    ----------------------------------------------------------------------------
    The layout is anchored, not measured, so it degrades by *moving furniture*
    rather than by shrinking the pitch: at narrow widths the shootout strip drops
    below the corner HUD, and the sheet spans the full width.
+
+   Mobile is portrait-only (see ROTATE GATE above), so there are deliberately
+   no mobile-landscape branches here: the portrait queries below assume the
+   only mobile shape is a narrow portrait viewport, and desktop keeps its own
+   unconstrained rules regardless of window aspect ratio.
    ========================================================================= */
 
 @media (max-width: 760px) {
@@ -2335,5 +2422,10 @@ body {
 
     #goal-fx::after {
         display: none;
+    }
+
+    /* the rotate prompt is a signal, not decoration: static phone, no sweep */
+    .rotate-phone {
+        animation: none;
     }
 }
