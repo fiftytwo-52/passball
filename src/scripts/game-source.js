@@ -110,7 +110,7 @@ import {
             const orient = window.screen && window.screen.orientation;
             if (orient && typeof orient.lock === 'function') {
                 const p = orient.lock('portrait');
-                if (p && typeof p.catch === 'function') p.catch(() => {});
+                if (p && typeof p.catch === 'function') p.catch(() => { });
             }
         } catch (e) { /* NotAllowedError outside fullscreen/install: ignore. */ }
     }
@@ -641,10 +641,10 @@ import {
     /** A team's own goal — the one goalFor() does *not* return. */
     const ownGoal = team => goalFor(other(team));
     /** Own-goal law: scoring is decided only by the net the ball entered. */
-    const scorerForEnteredGoal = goal => (goal === GOAL.cpu ? 'you' : 'cpu');
+    const scorerForEnteredGoal = goal => (goal === GOAL.cpu ? 'cpu' : 'you');
     const targetEntersGoal = (target, goal) => !!target
         && isOnTarget(target.x, goal.x, GOAL_HALF_WIDTH)
-        && (Math.abs(target.y - goal.y) <= 1.5 || (goal.y === 0 ? target.y <= 0 : target.y >= 100));
+        && (goal.y === 0 ? target.y <= 0 : target.y >= 100);
     /** The half a team attacks (+) or defends (−), as a y coordinate. */
     const attackSide = team => (team === 'you' ? 1 : -1);
 
@@ -681,23 +681,27 @@ import {
        so the playable pitch is maximally wide and tall without being cropped.
        reqHH tightly frames the goals and hoardings for wider viewports. */
     const reqHW = (PITCH_M.x / 2 + 0.6) * UPM;                   // ≈ 32.95 (touchlines at ~98% of width)
-    const reqHH = (PITCH_M.y / 2 + 5.5) * UPM;                   // ≈ 55.24 (tight goal-to-goal framing)
+    const reqHH = (PITCH_M.y / 2 + 6.5) * UPM;                   // ≈ 56.39 (extra headroom above top goal)
     /* §10 — the shootout magnifies one end, so the view carries a zoom and a
        pan (in game-y units) on top of the contain fit. */
     const view = { hw: reqHW, hh: reqHH, zoom: 1, panY: 50 };
 
     let renderer;
     try {
-        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+        /* alpha:true so the page's own turf background (#app / #stage in
+           game.css — the same recipe the main menu paints) shows through
+           wherever the ground plane does not cover the canvas. */
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     } catch (e) {
         fail('WebGL is unavailable in this browser: ' + e.message);
         return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    /* Surround colour. Matched to the pitch texture's base turf, so the area
-       beyond the touchline reads as the same grass under the same light and the
-       plane's edges disappear into it. */
-    renderer.setClearColor(0x0e2413, 1);
+    /* Fully transparent clear: the surround is painted by CSS (turf gradient +
+       mown bands + grain), so the ground plane's edge has to end in nothing
+       rather than in a flat fill. makePitchTexture() fades the plane's border
+       to alpha 0 so the two layers meet invisibly. */
+    renderer.setClearColor(0x0e2413, 0);
 
     const scene = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -400, 400);
@@ -873,6 +877,27 @@ import {
            in the HUD docks rather than printed on the turf. Anything else
            painted here only made the grass look less like grass. */
 
+        /* Edge feather. The canvas is transparent and the page's own turf
+           background (#app / #stage in game.css — the same recipe the main menu
+           paints) is what surrounds the ground plane, so the grass must dissolve
+           into that backdrop instead of stopping at a hard rectangle. The last
+           7 m of painted run-off is erased to alpha 0 on all four sides. */
+        const fade = 7 * M;
+        g.save();
+        g.globalCompositeOperation = 'destination-out';
+        const feather = (ax, ay, bx, by) => {
+            const gr = g.createLinearGradient(ax, ay, bx, by);
+            gr.addColorStop(0, 'rgba(0,0,0,1)');    // at the border — fully erased
+            gr.addColorStop(1, 'rgba(0,0,0,0)');    // inward — painted ground
+            g.fillStyle = gr;
+            g.fillRect(0, 0, cw, ch);
+        };
+        feather(0, 0, fade, 0);
+        feather(cw, 0, cw - fade, 0);
+        feather(0, 0, 0, fade);
+        feather(0, ch, 0, ch - fade);
+        g.restore();
+
         const tex = new THREE.CanvasTexture(c);
         tex.anisotropy = renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1;
         return tex;
@@ -894,10 +919,13 @@ import {
        edge cannot show a seam — the ground simply fades into the void */
     const apron = new THREE.Mesh(
         new THREE.PlaneGeometry(1200, 1200 * ZSTRETCH),
-        new THREE.MeshBasicMaterial({ color: 0x0e2413 })
+        new THREE.MeshBasicMaterial({ color: 0x0e2413, transparent: true, opacity: 0 })
     );
     apron.rotation.x = -Math.PI / 2;
     apron.position.y = -0.06;
+    /* kept (so the pitch plane never lies flush with nothing at grazing angles)
+       but invisible: an opaque apron would mask the CSS turf background. */
+    apron.visible = false;
     scene.add(apron);
 
     /* --- 3D goal frames (the ground is 2D; the furniture is real 3D) --- */
@@ -2233,6 +2261,7 @@ import {
            legitimately be open underneath one. */
         if (sheetOpen) setMenuOpen(false);
         Sfx.syncBgm(name);
+        fitView();
     });
 
     /* ==========================================================================
@@ -2466,7 +2495,7 @@ import {
             [1, 2, 3, 4, 5],
             [40, 30, 18, 8, 4],
             Math.random
-        );
+        ).item;
         endShootout(true);
         bus.emit('score'); bus.emit('half');
         Sfx.unlock(); Sfx.whistle();
@@ -2905,7 +2934,7 @@ import {
                 ball.alive = false;
                 return scoreGoal(scorerForEnteredGoal(goal));
             }
-            const atLine = !!ball.target && (Math.abs(ball.target.y - goal.y) <= 1.5 || (goal.y === 0 ? ball.target.y <= 0 : ball.target.y >= 100));
+            const atLine = !!ball.target && (goal.y === 0 ? ball.target.y <= 0 : ball.target.y >= 100);
             /* Wide, over, or short of the line. The ball keeps the line it was
                struck on and carries into the run-off, where the hoardings send it
                back; nobody is awarded anything, and the keeper who wants it has
@@ -3657,11 +3686,11 @@ import {
         const away = (k && k.x > gx) ? -1 : 1;
         const isHard = state.difficulty >= 1.0;
         const isExtreme = state.difficulty >= 1.5;
-        const cornerBias = isExtreme ? 0.78 : (isHard ? 0.65 : 0.42);
+        const cornerBias = isExtreme ? 0.88 : (isHard ? 0.82 : 0.75);
         const mid = clamp(gx + away * GOAL_HALF_WIDTH * cornerBias, 2, 98);
         const effSpread = spread !== undefined
-            ? spread * (isExtreme ? 0.28 : (isHard ? 0.5 : 1))
-            : (isExtreme ? 0.18 : (isHard ? 0.32 : 0.55));
+            ? spread * (isExtreme ? 0.2 : (isHard ? 0.35 : 0.5))
+            : (isExtreme ? 0.15 : (isHard ? 0.25 : 0.4));
         return {
             x: clamp(mid + (Math.random() - 0.5) * 2 * GOAL_HALF_WIDTH * effSpread, 0, 100),
             y: PLAY.goal.y
@@ -4050,25 +4079,179 @@ import {
     const drag = { kind: null, player: null, x0: 0, y0: 0, x: 0, y: 0, moved: 0, id: null, path: null };
     let lastTap = { t: 0, x: 0, y: 0 };
 
+    /* ==========================================================================
+       HUD-AWARE VIEWPORT INSETS
+       --------------------------------------------------------------------------
+       Nothing the HUD docks — the score capsule, the menu button, the shootout
+       strip, the action buttons, the guide line — may sit on the playable turf.
+       Everything visible is measured, classified to the edge it hugs, and the
+       camera fit (and every pointer conversion) is then computed against
+       whatever box is left in the middle. No offset is pinned in pixels: the
+       reservation is whatever the real boxes currently measure, so it holds at
+       any device dimension.
+       ========================================================================== */
+    const INSET_GUTTER = 6;        // px of clear turf between a dock and the board
+    const insets = { t: 0, r: 0, b: 0, l: 0 };
+    let needFit = false;           // set when the HUD boxes move; frame() re-fits
+
+    /* The WebGL buffer only ever has a different shape from the CSS box while
+       the rotate-to-landscape gate is up — and while that gate is up the whole
+       HUD is behind a full-screen overlay, so it does not need to be dodged. The
+       gate itself is therefore the entire test.
+
+       This used to be `w > h * 1.25 && (isTouchDevice() || isLandscapeShape())`,
+       and since isLandscapeShape() is just `w > h` it was true for EVERY
+       desktop landscape window: viewFrame() then returned zero insets and the
+       whole "nothing may sit on the pitch" guarantee switched itself off on PC,
+       which is exactly the machine the guide card was overhanging the turf on. */
+    let land = false;
+    function landscapeCanvas() {
+        land = rotateHold;
+        return land;
+    }
+
+    /* Which edge is this box docked to? A box spanning most of the width is a
+       bar (top or bottom, by the edge it hugs); one spanning most of the height
+       is a side rail; anything else belongs to whichever edge is nearest. */
+    function dockOf(r, w, h) {
+        const wFrac = r.width / Math.max(1, w);
+        const hFrac = r.height / Math.max(1, h);
+        if (wFrac >= 0.5) return (r.top + r.height / 2) < h / 2 ? 't' : 'b';
+        if (hFrac >= 0.5) return (r.left + r.width / 2) < w / 2 ? 'l' : 'r';
+        const dT = Math.max(0, r.bottom), dB = Math.max(0, h - r.top);
+        const dL = Math.max(0, r.right), dR = Math.max(0, w - r.left);
+        const m = Math.min(dT, dB, dL, dR);
+        if (m === dT) return 't';
+        if (m === dB) return 'b';
+        if (m === dL) return 'l';
+        return 'r';
+    }
+
+    /* The top bar and the bottom bar are full-bleed boxes: their own rect covers
+       the whole board even though their contents do not. They contribute the
+       union of their children instead of themselves. */
+    const LAYOUT_CONTAINERS = ['#hud-top', '#hud-bottom'];
+    const CARD_SELECTORS = [
+        '#hud-top', '#hud-bottom', '#hud-pens', '#btn-menu-open',
+        '#instruction', '#banner', '.hud-actions', '.hud-capsule'
+    ];
+
+    /* Things that are painted OVER the middle of the board, or that only exist
+       as an overlay on top of it. Reserving turf for them would be wrong twice
+       over: #plan-panel is the decision ring drawn at the pitch centre (its box
+       IS the play area, so measuring it would cap an inset at 45% of the screen
+       and gut the board), #menu-sheet and its scrim are a dropdown over the
+       pitch that would shove the camera every time it opened, and #goal-fx is
+       the goal flash. None of them is docked to an edge. */
+    const NEVER_MEASURE = '#plan-panel, #menu-sheet, .sheet-scrim, #goal-fx';
+
+    function measureHudInsets(w, h) {
+        const t = { t: 0, r: 0, b: 0, l: 0 };
+        const seen = new Set();
+        const add = box => {
+            if (!box || box.width < 1 || box.height < 1) return;
+            const side = dockOf(box, w, h);
+            const d = side === 't'
+                ? Math.max(0, box.bottom)
+                : side === 'b'
+                    ? Math.max(0, h - box.top)
+                    : side === 'l'
+                        ? Math.max(0, box.right)
+                        : Math.max(0, w - box.left);
+            if (d > t[side]) t[side] = d;
+        };
+
+        CARD_SELECTORS.forEach(sel => {
+            document.querySelectorAll(sel).forEach(node => {
+                if (node.hidden || node.getAttribute('aria-hidden') === 'true') return;
+                if (node.closest(NEVER_MEASURE)) return;
+                const cs = getComputedStyle(node);
+                if (cs.display === 'none' || cs.visibility === 'hidden') return;
+                if (LAYOUT_CONTAINERS.indexOf(sel) >= 0) {
+                    Array.from(node.children).forEach(ch => {
+                        if (seen.has(ch)) return;
+                        seen.add(ch);
+                        add(ch.getBoundingClientRect());
+                    });
+                    return;
+                }
+                if (seen.has(node)) return;
+                seen.add(node);
+                const r = node.getBoundingClientRect();
+                if (r.width >= w - 0.5 && r.height >= h - 0.5) return;   // a full bleed, not a dock
+                add(r);
+            });
+        });
+
+        /* every other control the match puts on the stage — the menu sheet's own
+           buttons included, since that sheet is a dropdown over the board */
+        document.querySelectorAll('#stage button, #stage input, #stage .segmented').forEach(node => {
+            if (seen.has(node) || node.hidden) return;
+            /* a control inside the sheet follows the sheet, not the pitch — the
+               `closest` test is what keeps the dropdown's own buttons from
+               reserving turf while the dropdown is open */
+            if (node.closest(NEVER_MEASURE)) return;
+            seen.add(node);
+            const cs = getComputedStyle(node);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return;
+            add(node.getBoundingClientRect());
+        });
+
+        /* The board has to stay usable however tall the docked furniture gets:
+           no single edge may eat more than 45% of its own axis. */
+        const capped = {};
+        ['t', 'r', 'b', 'l'].forEach(side => {
+            const axis = (side === 't' || side === 'b') ? h : w;
+            capped[side] = Math.min(t[side], axis * 0.45);
+        });
+        const next = {
+            t: capped.t ? capped.t + INSET_GUTTER : 0,
+            b: capped.b ? capped.b + INSET_GUTTER : 0,
+            l: capped.l ? capped.l + INSET_GUTTER : 0,
+            r: capped.r ? capped.r + INSET_GUTTER : 0
+        };
+        if (next.t !== insets.t || next.b !== insets.b
+            || next.l !== insets.l || next.r !== insets.r) needFit = true;
+        insets.t = next.t; insets.b = next.b; insets.l = next.l; insets.r = next.r;
+    }
+
+    /* The box the board is actually painted into: the canvas minus the docks.
+       One derivation, shared by the camera fit and by both pointer conversions,
+       so a tap can never disagree with what is drawn. */
+    function viewFrame(r) {
+        const w = r.width, h = r.height;
+        if (landscapeCanvas()) return { l: 0, t: 0, r: 0, b: 0, availW: w, availH: h };
+        const l = Math.min(w * 0.45, insets.l), t = Math.min(h * 0.45, insets.t);
+        const rr = Math.min(w * 0.45, insets.r), b = Math.min(h * 0.45, insets.b);
+        return { l, t, r: rr, b, availW: Math.max(1, w - l - rr), availH: Math.max(1, h - t - b) };
+    }
+
     function canvasPoint(e) {
         const r = canvas.getBoundingClientRect();
         const px = e.clientX - r.left, py = e.clientY - r.top;
-        /* view.hw is in screen units, where x is already compressed by KX —
-           divide it back out to land on the canonical 0…100 grid. `panY` is
-           where the screen centre sits in game-y (the §10 zoom moves it). */
-        const gx = 50 + ((px / r.width) * 2 - 1) * view.hw / KX;
-        const gy = view.panY + (1 - (py / r.height) * 2) * view.hh;
-        return { x: gx, y: gy, px, py, rect: r };
+        const F = viewFrame(r);
+        /* One game unit of y is availH / (2 * view.hh) pixels — the same
+           conversion fitView() writes into the projection — so a tap and the
+           artwork agree by construction. view.hw is in screen units, where x is
+           already compressed by KX; divide it back out to land on the canonical
+           0…100 grid. `panY` is where the frame's centre sits in game-y. */
+        const scale = (2 * view.hh) / F.availH;
+        const gx = 50 + (px - (F.l + F.availW / 2)) * scale / KX;
+        const gy = view.panY - (py - (F.t + F.availH / 2)) * scale;
+        return { x: gx, y: gy, px, py, rect: r, frame: F };
     }
     const screenRadius = rect => Math.max(18, rect.height * 0.055 * view.zoom);
 
     function pickPlayer(pt) {
         let best = null, bd = Infinity;
         const r = screenRadius(pt.rect);
+        const F = pt.frame || viewFrame(pt.rect);
+        const scale = (2 * view.hh) / F.availH;
+        const cx = F.l + F.availW / 2, cy = F.t + F.availH / 2;
         allPlayers.forEach(p => {
             const a = {
-                x: ((p.x - 50) * KX + view.hw) / (2 * view.hw) * pt.rect.width,
-                y: (1 - (p.y - view.panY + view.hh) / (2 * view.hh)) * pt.rect.height
+                x: cx + ((p.x - 50) * KX) / scale,
+                y: cy - ((p.y - view.panY) / (2 * view.hh)) * F.availH
             };
             const d = Math.hypot(a.x - pt.px, a.y - pt.py);
             if (d > r) return;
@@ -4200,8 +4383,10 @@ import {
                 drag.player.queuedDive = target;
                 drag.player.dive = null;
             }
-            /* no hint ring or line: the dive is the player's own instruction,
-               and the board does not announce where he is sending him */
+            diveLine.setEnds(drag.player, target);
+            diveLine.visible = true;
+            diveMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
+            diveMarker.visible = true;
         } else if (drag.kind === 'so-aim' && drag.moved > TAP_SLOP * 0.5) {
             /* no aim guide: the shot is the player's read, drawn blind */
             aimLine.visible = false;
@@ -4211,10 +4396,14 @@ import {
                which is *your* keeper exactly because the shootout only opens this
                gesture when the CPU is the kicker. Taken from soDefKeeper() rather
                than hard-coded to 'you' so the two can never drift apart. */
-            /* no dive guide: the drawn dive commits on release — the keeper's
-               feet stay put until the ball is actually struck */
-            diveLine.visible = false;
-            diveMarker.visible = false;
+            const k = soDefKeeper();
+            if (k) {
+                const target = { x: clamp(clampDiveX(pt.x, k.x), 4, 96), y: k.y };
+                diveLine.setEnds(k, target);
+                diveLine.visible = true;
+                diveMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
+                diveMarker.visible = true;
+            }
         }
     }
 
@@ -4446,7 +4635,8 @@ import {
         if (e.key === 'm' || e.key === 'M') toggleMute();
         if (e.key === 'r' || e.key === 'R') { if (state.phase !== 'idle') beginMatch(); }
         if (e.key === 'h' || e.key === 'H') pushScreen('tutorial', { focus: '#btn-tut-close' });
-        if (e.key === 's' || e.key === 'S') shootFromButton();
+        if (e.key === 'a' || e.key === 'A') { e.preventDefault(); humanDone(); }
+        if (e.key === 's' || e.key === 'S') { e.preventDefault(); shootFromButton(); }
         /* §17.b — Space is the PC shoot key, and Enter closes the decision window
            the same way the MOVES DONE button does. */
         if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); shootFromButton(); }
@@ -4709,7 +4899,11 @@ import {
             const aimSpread = isExtreme ? 0.18 : (isHard ? 0.32 : 0.55);
 
             const shootProb = isExtreme ? 0.98 : (isHard ? 0.85 : (0.55 + 0.45 * state.difficulty) * quality);
-            const cpuOwnGoal = scorerForEnteredGoal(GOAL.cpu) === 'you' ? GOAL.cpu : GOAL.you;
+            /* The CPU attacks GOAL.cpu, so the goal it must NOT shoot into is
+               ownGoal('cpu') — the human's goal it is defending. Getting this
+               backwards rejected every on-target CPU shot, so the CPU never
+               pulled the trigger. */
+            const cpuOwnGoal = ownGoal('cpu');
             const safeCpuTarget = target => !targetEntersGoal(target, cpuOwnGoal);
             if (inRange && (isHard || rng() < shootProb)) {
                 const aim = cpuShotAim(aimSpread);
@@ -5190,37 +5384,56 @@ import {
         }
     }
 
-    /* --- the contain-fit camera, with the §10 zoom/pan on top --- */
+    /* --- the contain-fit camera, with the §10 zoom/pan on top ---------------
+       CONTENT IS CONTAINED IN THE INSET BOX, NOT THE FULL CANVAS. The docks are
+       measured off the DOM (measureHudInsets) and the board is fitted into what
+       is left, so a goalpost can never end up under the score capsule however
+       the viewport is shaped. With no docks this reduces to a plain contain fit
+       of the canvas. */
     function fitView() {
         const w = canvas.clientWidth || window.innerWidth;
         const h = canvas.clientHeight || window.innerHeight;
-        const aspect = w / h;
+        const F = viewFrame({ width: w, height: h });
+        const availW = F.availW, availH = F.availH;
+        const aspect = availW / availH;
         let hw, hh;
         if (aspect >= reqHW / reqHH) { hh = reqHH; hw = reqHH * aspect; }
         else { hw = reqHW; hh = reqHW / aspect; }
         view.hw = hw / view.zoom;
         view.hh = hh / view.zoom;
-        camera.left = -view.hw; camera.right = view.hw;
-        camera.top = view.hh; camera.bottom = -view.hh;
+        /* Invariant: the projection is isotropic at (2 * view.hh) / availH
+           camera units per pixel, whichever way the fit above went. */
+        const scale = (2 * view.hh) / availH;
+        const cx = F.l + availW / 2;      // frame centre, in px
+        const cy = F.t + availH / 2;
+
+        camera.left = -cx * scale;
+        camera.right = camera.left + w * scale;
+        camera.top = cy * scale;
+        camera.bottom = camera.top - h * scale;
+
         camera.updateProjectionMatrix();
         renderer.setSize(w, h, false);
+
         /* §17.b — the decision ring is supposed to sit ON the painted centre
            circle, so its diameter is not a design constant — it is whatever the
            camera fit currently makes that circle. The circle is painted at 9.15m
            (makePitchTexture), which is 9.15 / M_Y game units of radius, and one
-           game unit of y is h / (2 * view.hh) pixels (the same conversion
+           game unit of y is availH / (2 * view.hh) pixels (the same conversion
            canvasPoint() uses to turn a tap into a board position). Written to
            --ring-d on #app, the ring's positioned ancestor, so it survives the
            zoom setPenaltyView() applies. */
         if (app) {
-            const ringPx = (9.15 / M_Y) * (app.clientHeight || h) / view.hh;
+            const ringPx = (9.15 / M_Y) * availH / view.hh;
             app.style.setProperty('--ring-d', ringPx.toFixed(2) + 'px');
+            app.style.setProperty('--ring-cx', cx.toFixed(2) + 'px');
+            app.style.setProperty('--ring-cy', cy.toFixed(2) + 'px');
         }
     }
-    window.addEventListener('resize', () => { syncRotateGate(); fitView(); });
+    window.addEventListener('resize', () => { syncRotateGate(); syncInsets(true); });
     window.addEventListener('orientationchange', () => {
         syncRotateGate();
-        setTimeout(() => { syncRotateGate(); fitView(); }, 120);
+        setTimeout(() => { syncRotateGate(); syncInsets(true); }, 120);
     });
     /* A mobile URL bar sliding in and out fires resize several times a second,
        and each one rebuilt the projection. Only act when the box changed. */
@@ -5229,9 +5442,28 @@ import {
         const w = canvas.clientWidth, h = canvas.clientHeight;
         if (w === viewBox.w && h === viewBox.h) return;
         viewBox.w = w; viewBox.h = h;
-        fitView();
+        syncInsets(true);
     }
     if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { syncRotateGate(); resizeIfChanged(); });
+
+    /* The reserved region is re-derived from the live DOM, never assumed. The
+       docks change size with the copy inside them — the clock's numerals, the
+       +N stoppage tag, the shootout strip, the outcome banner, the guide line
+       rewording itself — and they appear and disappear without the viewport
+       moving at all, which is why this runs off the render loop (syncInsets()
+       in frame()) and not only off resize. Reads only, no writes, so the
+       browser has no invalidated layout of its own to flush; a new projection
+       is built only when one of the four numbers actually moved. */
+    function syncInsets(force) {
+        const w = canvas.clientWidth || window.innerWidth;
+        const h = canvas.clientHeight || window.innerHeight;
+        const wasLand = land;
+        landscapeCanvas();
+        measureHudInsets(w, h);
+        if (!needFit && !force && land === wasLand) return;
+        needFit = false;
+        fitView();
+    }
 
     /** Where the camera sits this frame. Fixed: the ground never moves. */
     function placeCamera() {
@@ -5265,6 +5497,9 @@ import {
         requestAnimationFrame(frame);
         const dt = Math.min(0.05, (now - last) / 1000);
         last = now;
+        /* The docks are re-measured before anything is written this frame, so
+           the camera always fits a board the HUD cannot be standing on. */
+        syncInsets(false);
         /* The portrait gate freezes the world exactly like a pause: while a
            touch device is held sideways no match time, plan countdown, or
            move advances, and resuming is just clearing the flag — nothing

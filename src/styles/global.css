@@ -14,6 +14,15 @@ body {
     background: var(--pitch-turf);
 }
 
+@media (min-width: 768px) {
+    body {
+        background:
+            radial-gradient(ellipse 90% 60% at 50% -10%, rgba(191, 233, 255, 0.08), transparent 70%),
+            radial-gradient(ellipse 90% 60% at 50% 110%, rgba(191, 233, 255, 0.06), transparent 70%),
+            radial-gradient(ellipse 60% 80% at 50% 50%, #13331b 0%, #0e2413 55%, #08160c 100%);
+    }
+}
+
 /* ============================================================================
    TYPE — the display sizes need one honest step down on small screens.
    DESIGN.md's display-xl is a 48px desktop measure; at 360px it would wrap

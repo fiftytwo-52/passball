@@ -94,47 +94,60 @@ import '../styles/global.css';
                  that receives `.low`: the engine writes that class to
                  `#clock.parentElement.parentElement`, which here is `.clock-wrap`. -->
             <header id="hud-top" hidden>
-                <div class="hud-capsule">
-                    <!-- NOTE: the engine assigns `.textContent` on #score-you and
-                         #score-cpu outright, so neither may wrap a <strong>. The
-                         team colour is carried by the span itself instead. -->
-                    <div class="score-mini" aria-label="Score">
-                        <span class="sc sc-you" id="score-you">0</span>
-                        <span class="sc-dash" aria-hidden="true">–</span>
-                        <span class="sc sc-cpu" id="score-cpu">0</span>
-                    </div>
-
-                    <!-- Which end you are playing toward, and whose ball it is —
-                         the two facts that decide the next prompt. It sits
-                         between the scoreline and the clock so the eye reads
-                         score · situation · time straight across the capsule.
-
-                         NOTE: the engine assigns #role-badge.className and
-                         #possession-chip.className outright, so neither carries
-                         any other class — `.attack`/`.defend` and
-                         `.chip you`/`.chip cpu` are the only states they can be
-                         in. -->
-                    <div id="role-strip" hidden>
-                        <div class="status-row">
-                            <span id="role-badge" class="attack">ATTACK</span>
-                            <span id="possession-chip" class="chip you"><i class="dot"></i>YOU</span>
+                <!-- Left section: the scoreline capsule and nothing else. It is a
+                     sibling of .hud-right rather than a shared bar, so the two can
+                     never stretch one another — which is what turned the old
+                     combined top row into a bar lying across the pitch. -->
+                <div class="hud-left">
+                    <div class="hud-capsule">
+                        <!-- NOTE: the engine assigns `.textContent` on #score-you and
+                             #score-cpu outright, so neither may wrap a <strong>. The
+                             team colour is carried by the span itself instead. -->
+                        <div class="score-mini" aria-label="Score">
+                            <span class="sc sc-you" id="score-you">0</span>
+                            <span class="sc-dash" aria-hidden="true">–</span>
+                            <span class="sc sc-cpu" id="score-cpu">0</span>
                         </div>
-                    </div>
 
-                    <!-- The half, the clock, and the hairline that drains as the
-                         half runs out — three lines inside one field, because the
-                         capsule has the height for it. -->
-                    <div class="clock-wrap" id="clock-wrap">
-                        <span class="clock-half" id="half-label">HALF 1</span>
-                        <!-- role=timer implies aria-live=off: the countdown ticks every
-                             second and must not be announced each tick. -->
-                        <div class="clock-row">
-                            <span id="clock" role="timer" class="clock-num">2:00</span>
-                            <span id="clock-extra" class="clock-extra" hidden>+1s</span>
+                        <!-- Which end you are playing toward, and whose ball it is —
+                             the two facts that decide the next prompt. It sits
+                             between the scoreline and the clock so the eye reads
+                             score · situation · time straight across the capsule.
+
+                             NOTE: the engine assigns #role-badge.className and
+                             #possession-chip.className outright, so neither carries
+                             any other class — `.attack`/`.defend` and
+                             `.chip you`/`.chip cpu` are the only states they can be
+                             in. -->
+                        <div id="role-strip" hidden>
+                            <div class="status-row">
+                                <span id="role-badge" class="attack">ATTACK</span>
+                                <span id="possession-chip" class="chip you"><i class="dot"></i>YOU</span>
+                            </div>
                         </div>
-                        <span class="clock-line"><span id="clock-bar"></span></span>
-                    </div>
 
+                        <!-- The half, the clock, and the hairline that drains as the
+                             half runs out — three lines inside one field, because the
+                             capsule has the height for it. -->
+                        <div class="clock-wrap" id="clock-wrap">
+                            <span class="clock-half" id="half-label">HALF 1</span>
+                            <!-- role=timer implies aria-live=off: the countdown ticks every
+                                 second and must not be announced each tick. -->
+                            <div class="clock-row">
+                                <span id="clock" role="timer" class="clock-num">2:00</span>
+                                <span id="clock-extra" class="clock-extra" hidden>+1s</span>
+                            </div>
+                            <span class="clock-line"><span id="clock-bar"></span></span>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Right section: the floating menu button, on its own. It stays
+                     in normal flow on phones (so it sits on the capsule's line)
+                     but is position:fixed on desktop, where it detaches to the
+                     top-right corner — see the min-width:860px block in game.css. -->
+                <div class="hud-right">
                     <!-- The floating menu. Everything the match does not need on
                          screen lives in here so a phone shows the pitch and
                          almost nothing else. -->
@@ -209,16 +222,16 @@ import '../styles/global.css';
                     <!-- Closes the window for the human. The CPU also has to be
                          ready: if it has stacked its moves and you have not, the
                          board stays frozen until you do. -->
-                    <button type="button" class="btn btn-done" id="btn-done" title="Lock in your moves (Enter)"
+                    <button type="button" class="btn btn-done" id="btn-done" title="Lock in your moves (A or Enter)"
                         hidden>MOVES DONE</button>
 
                     <!-- The one action worth a button, and it sits in the RIGHT
                          corner, clear of the goal mouth. Disabled and dimmed until
                          the human is on the ball and inside range, so it doubles as
-                         the range indicator. Space and S fire it from the
+                         the range indicator. Space, S, and A fire it from the
                          keyboard. -->
                     <button type="button" class="btn btn-shoot" id="btn-shoot"
-                        title="Shoot along the drawn angle (S or Space)"
+                        title="Shoot along the drawn angle (S, A, or Space)"
                         aria-label="Shoot along the drawn angle" disabled>
                         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                             <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.7" />
