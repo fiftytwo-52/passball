@@ -7,21 +7,16 @@
    a rule could live in `tokens.css` or `game.css`, it belongs there instead.
    ========================================================================= */
 
-/* The stage is always the turf. The WebGL canvas paints over it, but the green
-   is what shows through during the first frame and any resize gap — never a
-   white flash, and never a different green than the renderer's clear colour. */
+/* The stage is always the turf. The WebGL canvas paints over it edge to edge
+   now (no phone-shaped column on desktop), but the green is what shows through
+   during the first frame and any resize gap — never a white flash, and never
+   a different green than the renderer's clear colour. The canvas fills the whole
+   viewport, so the body is only ever the floor of last resort behind a
+   transparent canvas. */
 body {
     background: var(--pitch-turf);
 }
 
-@media (min-width: 768px) {
-    body {
-        background:
-            radial-gradient(ellipse 90% 60% at 50% -10%, rgba(191, 233, 255, 0.08), transparent 70%),
-            radial-gradient(ellipse 90% 60% at 50% 110%, rgba(191, 233, 255, 0.06), transparent 70%),
-            radial-gradient(ellipse 60% 80% at 50% 50%, #13331b 0%, #0e2413 55%, #08160c 100%);
-    }
-}
 
 /* ============================================================================
    TYPE — the display sizes need one honest step down on small screens.

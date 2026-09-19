@@ -151,8 +151,11 @@ body {
     z-index: 10;
     display: flex;
     flex-direction: column;
-    /* NOTE: the shell must stay hit-testable — it contains the canvas, which owns
-       every drag gesture. The overlays inside it are made inert individually. */
+    /* The canvas fills this element edge to edge on every device; the CSS turf
+    recipe underneath is only ever the floor of last resort (first-frame / resize
+    gap). It uses the same mown-cut stripes and base tones the outfield plane
+    carries, so nothing flashes a different green when the renderer has not painted
+    yet. */
     background:
         radial-gradient(ellipse 620px 420px at 50% -8%, rgba(242, 166, 60, 0.16), transparent 66%),
         repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 4px),
@@ -182,10 +185,9 @@ body {
     cursor: crosshair;
     /* NOT --pitch-turf. The canvas is transparent (renderer alpha + a clear
        alpha of 0) and the ground covers every pixel of it — the pitch plane and
-       the outfield grass behind it — so the #stage turf recipe directly behind
-       this element is only ever the floor of last resort: a frame the ground has
-       not painted yet. Painting an opaque fill here would put the flat colour
-       back and hide that. */
+       the outfield grass behind it — so the turf recipe behind this element is
+       only ever the floor of last resort: a frame the ground has not painted yet.
+       Painting an opaque fill here would put the flat colour back and hide that. */
     background: transparent;
 }
 

@@ -268,6 +268,19 @@ import {
     const KEEPER_REFLEX_CHANCE = 0.55; // one roll per flight: is he allowed the lunge
     const KEEPER_TRACK_GAIN = 0.5;     // how much of the crossing point he runs to
 
+    /* --- §0.d the player's keeper, gently alive -------------------------------
+       Open play — the ball bounced around his box, a CPU carrier working the
+       edge — used to leave the human's keeper rooted on his spot, which read
+       as a statue wearing gloves. He now does the two quiet things the CPU's
+       keeper already does, both wound down: the SLIDE leans with the ball's x
+       at KEEPER_SLIDE_GAIN (against the CPU's 0.35), inside a narrower window,
+       and only while the ball is within KEEPER_SLIDE_DIST of his own goal —
+       a subtle shift with the play, never a second infielder. The sweep reuses
+       the CPU's gates whole, so it inherits their modesty (KEEPER_SWEEP_MAX
+       off the line, only when no team-mate is near the ball). */
+    const KEEPER_SLIDE_DIST = 40;      // ball this near his goal and he leans with it
+    const KEEPER_SLIDE_GAIN = 0.28;    // ...a smaller lean than the CPU keeper's
+
     /* ----------------------------------------------------------------------
        § 0.c THE PACE DIAL — one number, under every body on the board.
 
@@ -3567,11 +3580,50 @@ import {
                 return;
             }
         }
-        /* the human's keeper is the player's alone: no sweep of his own half and
-           no drift with the ball's x — the goal threat above is the ONE ball he
-           reads without being told to. He holds his line unless a dive is drawn
-           for him, and walks back to it once the dive is spent. */
+        /* --- the player's keeper: gently alive, never out of turn ------------
+           He is still the player's alone — a drawn dive is never overwritten,
+           and the pass threat and the shot reflex above are still the only
+           balls he READS. But a keeper who stands rooted while the ball is
+           bounced around his box is not keeping, so in open play he now does
+           the two quiet things the CPU's keeper already does, both gentler:
+
+           the SWEEP — the CPU's own gates, reused whole: a loose ball near his
+           goal that no team-mate is close to is his to come for, never further
+           than KEEPER_SWEEP_MAX off his line and never past it. The race guard
+           in simPlayers keeps this from fighting the chase: if he is the man
+           racing, the chase owns him and updateKeeper is not called at all.
+
+           the SLIDE — with the ball's x while it menaces his goal, a smaller
+           lean than the CPU's (KEEPER_SLIDE_GAIN against 0.35), inside a
+           narrower window (44..56 against 40..60), and only while the ball is
+           near his goal at all. Outside both, he walks home and holds. */
         if (k.team !== 'cpu') {
+            const own = ownGoal(k.team);
+            if (ball.alive && ball.mode !== 'pass' && ball.mode !== 'shot' &&
+                Math.abs(ball.y - own.y) < 50) {
+                let mate = false;
+                for (const p of teamOutfield(k.team)) {
+                    if (dist(p, ball) <= KEEPER_SWEEP_R) { mate = true; break; }
+                }
+                const fromHome = dist(home.x, home.y, ball.x, ball.y);
+                if (!mate && (fromHome <= KEEPER_CHASE_DIST || dist(k, ball) <= KEEPER_CLEAR_R)) {
+                    const dyHome = home.y - own.y;      // points OFF his own line
+                    const dyBall = ball.y - own.y;      // same sign when the ball is off it
+                    let ty = k.y;
+                    if (dyHome !== 0 && dyBall * dyHome > 0) {
+                        ty = own.y + Math.sign(dyBall) *
+                            Math.min(Math.abs(dyBall), KEEPER_SWEEP_MAX);
+                    }
+                    moveToward(k, clamp(ball.x, 6, 94), ty, DRILL_SPEED * 1.6 * KEEPER_SCALE, dt);
+                    return;
+                }
+            }
+            if (dist(ball, own) <= KEEPER_SLIDE_DIST) {
+                moveToward(k,
+                    clamp(50 + (ball.x - 50) * KEEPER_SLIDE_GAIN, 44, 56),
+                    home.y, DRILL_SPEED * 1.2 * KEEPER_SCALE, dt);
+                return;
+            }
             if (dist(k.x, k.y, home.x, home.y) > 0.5) {
                 moveToward(k, home.x, home.y, DRILL_SPEED * 1.5 * KEEPER_SCALE, dt);
             }
@@ -5790,6 +5842,14 @@ import {
             app.style.setProperty('--ring-d', ringPx.toFixed(2) + 'px');
             app.style.setProperty('--ring-cx', cx.toFixed(2) + 'px');
             app.style.setProperty('--ring-cy', cy.toFixed(2) + 'px');
+            /* --band-d and --band-y are written to :root for the page layer's
+               benefit. They are no longer consumed by global.css (the body now
+               just carries --pitch-turf as a flat floor), but they remain available
+               for any future CSS that wants to mirror the outfield's mown-cut phase
+               outside the canvas. */
+            const band = 12.66 * (availH / view.hh);
+            document.documentElement.style.setProperty('--band-d', band.toFixed(2) + 'px');
+            document.documentElement.style.setProperty('--band-y', cy.toFixed(2) + 'px');
         }
     }
     window.addEventListener('resize', () => { syncRotateGate(); syncInsets(true); });
