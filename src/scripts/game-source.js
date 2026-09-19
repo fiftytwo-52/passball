@@ -692,19 +692,23 @@ import {
 
     let renderer;
     try {
-        /* alpha:true so the page's own turf background (#app / #stage in
-           game.css — the same recipe the main menu paints) shows through
-           wherever the ground plane does not cover the canvas. */
+        /* alpha:true, with a transparent clear colour below: the ground covers
+           the canvas — the pitch plane, and the outfield behind it — so nothing
+           is meant to show through. The page's own turf (#app / #stage in
+           game.css, the recipe the main menu paints) is now only the floor of
+           last resort for a frame the ground has not painted yet. */
         renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     } catch (e) {
         fail('WebGL is unavailable in this browser: ' + e.message);
         return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    /* Fully transparent clear: the surround is painted by CSS (turf gradient +
-       mown bands + grain), so the ground plane's edge has to end in nothing
-       rather than in a flat fill. makePitchTexture() fades the plane's border
-       to alpha 0 so the two layers meet invisibly. */
+    /* Fully transparent clear. The grass fills the frame now — the pitch
+       plane, and behind it the outfield from makeOutfieldTexture() — so the
+       clear colour is only ever reached outside the ground, i.e. nowhere a
+       camera fit can see. Left transparent (rather than filled with turf green)
+       so that an early frame falls back to the page's own turf instead of to a
+       flat colour. */
     renderer.setClearColor(0x0e2413, 0);
 
     const scene = new THREE.Scene();
@@ -779,18 +783,13 @@ import {
         }
         g.restore();
 
-        /* daylight fall-off — shade gathering along the touchlines. Kept shallow:
-           from a top-down camera a strong vignette reads as a spotlight. */
-        [0, 1].forEach(axis => {
-            const len = axis ? cw : ch;
-            const edge = g.createLinearGradient(0, 0, axis ? len : 0, axis ? 0 : len);
-            edge.addColorStop(0, 'rgba(2,16,8,.30)');
-            edge.addColorStop(.17, 'rgba(2,16,8,0)');
-            edge.addColorStop(.83, 'rgba(2,16,8,0)');
-            edge.addColorStop(1, 'rgba(2,16,8,.30)');
-            g.fillStyle = edge;
-            g.fillRect(0, 0, cw, ch);
-        });
+        /* No daylight fall-off. This border used to carry a 30% wash of
+           rgba(2,16,8) so that the plane's outer 16–23 m settled into the darker
+           backdrop it met there. The grass now continues past it (see
+           makeOutfieldTexture), so the wash has nothing left to settle into and
+           reads as a black rim drawn around the field. The wear pass below is
+           the shading that stays: a scuffed goalmouth is turf, not a vignette,
+           and it sits well inside the field. */
 
         /* worn goalmouths — a hint of scuffed, yellower grass where the play
            actually happens, which is what separates a pitch from a pattern. */
@@ -881,28 +880,114 @@ import {
            in the HUD docks rather than printed on the turf. Anything else
            painted here only made the grass look less like grass. */
 
-        /* Edge feather. The canvas is transparent and the page's own turf
-           background (#app / #stage in game.css — the same recipe the main menu
-           paints) is what surrounds the ground plane, so the grass must dissolve
-           into that backdrop instead of stopping at a hard rectangle. The last
-           7 m of painted run-off is erased to alpha 0 on all four sides. */
-        const fade = 7 * M;
-        g.save();
-        g.globalCompositeOperation = 'destination-out';
-        const feather = (ax, ay, bx, by) => {
-            const gr = g.createLinearGradient(ax, ay, bx, by);
-            gr.addColorStop(0, 'rgba(0,0,0,1)');    // at the border — fully erased
-            gr.addColorStop(1, 'rgba(0,0,0,0)');    // inward — painted ground
-            g.fillStyle = gr;
-            g.fillRect(0, 0, cw, ch);
+        /* No edge feather. The border is painted like any other metre of
+           run-off, which is all it needs to be: the outfield carries this
+           texture's own base green, its 13.3 m cuts at this texture's mown
+           phase, its blade strokes at the same density and its two lights, so
+           the two surfaces are one. Erasing the border to alpha 0 would only
+           undo that — destination-out leaves the colour multiplied by that
+           alpha, and a transparent plane multiplies it again when it is drawn,
+           which turns the fade into a soft black band. That band is a second
+           dark ring around the field, and the fix for it is to not need a fade
+           at all. */
+
+        const tex = new THREE.CanvasTexture(c);
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1;
+        return tex;
+    }
+
+    /* --- the outfield: the pitch's own grass, carried across the whole screen --
+       The pitch plane is only 96 × 133 m of the world, and everything outside it
+       used to be the renderer's clear colour — the page's CSS turf, which is a
+       darker, diagonally-banded backdrop that reads as a different surface. This
+       plane lays the pitch's surface over the rest of the canvas instead, so the
+       frame is grass edge to edge and it is the markings, not a colour change,
+       that say where the pitch is.
+
+       It is drawn from the pitch's recipe — the same base green, the same mown
+       cut in the same lighter green, the same blade strokes at the same alpha and
+       the same blades per square metre — and lit by the same hemisphere + key
+       lights, so the two surfaces do not merely abut; they are one surface.
+
+       Three details are what make them agree instead of nearly agree:
+         • The cut. A mown cut is GROUND_M.y / 10 = 13.3 m and the tile is ten of
+           them (133 m), so the pattern closes on itself every repeat — ten is
+           even, which is what lets the light/dark parity survive the wrap. Bands
+           are lit by the pitch's rule, "cut k, counted from the halfway line, is
+           lighter when k is even", and the plane carries an even number of tiles
+           centred on the world origin, so cut 0 sits on the tile's own edge and
+           the mowing runs straight through the plane's boundary instead of
+           stepping half a cut at it.
+         • The scale. 2048 px over 133 m is 15.4 px per metre against the pitch's
+           15 — 2.6% out, which is invisible at 16% alpha — and a power of two, so
+           mipmaps and RepeatWrapping are safe on every renderer.
+         • The seam. Any blade stroke crossing an edge is stamped again on the far
+           side, so the tile is genuinely seamless and not merely close.
+       No wear, no markings and no fall-off here: the only thing that separates
+       the painted field from the plain grass around it is the paint on it — the
+       lines, the arcs, the nets and the goalmouth scuff. */
+    const OUTFIELD_TILE_M = GROUND_M.y;                     // 133 m — ten mown cuts
+    const OUTFIELD_TILES = 8;                               // even, so a tile edge lands on m = 0
+    const OUTFIELD_M = OUTFIELD_TILE_M * OUTFIELD_TILES;    // 1064 m — ±532 m of grass
+
+    function makeOutfieldTexture(px) {
+        const M = px / OUTFIELD_TILE_M;          // pixels per metre (~15.4)
+        const U = M * PITCH_M.y / 100;           // pixels per canonical game unit
+        const c = document.createElement('canvas');
+        c.width = px; c.height = px;
+        const g = c.getContext('2d');
+
+        /* turf — the pitch's two greens, unmixed */
+        g.fillStyle = '#1e4726';
+        g.fillRect(0, 0, px, px);
+        g.fillStyle = '#245229';
+        const band = GROUND_M.y / 10;             // 13.3 m — the pitch's cut width
+        const cuts = OUTFIELD_TILE_M / band;      // 10 — even, so the wrap keeps parity
+        /* the cut the tile's -m edge sits on, measured in cuts from the halfway
+           line; the loop then lights the same cuts the pitch lights, so a band
+           that is lighter on the field is lighter the whole way up the screen */
+        const firstCut = -Math.round(OUTFIELD_M / 2 / band);
+        for (let j = 0; j < cuts; j++) {
+            if ((firstCut + j) % 2 !== 0) continue;
+            /* three.js flips a canvas texture's Y, so canvas row 0 is the tile's
+               +m edge and cut j is measured up from the bottom of the canvas */
+            g.fillRect(0, px - (j + 1) * band * M, px, band * M + 0.5);
+        }
+
+        /* blades — same strokes, same weight, same density as the pitch's (4600
+           of them over 96 × 133 m). A stroke that runs off an edge is drawn again
+           on the far side, which is the whole of the seamlessness. */
+        const seg = (x0, y0, x1, y1) => {
+            g.beginPath();
+            g.moveTo(x0, y0);
+            g.lineTo(x1, y1);
+            g.stroke();
         };
-        feather(0, 0, fade, 0);
-        feather(cw, 0, cw - fade, 0);
-        feather(0, 0, 0, fade);
-        feather(0, ch, 0, ch - fade);
+        g.save();
+        g.globalAlpha = .16;
+        g.lineWidth = 1;
+        const blades = Math.round(4600 * OUTFIELD_TILE_M / GROUND_M.x);   // ≈ 6373
+        for (let i = 0; i < blades; i++) {
+            const x = Math.random() * px, y = Math.random() * px;
+            const x2 = x + (Math.random() - .5) * 1.8 * U;
+            const y2 = y - (1.2 + Math.random() * 3.4) * U;
+            g.strokeStyle = Math.random() < .52 ? '#2f6234' : '#173a1e';
+            const xs = [0], ys = [0];
+            if (Math.min(x, x2) < 0) xs.push(px);
+            if (Math.max(x, x2) > px) xs.push(-px);
+            if (Math.min(y, y2) < 0) ys.push(px);
+            if (Math.max(y, y2) > px) ys.push(-px);
+            for (const ox of xs) for (const oy of ys) seg(x + ox, y + oy, x2 + ox, y2 + oy);
+        }
         g.restore();
 
         const tex = new THREE.CanvasTexture(c);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        /* one repeat per tile: the plane is an even number of 133 m tiles, so the
+           world origin — the halfway line, and the pitch texture's own phase — is
+           a tile boundary and the two surfaces share one mown pattern */
+        tex.repeat.set(OUTFIELD_TILES, OUTFIELD_TILES);
         tex.anisotropy = renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1;
         return tex;
     }
@@ -912,25 +997,27 @@ import {
        texture share one scale and the pitch is a true 105 × 68 m. */
     const pitchPlane = new THREE.Mesh(
         new THREE.PlaneGeometry(GROUND_M.x * UPM, GROUND_M.y * UPM * ZSTRETCH),
-        /* 15 px per metre of ground held constant: 15 × 133 = 1995 */
+        /* 15 px per metre of ground held constant: 15 × 133 = 1995. Opaque — the
+           artwork is painted right out to the plane's border and the outfield
+           carries it on from there, so there is no fade left to blend and no
+           transparent pass to sort. */
         new THREE.MeshLambertMaterial({ map: makePitchTexture(1995) })
     );
     pitchPlane.rotation.x = -Math.PI / 2;
     pitchPlane.position.y = 0;
     scene.add(pitchPlane);
 
-    /* the surround, painted in the renderer's own clear colour so the plane's
-       edge cannot show a seam — the ground simply fades into the void */
-    const apron = new THREE.Mesh(
-        new THREE.PlaneGeometry(1200, 1200 * ZSTRETCH),
-        new THREE.MeshBasicMaterial({ color: 0x0e2413, transparent: true, opacity: 0 })
+    /* the outfield: the same grass, filling the rest of the frame. Sized in whole
+       tiles so the mown phase stays anchored to the world origin, and set a hair
+       under the pitch plane so the pitch's artwork always wins the depth test and
+       this surface is only ever seen beyond the plane's border. */
+    const outfield = new THREE.Mesh(
+        new THREE.PlaneGeometry(OUTFIELD_M * UPM, OUTFIELD_M * UPM * ZSTRETCH),
+        new THREE.MeshLambertMaterial({ map: makeOutfieldTexture(2048) })
     );
-    apron.rotation.x = -Math.PI / 2;
-    apron.position.y = -0.06;
-    /* kept (so the pitch plane never lies flush with nothing at grazing angles)
-       but invisible: an opaque apron would mask the CSS turf background. */
-    apron.visible = false;
-    scene.add(apron);
+    outfield.rotation.x = -Math.PI / 2;
+    outfield.position.y = -0.06;
+    scene.add(outfield);
 
     /* --- 3D goal frames (the ground is 2D; the furniture is real 3D) --- */
     function makeGoal(gy) {

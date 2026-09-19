@@ -140,6 +140,11 @@ body {
    THE APP SHELL — one stage, the pitch, and inert overlays on top of it
    ========================================================================= */
 
+/* The shell's turf. The canvas over it now paints the ground edge to edge — the
+   pitch plane and, behind it, the outfield grass in game-source.js — so this
+   recipe is only ever the floor of last resort: the frame before the first WebGL
+   render. #screen-menu re-declares the same values for the start screen, which
+   has no canvas over it and is meant to read dark. */
 #app {
     position: fixed;
     inset: 0;
@@ -175,11 +180,12 @@ body {
     touch-action: none;
     /* Pointer Events own every gesture */
     cursor: crosshair;
-    /* NOT --pitch-turf. The canvas is transparent now (renderer alpha + a
-       clear alpha of 0, plus a feathered edge on the ground plane), so the
-       #stage turf recipe directly behind it — the same gradient, mown bands and
-       grain the main menu paints — is what surrounds the painted ground. Painting
-       an opaque fill here would put the flat colour back and hide it. */
+    /* NOT --pitch-turf. The canvas is transparent (renderer alpha + a clear
+       alpha of 0) and the ground covers every pixel of it — the pitch plane and
+       the outfield grass behind it — so the #stage turf recipe directly behind
+       this element is only ever the floor of last resort: a frame the ground has
+       not painted yet. Painting an opaque fill here would put the flat colour
+       back and hide that. */
     background: transparent;
 }
 

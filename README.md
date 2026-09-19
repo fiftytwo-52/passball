@@ -35,7 +35,9 @@ There is no play cap and no "first to N" — a match runs its two halves, and a 
 
 - **True 3D characters, undistorted 2D pitch.** Humanoids are WebGL meshes; the pitch is a Canvas2D-drawn
   texture. A tilted orthographic camera plus a `1/cos(TILT)` depth stretch means the 2D artwork projects
-  **1:1 on screen** while the players remain genuinely three-dimensional.
+  **1:1 on screen** while the players remain genuinely three-dimensional. That surface is tiled outward as an
+  outfield — the identical greens, mown cuts and blades, phase-locked at the halfway line — so grass fills the
+  frame at every viewport and it is the markings, not a colour change, that say where the pitch is.
 - **A pure rulebook with no second copy.** [`src/scripts/rules.js`](src/scripts/rules.js:17) is positions in,
   outcomes out — no Three.js, no DOM, no `window`. The page imports it and [`tools/verify-4.mjs`](tools/verify-4.mjs)
   imports *the same file*, so the tests cannot drift from the shipped algorithm.
