@@ -204,7 +204,7 @@ body {
 #hud-pens,
 #role-strip,
 #hud-bottom,
-
+#plan-panel,
 #goal-fx {
     pointer-events: none;
 }
@@ -335,55 +335,48 @@ body {
 .hud-left {
     display: flex;
     align-items: center;
-    flex: 0 1 auto;
+    flex: 1 1 0;
     min-width: 0;
+    justify-content: flex-start;
+}
+
+.hud-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    min-width: 0;
+    pointer-events: none;
 }
 
 .hud-right {
     display: flex;
     align-items: center;
-    flex: none;
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: flex-end;
     pointer-events: none;
 }
 
 .hud-capsule {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    /* `space-between` only ever bites when #role-strip is hidden (during a
-       shootout): the slack-absorbing situation field is gone, so the scoreline
-       and the clock fall to the two ends instead of bunching left. */
-    justify-content: space-between;
-    /* ONE ROW. Wrapping is what made this element tall enough to be a bar across
-       the top of the pitch: with `flex-wrap: wrap` and a full-width basis the
-       situation field dropped to a second line on every phone. It never wraps
-       now, and the row is content-sized (`flex: 0 1 auto`) rather than
-       slack-absorbing, so the capsule is exactly as wide as its fields. */
+    justify-content: flex-start;
     flex-wrap: nowrap;
-    gap: 6px 8px;
+    gap: 8px;
     flex: 0 1 auto;
     min-width: 0;
     max-width: 100%;
     width: auto;
-    padding: 7px 9px;
-    border-radius: 26px;
-    /* Turf-tinted, but see-through: the blur does the work of separating the
-       chrome from the pitch, so the fill only has to nudge the hue. */
-    background: var(--cap-fill);
-    border: 1px solid var(--turf-line);
-    backdrop-filter: blur(8px) saturate(120%);
-    -webkit-backdrop-filter: blur(8px) saturate(120%);
-    box-shadow: 0 12px 28px -16px rgba(0, 0, 0, 0.7);
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    border: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
     color: var(--chalk);
     pointer-events: auto;
-}
-
-/* The tint is only this light because the blur is doing the separating. Where
-   there is no blur to lean on, the fill has to carry it alone. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-
-    .hud-capsule {
-        background: rgba(8, 20, 13, 0.82);
-    }
 }
 
 #hud-top[hidden],
@@ -393,102 +386,162 @@ body {
     display: none;
 }
 
-/* --- field 2: the situation read-out -------------------------------------
-   Which end you are playing toward, and whose ball it is — the two facts that
-   decide the next prompt. `flex: 1 1 auto` makes this the slack-absorber of the
-   row: it soaks up whatever the scoreline and the clock leave, which parks the
-   pair dead centre between them without a single margin being pinned. It is the
-   one field that may drop to its own line, and it takes the hairline with it —
-   the same divider the menu uses between its tag row and its utility row.
-
-   The engine owns this element's `.hidden` (the shootout swap flips it), so it
-   keeps its id and its single `.status-row` child. */
-#role-strip {
-    display: flex;
-    flex: 0 1 auto;
-    justify-content: center;
-    /* Shrinks before anything else in the row and clips rather than wraps: the
-       two pills are `white-space: nowrap`, so the field can lose width without
-       ever adding a line of height to the capsule. */
-    min-width: 0;
-    overflow: hidden;
+/* --- field 1: timer + score on the left (housed in a sleek pill) --- */
+.score-timer-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 9px 3px 8px;
+    border-radius: 999px;
+    background: rgba(8, 20, 13, 0.68);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(10px) saturate(120%);
+    -webkit-backdrop-filter: blur(10px) saturate(120%);
+    box-shadow: 0 4px 14px -2px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.08);
+    flex: none;
 }
 
-/* --- field 1: the scoreline ----------------------------------------------
-   The one number you must never have to hunt for. It is no longer an ink pill
-   of its own — the capsule is the pill now — so it keeps only its two kit
-   colours and a shadow strong enough to hold the numerals off a bright pitch. */
-.score-mini {
+.score-timer-group .clock-wrap {
+    order: 1;
+}
+
+.score-timer-group .score-timer-divider {
+    order: 2;
+    width: 1px;
+    height: 14px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 1px;
+    flex: none;
+}
+
+.score-timer-group .score-mini {
+    order: 3;
     display: inline-flex;
     align-items: baseline;
-    gap: 6px;
+    gap: 4px;
     flex: none;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 .sc {
     font-family: var(--f-mono);
-    font-size: clamp(1rem, 3.4vmin, 1.35rem);
-    font-weight: 600;
+    font-size: clamp(0.95rem, 3.6vmin, 1.25rem);
+    font-weight: 700;
     line-height: 1;
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 6px rgba(0, 0, 0, 0.75);
 }
 
-/* the two kits, as text — the same mint/pink contract the pitch uses */
 #score-you {
     color: var(--x-you);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 6px rgba(110, 231, 183, 0.45);
 }
 
 #score-cpu {
     color: var(--x-cpu);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 6px rgba(248, 113, 113, 0.45);
 }
 
 .sc-dash {
-    font-size: clamp(0.8rem, 2.4vmin, 1rem);
+    font-size: clamp(0.75rem, 2.4vmin, 0.9rem);
     line-height: 1;
     color: var(--on-glass-mute);
+    opacity: 0.75;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
 }
 
-/* --- field 2's two pills -------------------------------------------------
-   Deliberately quiet: they answer "which end am I playing toward" and "whose
-   ball is it" without competing with the scoreline. They wear the menu's `.cap`
-   recipe — an inset dark pill inside a turf hairline — so the nested chrome
-   reads as one material as the capsule it sits in. */
+.clock-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 1px;
+    flex: none;
+    min-width: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    box-shadow: none;
+}
+
+.clock-half {
+    font-family: 'Rajdhani', var(--f-sans);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sage-dim);
+    line-height: 1;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 6px rgba(0, 0, 0, 0.7);
+}
+
+.clock-row {
+    display: flex;
+    align-items: baseline;
+    gap: 3px;
+}
+
+.clock-num {
+    font-family: var(--f-mono);
+    font-size: clamp(11px, 2.9vmin, 13px);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
+    color: var(--chalk);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 6px rgba(0, 0, 0, 0.7);
+}
+
+.clock-wrap.low .clock-num,
+.clock-wrap.low .clock-half {
+    color: var(--amber);
+    text-shadow: 0 0 8px rgba(242, 166, 60, 0.65);
+}
+
+/* --- field 2: situation read-out (role badge + possession chip at center) --- */
+#role-strip {
+    display: flex;
+    flex: 0 1 auto;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    background: none;
+    border: none;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    pointer-events: auto;
+}
+
 .status-row {
     display: flex;
     align-items: center;
-    justify-content: center;
-    /* nowrap on purpose — see #role-strip: a wrapped pair of pills is a second
-       row of capsule height, which is the whole thing being removed here. */
     flex-wrap: nowrap;
     gap: 6px;
     min-width: 0;
-    overflow: hidden;
 }
 
-/* The engine assigns `className` outright, so this element carries no other
-   class — `.attack` and `.defend` are the only two states it can be in. Both
-   selectors are kept with the same body on purpose: they are two spellings of
-   one pill, and the engine's outright `className` write means neither may ever
-   gain a third class to share. */
 #role-badge,
 .chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    height: 22px;
-    padding: 0 9px;
-    border-radius: 999px;
-    background: var(--cap-fill-2);
-    border: 1px solid var(--turf-line);
-    font-family: var(--f-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
+    gap: 4px;
+    height: auto;
+    padding: 2px 4px;
+    border-radius: 0;
+    background: none;
+    border: none;
+    box-shadow: none;
+    font-family: 'Rajdhani', var(--f-sans);
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--sage);
+    color: var(--sage-dim);
     white-space: nowrap;
+    line-height: 1;
+    user-select: none;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 6px rgba(0, 0, 0, 0.7);
 }
 
 #role-badge::before {
@@ -498,23 +551,31 @@ body {
     border-radius: var(--r-full);
     background: currentColor;
     flex: none;
+    box-shadow: 0 0 6px currentColor;
 }
 
-/* defending is the "read it" verb, so it gets the accent; attacking stays quiet */
 #role-badge.defend {
-    border-color: rgba(242, 166, 60, 0.5);
+    border: none;
+    background: none;
     color: var(--amber);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 8px rgba(242, 166, 60, 0.65);
 }
 
-/* --- possession chip ---------------------------------------------------- */
+#role-badge.attack {
+    border: none;
+    background: none;
+    color: var(--sage);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 8px rgba(140, 240, 180, 0.45);
+}
+
 .chip {
-    padding: 0 9px 0 8px;
-    letter-spacing: 0.08em;
+    padding: 2px 4px;
+    color: var(--chalk);
 }
 
 .chip .dot {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: var(--r-full);
     background: currentColor;
     display: inline-block;
@@ -523,68 +584,12 @@ body {
 
 .chip.you .dot {
     background: var(--x-you);
+    box-shadow: 0 0 7px var(--x-you);
 }
 
 .chip.cpu .dot {
     background: var(--x-cpu);
-}
-
-/* ============================================================================
-   THE MATCH CLOCK (§8)
-   ----------------------------------------------------------------------------
-   Top-right, in minimal mono text, with a hairline that drains as the half runs
-   out. Written by the engine only when the displayed second changes. The last
-   15 seconds turn it warm — the one moment the chrome is allowed to go amber.
-   ========================================================================= */
-
-/* --- field 3: the half clock ---------------------------------------------
-   The right end of the capsule, still a stacked read-out: half label over the
-   numerals over the draining hairline. It is a *field* now, not a floating
-   column with padding of its own, so it is narrow, centred, and carries no fill —
-   the capsule is the pill.
-
-   It deliberately keeps its own inks (sage + chalk + amber) instead of
-   inheriting the capsule's, because the low-clock state has to stay legible
-   against the turf fill. It also keeps its own width: the line's drain is a
-   proportion, and a field that shrank as the digits changed would make the bar
-   crawl sideways every second.
-
-   DOM CONTRACT: #clock must stay exactly two levels below this element — the
-   engine toggles `.low` on `#clock.parentElement.parentElement`, i.e. here. */
-.clock-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-    flex: none;
-    min-width: clamp(58px, 13vmin, 86px);
-    padding: 0 2px;
-}
-
-.clock-half {
-    font-family: var(--f-mono);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--sage);
-    line-height: 1;
-}
-
-.clock-row {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.clock-num {
-    font-family: var(--f-mono);
-    font-size: clamp(0.95rem, 2.8vmin, 1.2rem);
-    font-weight: 600;
-    line-height: 1;
-    letter-spacing: -0.01em;
-    color: var(--chalk);
-    font-variant-numeric: tabular-nums;
+    box-shadow: 0 0 7px var(--x-cpu);
 }
 
 .clock-extra {
@@ -1003,6 +1008,100 @@ body {
    nothing.
    ========================================================================= */
 
+#plan-panel {
+    position: absolute;
+    /* The centre of the box the board is actually painted into — not 50% of the
+       stage. fitView() writes it, because the frame is inset by whatever the HUD
+       currently occupies, so the decision ring stays on the painted centre
+       circle even with the docks reserved. Falls back to the stage centre. */
+    left: var(--ring-cx, 50%);
+    top: var(--ring-cy, 50%);
+    z-index: 3;
+    width: var(--ring-d, 160px);
+    height: var(--ring-d, 160px);
+    /* centred on the pitch centre spot */
+    transform: translate(-50%, -50%);
+    transform-origin: 50% 50%;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: ring-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#plan-panel[hidden] {
+    display: none;
+}
+
+@keyframes ring-in {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.86);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+}
+
+#plan-panel .ring {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    /* the live arc sits proud of the grass line, so it must not be clipped */
+    overflow: visible;
+    /* 12 o'clock start: rotated 90 deg counter-clockwise so 0 dashoffset starts at top */
+    transform: rotate(-90deg);
+}
+
+.ring-track {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.18);
+    stroke-width: 1.4;
+}
+
+/* `pathLength="1"` on the circle makes the dash maths resolution-independent:
+   the engine only ever writes a 0…1 number here, never a pixel length. */
+.ring-fill {
+    fill: none;
+    stroke: #2bf090;
+    stroke-width: 2.6;
+    stroke-linecap: round;
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+    will-change: stroke-dashoffset;
+    filter: drop-shadow(0 0 6px rgba(43, 240, 144, 0.6));
+    transition: stroke 0.3s ease, filter 0.3s ease;
+}
+
+/* When CPU is attacking / ball belongs to CPU */
+#plan-panel.atk-cpu .ring-fill {
+    stroke: #ff9f1c;
+    filter: drop-shadow(0 0 8px rgba(255, 159, 28, 0.65));
+}
+
+/* Three seconds or less left: urgent warning amber/red breathing pulse */
+#plan-panel.low .ring-track {
+    stroke: rgba(255, 68, 68, 0.35);
+}
+
+#plan-panel.low .ring-fill {
+    stroke: #ff4757;
+    filter: drop-shadow(0 0 12px rgba(255, 71, 87, 0.9));
+    animation: ring-pulse 0.55s ease-in-out infinite;
+}
+
+@keyframes ring-pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.45;
+    }
+}
+
 /* ============================================================================
    HUD — BOTTOM: two corner controls, one instruction line, one outcome banner
    ----------------------------------------------------------------------------
@@ -1051,26 +1150,25 @@ body {
     justify-self: start;
 }
 
-/* In-match instruction — the middle track, between the two buttons. Read,
-   never tapped: it tints the grass (glass-xthin) instead of covering it, and
-   legibility is carried by a text-shadow rather than the fill. */
+/* In-match instruction — the middle track between the two buttons on phone,
+   right side on PC. Background and border removed; legibility is carried by
+   text-shadow over the pitch. */
 #instruction {
     grid-column: 2;
     justify-self: center;
     align-self: center;
     margin: 0;
     max-width: 100%;
-    padding: 6px 12px;
-    border-radius: var(--r-full);
-    background: var(--glass-xthin);
-    border: 1px solid var(--glass-line-soft);
-    color: var(--on-glass-mute);
+    padding: 4px 8px;
+    background: none;
+    border: none;
+    color: var(--on-glass);
     font-family: var(--f-mono);
     font-size: 10.5px;
     font-weight: 500;
     letter-spacing: 0.06em;
     text-align: center;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.7);
     pointer-events: none;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1082,6 +1180,11 @@ body {
 /* Empty most of the time (shootout / screens): no text, no box. */
 #instruction:empty {
     display: none;
+}
+
+/* Match Log — PC screen only, hidden by default on mobile / small screens */
+#match-log {
+    display: none !important;
 }
 
 /* SHOOT — right corner. */
@@ -1757,74 +1860,129 @@ body {
     color: var(--sage-dim);
 }
 
-/* --- the quick strip -----------------------------------------------------
-   One horizontally scrollable row of chips. Each chip carries the engine's own
-   `.segmented` group, so the pressed pill *is* the value and the strip never
-   keeps a second copy of a setting that could drift. */
+/* --- the quick settings grid ---------------------------------------------
+   A compact 2x2 grid (or 4-across on wider cards) of styled dropdown selects.
+   No horizontal scrollbar, perfectly responsive and accessible. */
 #screen-menu .quick {
-    display: flex;
-    gap: 8px;
-    padding-bottom: 12px;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 10px;
+    padding-bottom: 8px;
+    width: 100%;
 }
 
-#screen-menu .quick::-webkit-scrollbar {
-    display: none;
+@media (min-width: 500px) {
+    #screen-menu .quick {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+    }
 }
 
 #screen-menu .qchip {
     display: flex;
-    flex: 0 0 auto;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border: 1px solid var(--turf-line);
-    border-radius: 12px;
-    background: rgba(0, 0, 0, 0.2);
+    flex-direction: column;
+    gap: 5px;
+    padding: 7px 10px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    background: rgba(14, 26, 18, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+#screen-menu .qchip:hover,
+#screen-menu .qchip:focus-within {
+    border-color: rgba(242, 166, 60, 0.45);
+    background: rgba(18, 32, 22, 0.88);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
 
 #screen-menu .qchip-label {
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-    color: var(--sage);
-}
-
-/* The engine's segmented control, re-inked for turf. These are the same nodes
-   the in-game sheet edits, so they keep `.segmented`; only the skin changes —
-   a flat pill row inside the chip, with the pressed pill in amber. */
-#screen-menu .qchip .segmented {
-    gap: 2px;
-    padding: 0;
-    border: 0;
-    border-radius: 999px;
-    background: transparent;
-}
-
-#screen-menu .qchip .segmented button {
-    min-height: 24px;
-    padding: 0 8px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    gap: 5px;
     font-family: 'Rajdhani', var(--f-sans);
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.02em;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
     color: var(--sage);
+    user-select: none;
+    cursor: pointer;
 }
 
-#screen-menu .qchip .segmented button:hover {
-    background: rgba(255, 255, 255, 0.14);
+#screen-menu .qchip-icon {
+    flex: none;
+    width: 13px;
+    height: 13px;
+    color: var(--amber);
+    opacity: 0.9;
+}
+
+#screen-menu .select-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+#screen-menu .setting-select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    width: 100%;
+    min-height: 28px;
+    padding: 3px 22px 3px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    font-family: 'Rajdhani', var(--f-sans);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
     color: var(--chalk);
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
-#screen-menu .qchip .segmented button[aria-pressed='true'] {
-    background: var(--amber);
-    color: var(--amber-ink);
+#screen-menu .setting-select:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+}
+
+#screen-menu .setting-select:focus {
+    border-color: var(--amber);
+    background: rgba(242, 166, 60, 0.12);
+    box-shadow: 0 0 0 2px rgba(242, 166, 60, 0.25);
+    color: #ffffff;
+}
+
+#screen-menu .setting-select option {
+    background-color: #121f17;
+    color: #f2f7f3;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 10px;
+}
+
+#screen-menu .select-chevron {
+    position: absolute;
+    right: 8px;
+    pointer-events: none;
+    width: 10px;
+    height: 10px;
+    stroke: var(--amber);
+    transition: transform 0.2s ease;
+}
+
+#screen-menu .select-wrapper:hover .select-chevron {
+    transform: translateY(1px);
 }
 
 /* --- the kick-off CTA --------------------------------------------------- */
@@ -2389,10 +2547,6 @@ body {
         font-size: 17px;
     }
 
-    .hud-capsule {
-        padding: 7px 10px;
-    }
-
     .btn-icon-xs {
         width: 34px;
         height: 34px;
@@ -2416,6 +2570,30 @@ body {
     :root {
         --hud-bar-h: 62px;
     }
+
+    .hud-capsule {
+        padding: 0;
+        gap: 6px;
+    }
+
+    .score-timer-group {
+        padding: 2.5px 8px 2.5px 7px;
+        gap: 6px;
+    }
+
+    .sc {
+        font-size: clamp(0.92rem, 3.8vmin, 1.15rem);
+    }
+
+    .clock-wrap {
+        min-width: 0;
+    }
+
+    #role-badge,
+    .chip {
+        font-size: 9.5px;
+        gap: 3px;
+    }
 }
 
 /* ============================================================================
@@ -2429,7 +2607,7 @@ body {
    ========================================================================= */
 @media (min-width: 860px) {
     #hud-top {
-        padding: calc(14px + var(--sa-t)) calc(24px + var(--sa-r)) 0 calc(24px + var(--sa-l));
+        padding: calc(26px + var(--sa-t)) calc(24px + var(--sa-r)) 0 calc(24px + var(--sa-l));
         pointer-events: none;
         display: flex;
         justify-content: space-between;
@@ -2452,77 +2630,138 @@ body {
         flex: none;
     }
 
-    /* Unified Single Top-Left Capsule Design */
+    .hud-center {
+        display: none;
+    }
+
+    /* Unified Single Capsule Design: On PC, docked to the top left */
     .hud-capsule {
-        position: relative;
+        position: fixed;
+        left: calc(24px + var(--sa-l));
+        top: calc(26px + var(--sa-t));
+        bottom: auto;
         display: inline-flex;
         align-items: center;
-        justify-content: flex-start;
+        justify-content: center;
         background: var(--cap-fill);
         border: 1px solid var(--turf-line);
         backdrop-filter: blur(14px) saturate(120%);
         -webkit-backdrop-filter: blur(14px) saturate(120%);
         box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.7);
         border-radius: 999px;
-        padding: 6px clamp(12px, 1.4vw, 18px);
-        gap: clamp(10px, 1.4vw, 18px);
-        width: auto;
-        max-width: 100%;
+        padding: 7px 16px;
+        gap: 12px;
+        z-index: 4;
         pointer-events: auto;
         flex-wrap: nowrap;
     }
 
-    /* Situation / Possession Guide - Left of capsule */
-    #role-strip {
-        order: 1;
-        display: flex;
-        flex: 0 0 auto;
-        justify-content: flex-start;
+    /* Unified score-timer group is transparent on PC so original HUD layout is preserved */
+    .score-timer-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
         background: none;
         border: none;
         box-shadow: none;
-        backdrop-filter: none;
-        -webkit-backdrop-filter: none;
         padding: 0;
+        border-radius: 0;
     }
 
-    /* Scoreline - Center of capsule */
+    .score-timer-divider {
+        display: none;
+    }
+
+    /* Scoreline - Left inside capsule */
     .score-mini {
-        order: 2;
+        order: 1;
         display: inline-flex;
         align-items: baseline;
         justify-content: center;
         gap: 8px;
+        padding: 0 12px 0 2px;
+        border-right: 1px solid rgba(255, 255, 255, 0.12);
         background: none;
-        border: none;
+        border-top: none;
+        border-bottom: none;
+        border-left: none;
         box-shadow: none;
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
-        padding: 0 4px;
     }
 
-    /* Match Clock - Right of capsule */
+    /* Match Clock - Right inside capsule */
     .clock-wrap {
-        order: 3;
+        order: 2;
         margin-left: 0;
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 2px;
-        min-width: clamp(62px, 6vw, 84px);
+        gap: 1px;
+        min-width: 58px;
         background: none;
         border: none;
         box-shadow: none;
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
         padding: 0;
+    }
+
+    /* Defend / Attack & Possession Section — Docked on the right side above quick guide (PC only) */
+    #role-strip {
+        display: none;
+    }
+
+    #role-strip:not([hidden]) {
+        position: fixed;
+        right: calc(24px + var(--sa-r));
+        bottom: calc(50% + 14px);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--cap-fill);
+        border: 1px solid var(--turf-line);
+        backdrop-filter: blur(14px) saturate(120%);
+        -webkit-backdrop-filter: blur(14px) saturate(120%);
+        box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.7);
+        border-radius: 999px;
+        padding: 7px 14px;
+        z-index: 4;
+        pointer-events: auto;
+    }
+
+    #role-strip .status-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    #role-strip #role-badge,
+    #role-strip .chip {
+        height: 22px;
+        padding: 0 9px;
+        font-size: 10px;
+        gap: 5px;
+        background: rgba(0, 0, 0, 0.22);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 999px;
+    }
+
+    #role-strip #role-badge.defend {
+        border-color: rgba(242, 166, 60, 0.45);
+        background: rgba(242, 166, 60, 0.14);
+    }
+
+    #role-strip #role-badge.attack {
+        border-color: rgba(140, 240, 180, 0.3);
+        background: rgba(140, 240, 180, 0.08);
     }
 
     /* Hamburger Menu Button - Anchored at Top Right */
     #btn-menu-open {
         order: 4;
         position: fixed;
-        top: calc(14px + var(--sa-t));
+        top: calc(26px + var(--sa-t));
         right: calc(24px + var(--sa-r));
         left: auto;
         transform: none;
@@ -2558,7 +2797,7 @@ body {
     .hud-sheet {
         left: auto;
         right: calc(24px + var(--sa-r));
-        top: calc(14px + var(--sa-t) + 48px);
+        top: calc(26px + var(--sa-t) + 48px);
         width: 280px;
     }
 
@@ -2601,19 +2840,17 @@ body {
         padding: 0 clamp(14px, 1.8vw, 20px) 0 clamp(10px, 1.4vw, 16px);
     }
 
-    /* In-match instruction — off the bottom row entirely, docked to the blank
-       right-hand space, vertically centred. Fixed against #stage (which is the
-       positioned ancestor), clear of the top capsule, the bottom-right action
-       row, and the banner above it. */
+    /* In-match instruction — docked on the right side below the role & possession card */
     #instruction {
         position: fixed;
         right: calc(24px + var(--sa-r));
-        top: 50%;
-        transform: translateY(-50%);
+        top: calc(50% - 6px);
+        transform: none;
         z-index: 4;
         max-width: min(240px, 20vw);
         grid-column: auto;
         -webkit-line-clamp: 4;
+        text-align: right;
     }
 
     /* Banner Announcement - Bottom Center */
@@ -2623,6 +2860,133 @@ body {
         left: 50%;
         transform: translateX(-50%);
         pointer-events: none;
+    }
+
+    /* Match Log — docked on the left flank (PC only) */
+    #match-log {
+        display: none;
+    }
+
+    #match-log:not([hidden]) {
+        display: flex !important;
+        flex-direction: column;
+        gap: 6px;
+        position: fixed;
+        left: calc(24px + var(--sa-l));
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 4;
+        width: clamp(180px, 16vw, 224px);
+        pointer-events: none;
+    }
+
+    .match-log-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--f-mono);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        color: var(--on-glass-mute);
+        text-transform: uppercase;
+        padding-bottom: 2px;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+    }
+
+    .match-log-indicator {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--x-you);
+        box-shadow: 0 0 8px var(--x-you);
+        animation: pulse-dot 2s infinite ease-in-out;
+    }
+
+    .match-log-entries {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .match-log-item {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-family: var(--f-mono);
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        line-height: 1.35;
+        padding: 6px 10px;
+        border-radius: 6px;
+        background: rgba(10, 20, 12, 0.55);
+        border-left: 3px solid rgba(255, 255, 255, 0.3);
+        border-top: 1px solid rgba(255, 255, 255, 0.07);
+        border-right: 1px solid rgba(255, 255, 255, 0.07);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        color: var(--on-glass);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+        animation: log-slide-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .match-log-item.you {
+        border-left-color: var(--x-you);
+    }
+    .match-log-item.you .match-log-dot {
+        background: var(--x-you);
+        box-shadow: 0 0 6px var(--x-you);
+    }
+
+    .match-log-item.cpu {
+        border-left-color: var(--x-cpu);
+    }
+    .match-log-item.cpu .match-log-dot {
+        background: var(--x-cpu);
+        box-shadow: 0 0 6px var(--x-cpu);
+    }
+
+    .match-log-item.goal {
+        border-left-color: #ffd700;
+        background: rgba(30, 28, 10, 0.72);
+        color: #fff8e7;
+    }
+    .match-log-item.goal .match-log-dot {
+        background: #ffd700;
+        box-shadow: 0 0 6px #ffd700;
+    }
+
+    .match-log-dot {
+        flex: none;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.4);
+    }
+
+    .match-log-text {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.85); }
+}
+
+@keyframes log-slide-in {
+    from {
+        opacity: 0;
+        transform: translateX(-12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
     }
 }
 

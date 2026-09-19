@@ -93,6 +93,11 @@ import {
         const w = window.innerWidth || 0, h = window.innerHeight || 0;
         return w > 0 && h > 0 && w > h;
     }
+    function isPCView(w, h) {
+        const width = w || (canvas ? canvas.clientWidth : 0) || window.innerWidth || 0;
+        const height = h || (canvas ? canvas.clientHeight : 0) || window.innerHeight || 0;
+        return !isTouchDevice() && width >= 860 && width > height;
+    }
     function syncRotateGate() {
         if (!rotateGate) return;
         /* Desktop/PC: skip everything — no detection, no prompt, no lock. */
@@ -491,7 +496,7 @@ import {
          `ball.air`. The keeper is deliberately NOT exempt — pulling a chip out
          of the air inside his own reach is a catch, not a disruption. */
     const STROKE_MAX = 96;        // points kept per freehand stroke
-    const STROKE_MIN = 10;        // shorter than this is a flick, and a flick is not a strike
+    const STROKE_MIN = 2;         // minimum distance to register stroke power smoothly
     const POWER_LEN = 46;         // stroke length (canonical units) that reads as a full kick
     const AIR_LEN = 34;           // length at which a long stroke goes over the top
     const AIR_CURVE = 1.22;       // path ÷ chord that counts as a deliberate curve
@@ -559,7 +564,7 @@ import {
        bug the defender table below had. */
     const LANE_OFFSET = [-30, -14, 14, 30, -22, 22];
     const LANE_DEPTH = [0.55, 0.82, 0.62, 0.34, 0.40, 0.74];
-    const TAP_SLOP = 6;           // game units a pointer must travel to be a drag
+    const TAP_SLOP = 1.2;         // game units a pointer must travel to be a drag (~12px)
     const DOUBLE_TAP_MS = 340;    // §5 — double-tap to shoot
     const SO_ZOOM = 2.6, SO_PAN_Y = 92;   // §10 penalty view: one end, magnified
     /* --- §11.b the coached opening --------------------------------------- */
@@ -1311,8 +1316,8 @@ import {
                     /* dead centre: split along a fixed axis derived from the pair */
                     const ang = (i * 7 + j * 13) * 2.399963229728653;
                     const px = Math.cos(ang) * maxPush * 0.5, py = Math.sin(ang) * maxPush * 0.5;
-                    if (!a.dive) { a.x = clamp(a.x - px, -OUT_PAD, 100 + OUT_PAD); a.y = clamp(a.y - py, -OUT_PAD, 100 + OUT_PAD); }
-                    if (!b.dive) { b.x = clamp(b.x + px, -OUT_PAD, 100 + OUT_PAD); b.y = clamp(b.y + py, -OUT_PAD, 100 + OUT_PAD); }
+                    if (!a.dive && !a.trapping) { a.x = clamp(a.x - px, -OUT_PAD, 100 + OUT_PAD); a.y = clamp(a.y - py, -OUT_PAD, 100 + OUT_PAD); }
+                    if (!b.dive && !b.trapping) { b.x = clamp(b.x + px, -OUT_PAD, 100 + OUT_PAD); b.y = clamp(b.y + py, -OUT_PAD, 100 + OUT_PAD); }
                     continue;
                 }
                 const push = Math.min((SEPARATE_R - d) * 0.5, maxPush);
@@ -1320,8 +1325,8 @@ import {
                 /* §12.j — the same bounds moveToward() allows: a man chasing a
                    ball into the run-off must not be snapped back onto the pitch
                    by a separation shove. */
-                if (!a.dive) { a.x = clamp(a.x - ux * push, -OUT_PAD, 100 + OUT_PAD); a.y = clamp(a.y - uy * push, -OUT_PAD, 100 + OUT_PAD); }
-                if (!b.dive) { b.x = clamp(b.x + ux * push, -OUT_PAD, 100 + OUT_PAD); b.y = clamp(b.y + uy * push, -OUT_PAD, 100 + OUT_PAD); }
+                if (!a.dive && !a.trapping) { a.x = clamp(a.x - ux * push, -OUT_PAD, 100 + OUT_PAD); a.y = clamp(a.y - uy * push, -OUT_PAD, 100 + OUT_PAD); }
+                if (!b.dive && !b.trapping) { b.x = clamp(b.x + ux * push, -OUT_PAD, 100 + OUT_PAD); b.y = clamp(b.y + uy * push, -OUT_PAD, 100 + OUT_PAD); }
             }
         }
     }
@@ -1390,7 +1395,13 @@ import {
            exception: he is squared back up to his own goal line while the dive
            is up, because the roll below is applied about his local z and a body
            turned side-on would somersault instead of dive. */
-        if (sp > .25 || da > .35) {
+        if (p.hasBall && Number.isFinite(ball.cdx) && Number.isFinite(ball.cdy)) {
+            const target = p.trapping ? p.trapping.toYaw : Math.atan2(ball.cdx, -ball.cdy);
+            let d = target - p.yaw;
+            while (d > Math.PI) d -= Math.PI * 2;
+            while (d < -Math.PI) d += Math.PI * 2;
+            p.yaw += d * Math.min(1, dt * 14);
+        } else if (sp > .25 || da > .35) {
             const target = da > .35 ? (p.team === 'you' ? Math.PI : 0) : Math.atan2(dx, -dy);
             let d = target - p.yaw;
             while (d > Math.PI) d -= Math.PI * 2;
@@ -1515,26 +1526,103 @@ import {
     ballPing.rotation.x = -Math.PI / 2;
     ballPing.position.y = 0.07;
     scene.add(ballPing);
-    /* The possession mark: a three-sided cone flipped apex-down, so from this
-       tilted top view it reads as a flat triangle hanging over the carrier with
-       its point at their head. A cone rather than a flat triangle because a flat
-       one would be squashed to a sliver by the camera tilt; this one keeps its
-       shape from anywhere on the board. 'YXZ' so the yaw is applied last, in
-       world terms, and spinning the mark to the carrier's facing cannot tip the
-       flip over — the flip and the spin are on the same object. */
-    const carrierMark = new THREE.Mesh(
-        new THREE.ConeGeometry(1.0, 0.85, 3),
-        new THREE.MeshBasicMaterial({ color: COL.you, transparent: true, opacity: .95 })
-    );
-    carrierMark.rotation.order = 'YXZ';
+    /* The possession mark: a true volumetric 3D location pin hovering over the carrier's head.
+       Constructed via 3D rotational lathe geometry so it is 100% three-dimensional from all angles,
+       featuring a gleaming white waist collar, bright crown jewel, and soft radiant aura. */
+    const pinGlowTex = (() => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 128;
+        const g = c.getContext('2d');
+        const rad = g.createRadialGradient(64, 64, 4, 64, 64, 62);
+        rad.addColorStop(0, 'rgba(255,255,255,0.95)');
+        rad.addColorStop(0.28, 'rgba(255,255,255,0.65)');
+        rad.addColorStop(0.65, 'rgba(255,255,255,0.18)');
+        rad.addColorStop(1, 'rgba(255,255,255,0)');
+        g.fillStyle = rad; g.fillRect(0, 0, 128, 128);
+        return new THREE.CanvasTexture(c);
+    })();
+
+    const pinGlowMat = new THREE.MeshBasicMaterial({
+        map: pinGlowTex,
+        transparent: true,
+        opacity: 0.6,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+
+    function make3DLocationPinGeometry() {
+        const R = 0.62;      // radius of the spherical head
+        const cy = 1.32;     // vertical center of the head
+        const sinA = Math.min(R / cy, 0.999);
+        const cosA = Math.sqrt(1 - sinA * sinA);
+        const alpha = Math.asin(sinA);
+        const tx = R * cosA, ty = cy - R * sinA;
+
+        const pts = [
+            new THREE.Vector2(0, 0),                       // Needle tip pointing to player
+            new THREE.Vector2(tx * 0.28, ty * 0.28),       // Tapered cone stem
+            new THREE.Vector2(tx * 0.62, ty * 0.62),
+            new THREE.Vector2(tx, ty)                      // Tangent contact point
+        ];
+
+        // Smooth arc wrapping around the 3D spherical dome
+        const startAng = -(Math.PI * 0.5 - alpha);
+        const endAng = Math.PI * 0.5;
+        const arcSteps = 16;
+        for (let i = 1; i <= arcSteps; i++) {
+            const th = startAng + (endAng - startAng) * (i / arcSteps);
+            pts.push(new THREE.Vector2(Math.max(0, R * Math.cos(th)), cy + R * Math.sin(th)));
+        }
+
+        const geo = new THREE.LatheGeometry(pts, 28);
+        geo.computeVertexNormals();
+        return { geo, cy, R };
+    }
+
+    const pinData = make3DLocationPinGeometry();
+
+    // 1. Vibrant team-colored 3D pin body with high-specular Phong luster
+    const carrierMarkMat = new THREE.MeshPhongMaterial({
+        color: COL.you,
+        emissive: COL.you,
+        emissiveIntensity: 0.9,
+        shininess: 100,
+        transparent: true,
+        opacity: 0.98
+    });
+    const carrierPinMesh = new THREE.Mesh(pinData.geo, carrierMarkMat);
+
+    // 2. High-contrast white waist collar torus for razor-sharp definition
+    const collarGeo = new THREE.TorusGeometry(0.63, 0.055, 12, 28);
+    const collarMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const collarMesh = new THREE.Mesh(collarGeo, collarMat);
+    collarMesh.rotation.x = Math.PI / 2;
+    collarMesh.position.y = pinData.cy;
+
+    // 3. Bright illuminated 3D crown jewel
+    const crownGeo = new THREE.SphereGeometry(0.24, 16, 12);
+    const crownMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const crownMesh = new THREE.Mesh(crownGeo, crownMat);
+    crownMesh.position.y = pinData.cy;
+
+    // 4. Soft radiant aura halo
+    const pinGlow = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 3.0), pinGlowMat);
+    pinGlow.position.set(0, pinData.cy, 0);
+
+    const carrierMark = new THREE.Group();
+    carrierMark.add(pinGlow, carrierPinMesh, collarMesh, crownMesh);
     carrierMark.visible = false;
+    carrierMark.scale.setScalar(0);
     scene.add(carrierMark);
+
+    let carrierMarkScale = 0;
     const ballShadow = makeBlobShadow(0.6);
     scene.add(ballMesh, ballShadow);
     const ball = {
         x: 50, y: 50, h: 0.42,
         mode: 'held',            // held | pass | shot | loose
         holder: null,
+        atKickoffDot: false,
         from: null, dir: null, target: null,
         speed: BALL_SPEED, t: 0, total: 0, travel: 0,
         s0: BALL_SPEED, s: 0, dec: 0, roll: false,  /* §12.b rolling-ball state */
@@ -1548,6 +1636,7 @@ import {
     };
 
     function launchBall(from, to, speed, opts) {
+        ball.atKickoffDot = false;
         const o = opts || {};
         const d = Math.max(1e-6, dist(from, to));
         /* Direction without leaning on unit()'s zero-length behaviour: a
@@ -1664,6 +1753,9 @@ import {
         return m;
     }
     const runnerMarker = mkRing(COL.aim, 0.9, 1.25);
+    const playerDragLine = groundLine(COL.aim, 2);
+    const diveLine = groundLine(COL.ghost, 2);
+    const diveMarker = mkRing(COL.ghost, 0.9, 1.25);
 
     /* --- §8.b the stacked moves (§17.b) -------------------------------------
        A ring per queued run, plus one line for the queued ball. These show the
@@ -1751,6 +1843,7 @@ import {
         strokeLine.visible = false;
         passCurve.visible = false;
         moveCurve.visible = false;
+        playerDragLine.visible = false;
     }
 
     /* --- the two properties of a stroke, and the two mechanics they drive --- */
@@ -2028,7 +2121,7 @@ import {
         const own = ownGoal(team);
         return { x: 50, y: own.y + attackSide(team) * KEEPER_LINE };
     }
-    const keeperSlideX = () => clamp(50 + (ball.x - 50) * 0.35, 40, 60);
+    const keeperSlideX = () => clamp(50 + (ball.x - 50) * 0.65, 36, 64);
 
     /** §0.d — a ball in flight that is heading into this keeper's own mouth.
 
@@ -2146,6 +2239,7 @@ import {
         stroke: it is anchored once, at commit, by anchored(), and struck from
         here. A straight line between those two points IS the drawn ray.) */
     function kickFrom(from) {
+        if (ball.atKickoffDot) return { x: 50, y: 50 };
         if (!from) return { x: ball.x, y: ball.y };
         if (ball.mode === 'held' && ball.holder === from) return { x: ball.x, y: ball.y };
         return { x: from.x, y: from.y };
@@ -2154,7 +2248,7 @@ import {
     /** Rebuild the play context around whoever now has the ball. */
     function setCarrier(p) {
         state.possession = p.team;
-        allPlayers.forEach(x => { x.hasBall = false; x.dest = null; });
+        allPlayers.forEach(x => { x.hasBall = false; x.dest = null; x.trapping = null; });
         p.hasBall = true;
         ball.mode = 'held';
         ball.holder = p;
@@ -2162,6 +2256,21 @@ import {
         ball.passTarget = null;
         ball.air = false;      // §12.d — a ball in hand is never an air ball
         ball.lastTouch = p;
+
+        /* Orient carry direction naturally towards the attacked goal on possession change */
+        const g = goalFor(p.team);
+        const bx = Number.isFinite(ball.x) ? ball.x : p.x;
+        const by = Number.isFinite(ball.y) ? ball.y : p.y;
+        const gl = Math.max(1e-6, Math.hypot(g.x - bx, g.y - by));
+        const targetCdx = (g.x - bx) / gl;
+        const targetCdy = (g.y - by) / gl;
+        ball.cdx = targetCdx;
+        ball.cdy = targetCdy;
+
+        const targetX = clamp(bx - targetCdx * BALL_CARRY, 2, 98);
+        const targetY = clamp(by - targetCdy * BALL_CARRY, 2, 98);
+        const targetYaw = Math.atan2(targetCdx, -targetCdy);
+        const d = Math.hypot(targetX - p.x, targetY - p.y);
 
         const atk = p.team, def = other(atk);
         PLAY = {
@@ -2175,12 +2284,60 @@ import {
         };
         assignControls();
         bus.emit('role');
-        /* §17.b — every possession change is the start of a new passage, and every
-           passage begins with a decision window. setCarrier() is the single writer
-           of state.possession, so this is the one hook the whole model needs.
-           openPlan() itself refuses to open during the assemble beat, a shootout
-           or a half whose clock has run out. */
-        openPlan();
+
+        /* If restarting or at kickoff dot, keep player and ball at the restart mark:
+           keep them there and do not open plan until teams finish walking into shape. */
+        if (state.phase === 'restart' || ball.atKickoffDot) {
+            p.trapping = null;
+            const gl = Math.max(1e-6, Math.hypot(g.x - p.x, g.y - p.y));
+            ball.cdx = (g.x - p.x) / gl;
+            ball.cdy = (g.y - p.y) / gl;
+            if (ball.atKickoffDot) {
+                ball.x = 50;
+                ball.y = 50;
+            } else {
+                ball.x = bx;
+                ball.y = by;
+            }
+            ball.h = 0.42;
+            ball.s = 0;
+            p.yaw = Math.atan2(ball.cdx, -ball.cdy);
+            p.mesh.rotation.y = p.yaw;
+            syncToMesh(p);
+            if (state.phase === 'restart') return;
+        }
+
+        /* The player goes to the ball: if there is a gap, smoothly step to the ball,
+           take control, and turn accordingly — without any blip or teleportation. */
+        if (state.phase === 'play' && !SO.active && d > 0.15 && p.role !== 'keeper') {
+            p.trapping = {
+                fromX: p.x, fromY: p.y,
+                toX: targetX, toY: targetY,
+                ballX: bx, ballY: by,
+                toYaw: targetYaw,
+                t: 0,
+                dur: clamp(d / (PLAYER_SPEED * 1.5), 0.12, 0.22)
+            };
+            ball.x = bx;
+            ball.y = by;
+            ball.h = 0.42;
+            ball.s = 0;
+            // openPlan() is called smoothly when the player finishes taking control at the ball
+        } else {
+            p.x = targetX;
+            p.y = targetY;
+            p.px = p.x; p.py = p.y;
+            p.yaw = targetYaw;
+            p.mesh.rotation.y = p.yaw;
+            syncToMesh(p);
+            ball.x = bx;
+            ball.y = by;
+            ball.h = 0.42;
+            ball.s = 0;
+            /* §17.b — every possession change is the start of a new passage, and every
+               passage begins with a decision window. */
+            openPlan();
+        }
     }
 
     /**
@@ -2397,6 +2554,8 @@ import {
         /* the same three settings live on the start card as well as in the
            sheet — one id per control per surface, and the sync functions
            keep both sets of pills pressed in step */
+        matchLog: el('match-log'),
+        matchLogEntries: el('match-log-entries'),
         difficultyStart: el('difficulty-start'), planWinStart: el('plan-window-start'),
         halfLen: el('half-length'), halfLenStart: el('half-length-start'),
         soundStart: el('sound-start'),
@@ -2410,16 +2569,42 @@ import {
 
     let lastClock = -1, lastBar = -1;
 
-    /* The match log is no longer shown — the board IS the log, and a scrolling
-       list of sentences was the one thing on the HUD competing with it. What
-       happened is still emitted on the bus as a debug hook and kept in a tiny
-       in-memory ring, so nothing that used to read the log had to be deleted. */
+    /* Match event log — displayed on the left flank of the pitch on PC screens. */
     const LOG = { lines: [], max: 5 };
     function pushLog(text, cls) {
+        if (!text) return;
+        /* Filter out gesture queue and aiming noise */
+        if (text.startsWith('Queued:') || text.startsWith('Angle set:') ||
+            text.startsWith('Draw a line') || text.startsWith('Shooting only works') ||
+            text.startsWith('Too far out')) return;
+
         LOG.lines.push({ text, cls });
         while (LOG.lines.length > LOG.max) LOG.lines.shift();
+        renderMatchLog();
     }
     const log = (text, cls) => bus.emit('log', { text, cls });
+
+    function renderMatchLog() {
+        if (!ui.matchLogEntries) return;
+        ui.matchLogEntries.innerHTML = '';
+        LOG.lines.forEach(item => {
+            const row = document.createElement('div');
+            let itemCls = item.cls || '';
+            if (item.text.includes('GOAL!')) itemCls += ' goal';
+            row.className = 'match-log-item' + (itemCls ? ' ' + itemCls.trim() : '');
+
+            const dot = document.createElement('span');
+            dot.className = 'match-log-dot';
+
+            const txt = document.createElement('span');
+            txt.className = 'match-log-text';
+            txt.textContent = item.text;
+
+            row.appendChild(dot);
+            row.appendChild(txt);
+            ui.matchLogEntries.appendChild(row);
+        });
+    }
 
     /* --- §18.b the goal celebration ------------------------------------------
        Two pieces, both fired from scoreGoal(), neither of them touching a rule:
@@ -2532,6 +2717,7 @@ import {
         const show = name === null || name === 'pause';
         ui.hudTop.hidden = !show;
         ui.hudBottom.hidden = !show;
+        if (ui.matchLog) ui.matchLog.hidden = !show;
         ui.pens.hidden = !(show && SO.active);
         /* The role strip shares the top-centre band with the shootout strip, so it
            stands down for the whole of a shootout: the penalties read-out takes
@@ -2619,7 +2805,8 @@ import {
            player taking the kick-off stands on the line itself; everybody else is
            unambiguously in their own half. */
         const place = (p, spot, jitter) => {
-            const s = { x: spot.x, y: ownHalf(p.team, spot.y) };
+            const isCarrierKickoff = (centred && p === carrier);
+            const s = isCarrierKickoff ? spot : { x: spot.x, y: ownHalf(p.team, spot.y) };
             p.ax = s.x; p.ay = s.y;
             p.dest = null; p.selected = false; p.held = false;
             p.x = clamp(s.x + (jitter ? randRange(rng, -2.5, 2.5) : 0), 6, 94);
@@ -2627,7 +2814,18 @@ import {
             p.px = p.x; p.py = p.y;
         };
 
-        if (centred && !state.tutorDone) {
+        const g = goalFor(atk);
+        const gl = Math.max(1e-6, Math.hypot(g.x - pos.x, g.y - pos.y));
+        const cdx = (g.x - pos.x) / gl;
+        const cdy = (g.y - pos.y) / gl;
+        /* At kickoff, the ball rests directly on the center white dot (50, 50),
+           and the carrier takes stance right behind the ball in their own half. */
+        const carrierPos = centred ? {
+            x: clamp(pos.x - cdx * BALL_CARRY, 2, 98),
+            y: clamp(pos.y - cdy * BALL_CARRY, 2, 98)
+        } : pos;
+
+        if (centred && atk === 'you' && !state.tutorDone) {
             /* the coached kick-off: the carrier stands on the spot, the next four
                take the walkthrough's fixed slots, and anybody left over walks into
                the extra coached places. The leftovers are placed with a loop and a
@@ -2636,7 +2834,7 @@ import {
                grow — an exception thrown out of arrangeRestart() would have taken
                the kick-off with it. */
             const plan = tutorPlan(atk, pos);
-            place(carrier, pos, false);
+            place(carrier, carrierPos, false);
             const rest = outfield.filter(p => p !== carrier);
             place(rest[0], plan.striker, false);
             place(rest[1], plan.passer, false);
@@ -2651,7 +2849,7 @@ import {
         } else {
             /* Generic restart. The kicking side lines up behind the ball, in its
                own half, so neither end is ever left empty. */
-            place(carrier, pos, false);
+            place(carrier, carrierPos, false);
             outfield.filter(p => p !== carrier).forEach((p, i) => {
                 place(p, attackingSpot(pos, home, i), true);
             });
@@ -2676,6 +2874,22 @@ import {
         state.phaseT = 0;
         PLAN = null;
         clearIntents();
+        if (centred) {
+            ball.atKickoffDot = true;
+            ball.x = 50;
+            ball.y = 50;
+        } else {
+            ball.atKickoffDot = false;
+            ball.x = pos.x;
+            ball.y = pos.y;
+        }
+        ball.h = 0.42;
+        ball.s = 0;
+        ball.alive = false;
+        ball.mode = 'held';
+        ball.holder = carrier;
+        ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
+        ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
         setCarrier(carrier);
         hideOverlays();
     }
@@ -2740,7 +2954,7 @@ import {
     /** §3 — centre kick-off, to the conceding side. */
     function kickoff(team) {
         arrangeRestart(team, { x: 50, y: 50 });
-        log((team === 'you' ? 'Your' : 'CPU') + ' kick-off from the centre spot.', '');
+        log((team === 'you' ? 'Your' : 'CPU') + ' kick-off.', team);
     }
 
     /** §3 — a goal kick is taken IN PLACE. The keeper already has the ball; the
@@ -2760,12 +2974,16 @@ import {
         if (!k) return kickoff(team);
         ball.mode = 'held'; ball.alive = false;
         ball.holder = k;
-        ball.x = k.x; ball.y = k.y;
+        if (dist(ball, k) > 10) {
+            ball.x = k.x; ball.y = k.y;
+        }
         setCarrier(k);
         log((team === 'you' ? 'Your' : 'CPU') + ' keeper plays on from where he stands.', '');
     }
 
     function beginMatch() {
+        LOG.lines = [];
+        renderMatchLog();
         state.humanScore = 0; state.cpuScore = 0;
         state.half = 1; state.halfT = 0; state.pendingHalf = false;
         state.seed = (Math.random() * 1e9) | 0;
@@ -2910,11 +3128,30 @@ import {
            whistles past somebody now runs on, which is what the drawn line
            promised; a defender who wants it has to get his feet to it, and the
            loose-ball rule is what collects it for him if he does not. */
-        if (!ball.air && (ball.mode !== 'pass' || ball.travel >= TOUCH_R)) {
-            /* outfielders of the defending side may cut any ball in flight, but
-               only by reaching it */
+        const isAirHigh = ball.air && ball.h > 1.1;
+        if (!isAirHigh) {
+            /* Outfielders of the defending side may cut any ball in flight, but only by reaching it */
             for (const p of teamOutfield(def)) {
-                if (ballPathDist(p, fromX, fromY) <= TOUCH_R) return cutOut(p, atk);
+                const isCpu = p.team === 'cpu';
+                // User players remain exactly as they were (TOUCH_R = 0.95).
+                // CPU defenders have realistic reach (1.75 units) to intercept passes near their feet:
+                const reach = isCpu ? 1.25 : TOUCH_R;
+                const minTravel = isCpu ? 0.6 : TOUCH_R;
+                if (ball.mode !== 'pass' || ball.travel >= minTravel) {
+                    const dPath = ballPathDist(p, fromX, fromY);
+                    const dLive = dist(p, ball);
+                    if (dPath <= reach || dLive <= reach) return cutOut(p, atk);
+                }
+            }
+            /* A receiver moving to meet the pass collects it when their feet reach the ball */
+            if (ball.mode === 'pass') {
+                const rc = (PLAY && PLAY.receiver) || ball.passTarget;
+                if (rc && rc.team === atk && rc !== ball.lastTouch && ballPathDist(rc, fromX, fromY) <= TOUCH_R) {
+                    ball.alive = false;
+                    setCarrier(rc);
+                    Sfx.good();
+                    return;
+                }
             }
         }
         /* the defending keeper: a hand's reach against a pass, and — against a
@@ -2952,7 +3189,7 @@ import {
                 if (def === 'cpu') {
                     const isHard = state.difficulty >= 1.0;
                     const isExtreme = state.difficulty >= 1.5;
-                    const diffMul = isExtreme ? 1.2 : (isHard ? 1.1 : 1.0);
+                    const diffMul = isExtreme ? 1.4 : (isHard ? 1.28 : 1.18);
                     keeperReach *= diffMul;
                     keeperDiveSpeed *= (KEEPER_SCALE * diffMul);
                 } else {
@@ -2978,8 +3215,8 @@ import {
                 });
                 if (r.outcome === 'SAVED' && ball.t >= r.t - 1e-6) return keeperContact(k, atk);
             } else if ((!ball.air || keeperThreatX(k) !== null) &&
-                (ball.mode !== 'pass' || ball.travel >= TOUCH_R) &&
-                ballPathDist(k, fromX, fromY) <= KEEPER_TOUCH_R) {
+                (ball.mode !== 'pass' || ball.travel >= (k.team === 'cpu' ? 0.6 : TOUCH_R)) &&
+                ballPathDist(k, fromX, fromY) <= (k.team === 'cpu' ? 1.8 : KEEPER_TOUCH_R)) {
                 /* §0.d — a keeper goes for a ball at his OWN MOUTH whether it is
                    on the deck or chipped over his line: he has hands, which is
                    exactly why §0.b gives a keeper more contact than an
@@ -2994,14 +3231,13 @@ import {
     /** §3 — an interception never resets: possession flips exactly here. */
     function cutOut(p, atk) {
         ball.mode = 'held'; ball.alive = false;
-        ball.x = p.x; ball.y = p.y;
         if (p.team !== atk) {
             /* No banner here: the bottom-centre band belongs to the guide line
                now, and an interception is legible from the possession mark
                flipping and the log line below — the sound and the shake carry
                the tactile part. */
             Sfx.bad(); shake(.28);
-            log(logName(p) + ' cuts it out.', p.team === 'you' ? 'good' : 'bad');
+            log(p.team === 'you' ? 'You intercepted.' : 'Computer intercepted.', p.team === 'you' ? 'you' : 'cpu');
         }
         setCarrier(p);
     }
@@ -3012,11 +3248,10 @@ import {
     function caughtByKeeper(k, atk) {
         const wasShot = ball.mode === 'shot';
         ball.mode = 'held'; ball.alive = false;
-        ball.x = k.x; ball.y = k.y;
         if (wasShot || k.team !== atk) {
             Sfx.save(); shake(.22);
             banner('SAVED', CSS.warn);
-            log(k.team === 'you' ? 'Your keeper saves it!' : 'CPU keeper saves it!', k.team === 'you' ? 'good' : 'bad');
+            log(k.team === 'you' ? 'Your keeper saved it.' : 'Computer keeper saved it.', k.team === 'you' ? 'you' : 'cpu');
         }
         goalKick(k.team);
     }
@@ -3044,8 +3279,8 @@ import {
         spillLoose();
         Sfx.save(); shake(.3);
         banner('PARRIED', CSS.warn);
-        log(k.team === 'you' ? 'Your keeper parries it away!' : 'CPU keeper parries it away!',
-            k.team === 'you' ? 'good' : 'bad');
+        log(k.team === 'you' ? 'Your keeper parried it.' : 'Computer keeper parried it.',
+            k.team === 'you' ? 'you' : 'cpu');
     }
 
     function scoreGoal(team) {
@@ -3060,8 +3295,8 @@ import {
         if (team === 'you') Sfx.goal(); else Sfx.concede();
         shake(.7);
         banner('GOAL', team === 'you' ? CSS.you : CSS.cpu);
-        log(team === 'you' ? 'GOAL! ' + state.humanScore + '–' + state.cpuScore : 'CPU score. ' + state.humanScore + '–' + state.cpuScore,
-            team === 'you' ? 'good' : 'bad');
+        log(team === 'you' ? 'GOAL! You scored (' + state.humanScore + '–' + state.cpuScore + ')' : 'GOAL! Computer scored (' + state.humanScore + '–' + state.cpuScore + ')',
+            team === 'you' ? 'you' : 'cpu');
         kickoff(other(team));
     }
 
@@ -3320,6 +3555,43 @@ import {
 
     function stepBall(dt) {
         if (ball.mode === 'held' && ball.holder) {
+            const h = ball.holder;
+            if (h.trapping) {
+                h.trapping.t += dt;
+                const progress = Math.min(1, h.trapping.t / h.trapping.dur);
+                const ease = progress * (2 - progress);
+                h.x = h.trapping.fromX + (h.trapping.toX - h.trapping.fromX) * ease;
+                h.y = h.trapping.fromY + (h.trapping.toY - h.trapping.fromY) * ease;
+                h.walk += dt * 6;
+                h.gait = 0.8;
+
+                let dyaw = h.trapping.toYaw - h.yaw;
+                while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+                while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+                h.yaw += dyaw * Math.min(1, dt * 14);
+                h.mesh.rotation.y = h.yaw;
+                syncToMesh(h);
+
+                ball.x = h.trapping.ballX;
+                ball.y = h.trapping.ballY;
+                ball.h = 0.42;
+                ball.s = 0;
+                ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
+                ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
+
+                if (progress >= 1) {
+                    h.x = h.trapping.toX;
+                    h.y = h.trapping.toY;
+                    h.px = h.x; h.py = h.y;
+                    h.yaw = h.trapping.toYaw;
+                    h.mesh.rotation.y = h.yaw;
+                    h.trapping = null;
+                    syncToMesh(h);
+                    openPlan();
+                }
+                return;
+            }
+
             /* §12.b — the ball rides at the carrier's boot, in front of the
                direction they are ACTUALLY travelling, and it never drives
                itself. The old version pinned it at a fixed offset towards the
@@ -3330,41 +3602,54 @@ import {
                the player moves, which is what carrying is. A stationary carrier
                has no step to read, so the ball just rests ahead of their facing
                and waits to be kicked. */
-            const h = ball.holder;
             const px = Number.isFinite(h.px) ? h.px : h.x;
             const py = Number.isFinite(h.py) ? h.py : h.y;
             const sx = h.x - px, sy = h.y - py;
             const step = Math.hypot(sx, sy);
             let bx, by;                      /* where the ball WANTS to be held */
-            if (step > 1e-4) { bx = sx / step; by = sy / step; }
-            else {
+            if (drag && drag.player === h && drag.moved > 1.5) {
+                const dx = drag.x - h.x, dy = drag.y - h.y, dl = Math.hypot(dx, dy);
+                if (dl > 1e-4) { bx = dx / dl; by = dy / dl; }
+            } else if (PLAN && PLAN.pass && PLAN.pass[h.team]) {
+                const pt = PLAN.pass[h.team];
+                const dx = pt.x - h.x, dy = pt.y - h.y, dl = Math.hypot(dx, dy);
+                if (dl > 1e-4) { bx = dx / dl; by = dy / dl; }
+            } else if (PLAN && PLAN.shot && PLAN.shot[h.team]) {
+                const pt = PLAN.shot[h.team];
+                const dx = pt.x - h.x, dy = pt.y - h.y, dl = Math.hypot(dx, dy);
+                if (dl > 1e-4) { bx = dx / dl; by = dy / dl; }
+            } else if (step > 1e-4) {
+                bx = sx / step; by = sy / step;
+            } else {
                 /* never moved: face the goal being attacked (the carrier spawns
                    facing it) rather than produce a zero-length offset */
                 const g = PLAY ? PLAY.goal : GOAL.you;
                 const gl = Math.max(1e-6, Math.hypot(g.x - h.x, g.y - h.y));
                 bx = (g.x - h.x) / gl; by = (g.y - h.y) / gl;
             }
+            if (!Number.isFinite(bx) || !Number.isFinite(by)) {
+                bx = 0; by = attackSide(h.team);
+            }
             /* §12.b — and the carry direction is EASED, not snapped.
-               Reading the step direction straight off the last frame meant the
-               ball flicked from one side of the player to the other the instant
-               they reversed or cut: a one-frame jump of more than two ball
-               widths, which reads as the ball glitching rather than being
-               carried, and it is the same class of error as the old fixed goal
-               offset — the ball whose position the player cannot predict. The
-               direction is now a vector on the ball, turned towards the step at
-               a finite rate (faster while running, slower when settling), so
-               control is a thing the player can feel. A TRUE reversal still
-               collapses the vector to nothing on the way through, and the
-               collapse guard re-seeds it from the step, because a carried ball
-               must never slide THROUGH the body it is in front of. */
-            const turn = Math.min(1, dt * (step > 1e-4 ? 9 : 3));
+               The direction is now a vector on the ball, turned towards the step at
+               a finite rate (faster while running, responsive when settling), so
+               control is a thing the player can feel. */
+            const turn = Math.min(1, dt * (step > 1e-4 ? 12 : 8));
             ball.cdx += (bx - ball.cdx) * turn;
             ball.cdy += (by - ball.cdy) * turn;
             const cl = Math.hypot(ball.cdx, ball.cdy);
             if (cl < 1e-4) { ball.cdx = bx; ball.cdy = by; }
             else { ball.cdx /= cl; ball.cdy /= cl; }
-            ball.x = clamp(h.x + ball.cdx * BALL_CARRY, 2, 98);
-            ball.y = clamp(h.y + ball.cdy * BALL_CARRY, 2, 98);
+            if (step > 0.05 || (drag && drag.player === h)) {
+                ball.atKickoffDot = false;
+            }
+            if (ball.atKickoffDot || (state.phase === 'restart' && Math.abs(ball.x - 50) < 0.1 && Math.abs(ball.y - 50) < 0.1)) {
+                ball.x = 50;
+                ball.y = 50;
+            } else {
+                ball.x = clamp(h.x + ball.cdx * BALL_CARRY, 2, 98);
+                ball.y = clamp(h.y + ball.cdy * BALL_CARRY, 2, 98);
+            }
             ball.h = 0.42;
             ball.s = 0;
         } else if (ball.mode === 'pass' || ball.mode === 'shot') {
@@ -3704,6 +3989,21 @@ import {
         }
         const chasing = p => chasers.indexOf(p) >= 0;
 
+        /* 1.c when a pass is in flight, the intended receiver runs to meet the ball */
+        let passReceiver = null;
+        if (ball.mode === 'pass' && ball.alive && ball.target) {
+            passReceiver = (PLAY && PLAY.receiver) || ball.passTarget;
+            if (!passReceiver && PLAY && PLAY.atk) {
+                const candidates = teamOutfield(PLAY.atk).filter(p => p !== ball.lastTouch);
+                candidates.sort((a, b) => dist(a, ball.target) - dist(b, ball.target));
+                passReceiver = candidates[0] || null;
+            }
+            if (passReceiver) {
+                passReceiver.dest = null;
+                moveToward(passReceiver, ball.target.x, ball.target.y, passReceiver.speed || PLAYER_SPEED, dt);
+            }
+        }
+
         /* 2. BOTH sides hold a shape.
 
               This used to be the CPU's loop alone, under a comment that said the
@@ -3745,6 +4045,7 @@ import {
             if (p.dest) return;        // the human's stacked run outranks the shape
             if (chasing(p)) return;    // a man sent for the ball holds shape for nobody
             if (p === holder) return;  // moveCarrier() drives the man on the ball
+            if (p === passReceiver) return; // receiver running to meet the pass holds shape for nobody
 
             /* With the ball loose there IS no carrier, only a body that used to
                have it — so the whole shape keys off the live ball instead of the
@@ -3766,6 +4067,8 @@ import {
             const isHard = isCpu && state.difficulty >= 1.0;
             const isExtreme = isCpu && state.difficulty >= 1.5;
             const c = PLAY.carrier;
+
+
             if (p.duty === 'interceptor' && c) {
                 /* with the ball loose there is no lane to intercept: the ball
                    IS the objective, and it is still moving */
@@ -3816,7 +4119,17 @@ import {
               goal and leaves the human's half alone. */
         chasers.forEach(p => {
             const chaseY = p.team === def ? ownHalf(p.team, ball.y) : ball.y;
-            const chaseSpeed = (p.team === 'you' && !p.dest) ? PLAYER_SPEED * 0.92 : PLAYER_SPEED;
+            let chaseSpeed;
+            if (p.team === 'you' && !p.dest) {
+                chaseSpeed = PLAYER_SPEED * 0.92;
+            } else if (p.team === 'cpu') {
+                // CPU chasers hustle harder on higher difficulties
+                const isHard = state.difficulty >= 1.0;
+                const isExtreme = state.difficulty >= 1.5;
+                chaseSpeed = PLAYER_SPEED * (isExtreme ? 1.12 : (isHard ? 1.05 : 1.0));
+            } else {
+                chaseSpeed = PLAYER_SPEED;
+            }
             moveToward(p, ball.x, chaseY, chaseSpeed, dt);
         });
 
@@ -3967,6 +4280,7 @@ import {
         if (PLAY && to.team) PLAY.receiver = to;
         tutorOnPass(from);
         Sfx.kick();
+        log(from.team === 'you' ? 'You passed.' : 'Computer passed.', from.team === 'you' ? 'you' : 'cpu');
     }
 
     /** §5 / §12.h — a shot is only legal inside SHOT_RANGE. It is struck at
@@ -4037,7 +4351,7 @@ import {
             }
         }
         Sfx.kick(); shake(.12);
-        log((from.team === 'you' ? 'You shoot' : 'CPU shoots') + '!', '');
+        log(from.team === 'you' ? 'You took shot.' : 'Computer took shot.', from.team === 'you' ? 'you' : 'cpu');
         return true;
     }
 
@@ -4555,7 +4869,7 @@ import {
        and gut the board), #menu-sheet and its scrim are a dropdown over the
        pitch that would shove the camera every time it opened, and #goal-fx is
        the goal flash. None of them is docked to an edge. */
-    const NEVER_MEASURE = ' #menu-sheet, .sheet-scrim, #goal-fx';
+    const NEVER_MEASURE = '#plan-panel, #menu-sheet, .sheet-scrim, #goal-fx';
 
     function measureHudInsets(w, h) {
         const t = { t: 0, r: 0, b: 0, l: 0 };
@@ -4633,6 +4947,15 @@ import {
     function viewFrame(r) {
         const w = r.width, h = r.height;
         if (landscapeCanvas()) return { l: 0, t: 0, r: 0, b: 0, availW: w, availH: h };
+        if (isPCView(w, h)) {
+            /* On PC screens, HUD elements sit in the corners/flanks, leaving the
+               central pitch corridor completely clear. Using minimal vertical padding
+               (10px) lets the playable pitch expand vertically instead of being shrunk
+               by corner HUD cards. */
+            const t = 10;
+            const b = 10;
+            return { l: 0, t, r: 0, b, availW: w, availH: Math.max(1, h - t - b) };
+        }
         const l = Math.min(w * 0.45, insets.l), t = Math.min(h * 0.45, insets.t);
         const rr = Math.min(w * 0.45, insets.r), b = Math.min(h * 0.45, insets.b);
         return { l, t, r: rr, b, availW: Math.max(1, w - l - rr), availH: Math.max(1, h - t - b) };
@@ -4776,15 +5099,21 @@ import {
                     line.material.color.setHex(hit || mate ? COL.aim : (t ? COL.bad : COL.ghost));
                     line.material.opacity = .95;
                 }
-                line.setPoints(path);
+                const displayPts = (path.length > 1 && path[path.length - 1].x === drag.x && path[path.length - 1].y === drag.y)
+                    ? path
+                    : path.concat([{ x: drag.x, y: drag.y }]);
+                line.setPoints(displayPts);
                 line.visible = true;
                 runnerMarker.visible = !!mate;
                 if (mate) runnerMarker.position.set(worldX(mate.x), 0.09, worldZ(mate.y));
             }
             aimLine.visible = false;
         } else if (drag.kind === 'move' && drag.moved > TAP_SLOP) {
+            const dest = { x: clamp(pt.x, 5, 95), y: clamp(pt.y, 5, 95) };
             runnerMarker.visible = true;
-            runnerMarker.position.set(worldX(clamp(pt.x, 5, 95)), 0.09, worldZ(clamp(pt.y, 5, 95)));
+            runnerMarker.position.set(worldX(dest.x), 0.09, worldZ(dest.y));
+            playerDragLine.setEnds(drag.player, dest);
+            playerDragLine.visible = true;
         } else if (drag.kind === 'keeper' && drag.moved > TAP_SLOP) {
             const isLiveShot = ball.mode === 'shot';
             const target = { x: clamp(clampDiveX(pt.x, drag.player.x), 8, 92), y: drag.player.y };
@@ -4863,7 +5192,10 @@ import {
             drag.path = null;
             aimLine.visible = false;
             runnerMarker.visible = false;
-            if (moved > TAP_SLOP && pts.length > 1) {
+            if (moved > TAP_SLOP) {
+                if (pts.length < 2) {
+                    pts.push({ x: pt.x, y: pt.y });
+                }
                 const stroke = readStroke(pts);
                 if (AIM.slot === 2) {
                     AIM.move = stroke;
@@ -4956,6 +5288,7 @@ import {
                 }
             }
         } else if (kind === 'move') {
+            playerDragLine.visible = false;
             if (moved > TAP_SLOP) {
                 const dest = { x: clamp(pt.x, 5, 95), y: clamp(pt.y, 5, 95) };
                 /* §17.b — a run is *stacked*, never started: the ring appears where
@@ -5087,8 +5420,12 @@ import {
         halfLength = HALF_LENGTH_STEPS.indexOf(n) >= 0 ? n : HALF_LENGTH_DEFAULT;
         [ui.halfLen, ui.halfLenStart].forEach(group => {
             if (!group) return;
-            Array.from(group.querySelectorAll('button[data-half]')).forEach(b =>
-                b.setAttribute('aria-pressed', String(Number(b.dataset.half) === halfLength)));
+            if (group.tagName === 'SELECT') {
+                group.value = String(halfLength);
+            } else {
+                Array.from(group.querySelectorAll('button[data-half]')).forEach(b =>
+                    b.setAttribute('aria-pressed', String(Number(b.dataset.half) === halfLength)));
+            }
         });
     }
 
@@ -5104,9 +5441,14 @@ import {
         lastPlanBar = -1;
         [ui.planWin, ui.planWinStart].forEach(group => {
             if (!group) return;
-            Array.from(group.querySelectorAll('button[data-lock]')).forEach(b =>
-                b.setAttribute('aria-pressed', String(Number(b.dataset.lock) === planWindow)));
+            if (group.tagName === 'SELECT') {
+                group.value = String(planWindow);
+            } else {
+                Array.from(group.querySelectorAll('button[data-lock]')).forEach(b =>
+                    b.setAttribute('aria-pressed', String(Number(b.dataset.lock) === planWindow)));
+            }
         });
+        refreshPlanHud();
     }
 
     let PLAN = null;
@@ -5374,12 +5716,21 @@ import {
                     x: clamp(c.x - (mine.x - c.x) * markTight, 6, 94),
                     y: ownHalf('cpu', clamp(lerp(c.y, mine.y, markTight), 6, 94))
                 });
-            } else if (isHard && i === 2) {
-                // Dual press / cutoff on Hard & Extreme
+            } else if (p.duty === 'cover') {
+                // Cover player: cut the most likely passing lane
                 const c = PLAY.carrier;
-                const cutX = clamp(c.x + (mine.x > 50 ? -14 : 14), 10, 90);
-                const cutY = ownHalf('cpu', clamp(lerp(c.y, mine.y, isExtreme ? 0.18 : 0.25), 6, 94));
-                setIntent(p, { x: cutX, y: cutY });
+                const potentialReceivers = teamOutfield(c.team).filter(m => m !== c);
+                potentialReceivers.sort((a, b) => dist(a, c) - dist(b, c));
+                const likelyTarget = potentialReceivers[0];
+                if (likelyTarget) {
+                    const cutX = clamp(lerp(c.x, likelyTarget.x, 0.45), 10, 90);
+                    const cutY = clamp(lerp(c.y, likelyTarget.y, 0.45), 10, 90);
+                    const safeY = ownHalf('cpu', lerp(cutY, mine.y, 0.15));
+                    setIntent(p, { x: cutX, y: safeY });
+                } else {
+                    const s = defendingSpot(PLAY.carrier, mine, i);
+                    setIntent(p, { x: s.x, y: ownHalf('cpu', s.y) });
+                }
             } else {
                 const s = defendingSpot(PLAY.carrier, mine, i);
                 setIntent(p, { x: s.x, y: ownHalf('cpu', s.y) });
@@ -5711,13 +6062,47 @@ import {
        carry the same information to a screen reader. Like the match clock this is
        change-guarded, so nothing is written to the DOM unless the bucket moved. */
     let lastPlanSec = -1, lastPlanBar = -1, lastPlanState = '', lastPlanShow = null;
+    function refreshPlanHud() {
+        if (!ui.plan || !ui.planClock) return;
+        const show = !SO.active && !!(PLAN && !PLAN.armed) && state.phase === 'play' && !topScreen();
+        if (lastPlanShow !== show) {
+            lastPlanShow = show;
+            ui.plan.hidden = !show;
+            if (ui.done) ui.done.hidden = !show;
+        }
+        if (ui.done) ui.done.disabled = !show;
+        if (!show) { lastPlanSec = -1; lastPlanBar = -1; lastPlanState = ''; return; }
+
+        const secs = Math.max(0, Math.ceil(PLAN.t - 1e-6));
+        if (secs !== lastPlanSec) {
+            lastPlanSec = secs;
+            setText(ui.planClock, String(secs));
+            /* "low" has to mean something on every budget: a quarter of the
+               window, capped at three seconds, so a 3s window is not
+               painted red from the instant it opens and a 20s window still warns
+               at the same point it always did. */
+            ui.plan.classList.toggle('low', secs <= Math.min(3, Math.ceil(planWindow / 4)));
+            ui.plan.classList.toggle('atk-cpu', PLAN.atk === 'cpu');
+        }
+        /* The ring is an SVG circle with pathLength="1" and stroke-dasharray:1,
+           so the dash offset is the fraction of the circle that is NOT drawn:
+           0 is a full ring, 1 is an empty one. It empties as the window closes —
+           over whichever budget the player chose. */
+        const k = clamp(PLAN.t / Math.max(1e-6, planWindow), 0, 1);
+        if (Math.abs(k - lastPlanBar) > 0.004) {
+            lastPlanBar = k;
+            if (ui.planBar) ui.planBar.style.strokeDashoffset = (1 - k).toFixed(4);
+        }
+        const label = PLAN.cpuPlanned ? 'CPU READY · YOUR MOVE' : 'PLANNING';
+        if (label !== lastPlanState) {
+            lastPlanState = label;
+            setText(ui.planState, label);
+        }
+    }
 
     function updateHud() {
         refreshShootButton();
-        if (ui.done) {
-            const show = !SO.active && !!(PLAN && !PLAN.armed) && state.phase === 'play' && !topScreen();
-            if (ui.done.hidden === show) ui.done.hidden = !show;
-        }
+        refreshPlanHud();
         if (SO.active) return;
         if (ui.clockExtra) {
             if (state.half === 1 && state.halfT > halfLength) {
@@ -5758,8 +6143,13 @@ import {
         const F = viewFrame({ width: w, height: h });
         const availW = F.availW, availH = F.availH;
         const aspect = availW / availH;
+        const isPC = isPCView(w, h);
+        /* On PC screen, frame the pitch more closely behind the nets
+           ((PITCH_M.y / 2 + 2.8) * UPM ≈ 52.66) instead of paying for extra empty outfield
+           grass, making the playable pitch larger while keeping both nets fully visible. */
+        const targetReqHH = isPC ? (PITCH_M.y / 2 + 2.8) * UPM : reqHH;
         let hw, hh;
-        if (aspect >= reqHW / reqHH) { hh = reqHH; hw = reqHH * aspect; }
+        if (aspect >= reqHW / targetReqHH) { hh = targetReqHH; hw = targetReqHH * aspect; }
         else { hw = reqHW; hh = reqHW / aspect; }
         view.hw = hw / view.zoom;
         view.hh = hh / view.zoom;
@@ -5776,6 +6166,8 @@ import {
 
         camera.updateProjectionMatrix();
         renderer.setSize(w, h, false);
+
+        syncRoleStripLocation();
 
         /* §17.b — the decision ring is supposed to sit ON the painted centre
            circle, so its diameter is not a design constant — it is whatever the
@@ -5798,6 +6190,19 @@ import {
             const band = 12.66 * (availH / view.hh);
             document.documentElement.style.setProperty('--band-d', band.toFixed(2) + 'px');
             document.documentElement.style.setProperty('--band-y', cy.toFixed(2) + 'px');
+        }
+    }
+
+    function syncRoleStripLocation() {
+        const roleStrip = ui.roleStrip || el('role-strip');
+        const hudCenter = el('hud-center') || document.querySelector('.hud-center');
+        const stage = el('stage');
+        if (!roleStrip || !stage) return;
+        const onPC = isPCView();
+        if (onPC && roleStrip.parentElement !== stage) {
+            stage.appendChild(roleStrip);
+        } else if (!onPC && hudCenter && roleStrip.parentElement !== hudCenter) {
+            hudCenter.appendChild(roleStrip);
         }
     }
     window.addEventListener('resize', () => { syncRotateGate(); syncInsets(true); });
@@ -5824,13 +6229,17 @@ import {
        in frame()) and not only off resize. Reads only, no writes, so the
        browser has no invalidated layout of its own to flush; a new projection
        is built only when one of the four numbers actually moved. */
+    let lastPC = null;
     function syncInsets(force) {
         const w = canvas.clientWidth || window.innerWidth;
         const h = canvas.clientHeight || window.innerHeight;
         const wasLand = land;
+        const isPC = isPCView(w, h);
+        const wasPC = lastPC;
+        lastPC = isPC;
         landscapeCanvas();
         measureHudInsets(w, h);
-        if (!needFit && !force && land === wasLand) return;
+        if (!needFit && !force && land === wasLand && isPC === wasPC) return;
         needFit = false;
         fitView();
     }
@@ -5915,16 +6324,42 @@ import {
            team's own colour, bobbing on the same beat as everything else so the
            eye reads it and the ball as one signal. */
         const holder = (!SO.active && ball.mode === 'held') ? ball.holder : null;
-        carrierMark.visible = !!holder;
         if (holder) {
-            carrierMark.position.set(
-                worldX(holder.x),
-                4.55 + Math.sin(blinkT * 4.2) * 0.22,
-                worldZ(holder.y)
-            );
-            carrierMark.rotation.set(Math.PI, holder.yaw, 0);
-            carrierMark.material.color.setHex(teamRingHex(holder));
-            carrierMark.material.opacity = 0.68 + beat * 0.32;
+            const targetX = worldX(holder.x);
+            const targetZ = worldZ(holder.y);
+            if (!carrierMark.visible || carrierMarkScale < 0.05) {
+                carrierMark.position.x = targetX;
+                carrierMark.position.z = targetZ;
+                carrierMark.visible = true;
+            } else {
+                carrierMark.position.x += (targetX - carrierMark.position.x) * Math.min(1, dt * 18);
+                carrierMark.position.z += (targetZ - carrierMark.position.z) * Math.min(1, dt * 18);
+            }
+            const bob = Math.sin(blinkT * 4.2) * 0.18;
+            carrierMark.position.y = 4.45 + bob;
+            // Tilt slightly towards the 34° overhead camera so 3D volume, collar, and tip are highlighted
+            carrierMark.rotation.x = -0.22;
+            // Gentle continuous 3D rotation so dynamic specular highlights catch the stadium lights in real-time
+            carrierMark.rotation.y += dt * 2.2;
+
+            carrierMarkScale += (1 - carrierMarkScale) * Math.min(1, dt * 14);
+            // Prominent high-visibility scale with energetic breathing pulse
+            const pulse = 1.34 + Math.sin(blinkT * 4.2) * 0.08;
+            carrierMark.scale.setScalar(pulse * carrierMarkScale);
+
+            const hex = teamRingHex(holder);
+            carrierPinMesh.material.color.setHex(hex);
+            carrierPinMesh.material.emissive.setHex(hex);
+            carrierPinMesh.material.emissiveIntensity = 0.95 + beat * 0.3;
+            pinGlowMat.color.setHex(hex);
+            pinGlowMat.opacity = 0.5 + beat * 0.3;
+        } else {
+            carrierMarkScale += (0 - carrierMarkScale) * Math.min(1, dt * 16);
+            if (carrierMarkScale < 0.05) {
+                carrierMark.visible = false;
+            } else {
+                carrierMark.scale.setScalar(1.34 * carrierMarkScale);
+            }
         }
         updateHud();
         placeCamera();
@@ -5944,8 +6379,12 @@ import {
         if (val) setText(val, m ? 'OFF' : 'ON');
         if (ui.mute) ui.mute.setAttribute('aria-pressed', String(m));
         if (ui.soundStart) {
-            Array.from(ui.soundStart.querySelectorAll('button[data-sound]')).forEach(b =>
-                b.setAttribute('aria-pressed', String((b.dataset.sound === 'off') === m)));
+            if (ui.soundStart.tagName === 'SELECT') {
+                ui.soundStart.value = m ? 'off' : 'on';
+            } else {
+                Array.from(ui.soundStart.querySelectorAll('button[data-sound]')).forEach(b =>
+                    b.setAttribute('aria-pressed', String((b.dataset.sound === 'off') === m)));
+            }
         }
     }
     function toggleMute() {
@@ -5953,14 +6392,21 @@ import {
         syncSound();
         if (!Sfx.muted) Sfx.unlock();
     }
-    /* the start card's Sound pills are the same toggle, just drawn as a pair */
+    /* the start card's Sound control: syncs toggle via select or button */
     if (ui.soundStart) {
-        ui.soundStart.addEventListener('click', e => {
-            const b = e.target.closest('button[data-sound]');
-            if (!b) return;
-            const wantMuted = b.dataset.sound === 'off';
-            if (wantMuted !== Sfx.muted) toggleMute();
-        });
+        if (ui.soundStart.tagName === 'SELECT') {
+            ui.soundStart.addEventListener('change', () => {
+                const wantMuted = ui.soundStart.value === 'off';
+                if (wantMuted !== Sfx.muted) toggleMute();
+            });
+        } else {
+            ui.soundStart.addEventListener('click', e => {
+                const b = e.target.closest('button[data-sound]');
+                if (!b) return;
+                const wantMuted = b.dataset.sound === 'off';
+                if (wantMuted !== Sfx.muted) toggleMute();
+            });
+        }
     }
 
     /* --- the floating menu (game-ui-ux: an overlay over the board) -----------
@@ -6055,38 +6501,72 @@ import {
     function syncDifficulty() {
         [ui.difficulty, ui.difficultyStart].forEach(group => {
             if (!group) return;
-            Array.from(group.querySelectorAll('button[data-diff]')).forEach(x =>
-                x.setAttribute('aria-pressed', String(parseFloat(x.dataset.diff) === state.difficulty)));
+            if (group.tagName === 'SELECT') {
+                group.value = String(state.difficulty);
+            } else {
+                Array.from(group.querySelectorAll('button[data-diff]')).forEach(x =>
+                    x.setAttribute('aria-pressed', String(parseFloat(x.dataset.diff) === state.difficulty)));
+            }
         });
     }
     [ui.difficulty, ui.difficultyStart].forEach(group => {
         if (!group) return;
-        group.addEventListener('click', e => {
-            const b = e.target.closest('button[data-diff]');
-            if (!b) return;
-            state.difficulty = parseFloat(b.dataset.diff);
-            if (PLAY) { PLAY.cpuThink = 0.6; cpuAssignDuties(); }
-            syncDifficulty();
-        });
+        if (group.tagName === 'SELECT') {
+            group.addEventListener('change', () => {
+                state.difficulty = parseFloat(group.value);
+                if (PLAY) {
+                    const isHard = state.difficulty >= 1.0;
+                    const isExtreme = state.difficulty >= 1.5;
+                    PLAY.cpuThink = isExtreme ? 0.25 : (isHard ? 0.38 : 0.6);
+                    cpuAssignDuties();
+                }
+                syncDifficulty();
+            });
+        } else {
+            group.addEventListener('click', e => {
+                const b = e.target.closest('button[data-diff]');
+                if (!b) return;
+                state.difficulty = parseFloat(b.dataset.diff);
+                if (PLAY) {
+                    const isHard = state.difficulty >= 1.0;
+                    const isExtreme = state.difficulty >= 1.5;
+                    PLAY.cpuThink = isExtreme ? 0.25 : (isHard ? 0.38 : 0.6);
+                    cpuAssignDuties();
+                }
+                syncDifficulty();
+            });
+        }
     });
     /* The window budget is a setting, not a phase: no screen is pushed and the
        match is never interrupted. setPlanWindow() owns the aria-pressed sync, so
        there is one place that decides what "selected" looks like. */
     [ui.planWin, ui.planWinStart].forEach(group => {
         if (!group) return;
-        group.addEventListener('click', e => {
-            const b = e.target.closest('button[data-lock]');
-            if (b) setPlanWindow(parseFloat(b.dataset.lock));
-        });
+        if (group.tagName === 'SELECT') {
+            group.addEventListener('change', () => {
+                setPlanWindow(parseFloat(group.value));
+            });
+        } else {
+            group.addEventListener('click', e => {
+                const b = e.target.closest('button[data-lock]');
+                if (b) setPlanWindow(parseFloat(b.dataset.lock));
+            });
+        }
     });
     /* the half length is a setting like the other two: no screen is pushed,
        nothing running is interrupted, and setHalfLength() owns the sync */
     [ui.halfLen, ui.halfLenStart].forEach(group => {
         if (!group) return;
-        group.addEventListener('click', e => {
-            const b = e.target.closest('button[data-half]');
-            if (b) setHalfLength(parseFloat(b.dataset.half));
-        });
+        if (group.tagName === 'SELECT') {
+            group.addEventListener('change', () => {
+                setHalfLength(parseFloat(group.value));
+            });
+        } else {
+            group.addEventListener('click', e => {
+                const b = e.target.closest('button[data-half]');
+                if (b) setHalfLength(parseFloat(b.dataset.half));
+            });
+        }
     });
 
     /* first user gesture unlocks Web Audio */
@@ -6116,6 +6596,7 @@ import {
     syncDifficulty();
     syncSound();
     setHalfLength(HALF_LENGTH_DEFAULT);
+    setPlanWindow(PLAN_WINDOW_DEFAULT);
     allPlayers.forEach(p => { syncToMesh(p); refreshRings(); });
     setCarrier(teamOutfield('you')[0]);
     state.phase = 'idle';

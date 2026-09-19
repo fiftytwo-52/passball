@@ -117,44 +117,39 @@ import '../styles/global.css';
                      combined top row into a bar lying across the pitch. -->
                 <div class="hud-left">
                     <div class="hud-capsule">
-                        <!-- NOTE: the engine assigns `.textContent` on #score-you and
-                             #score-cpu outright, so neither may wrap a <strong>. The
-                             team colour is carried by the span itself instead. -->
-                        <div class="score-mini" aria-label="Score">
-                            <span class="sc sc-you" id="score-you">0</span>
-                            <span class="sc-dash" aria-hidden="true">–</span>
-                            <span class="sc sc-cpu" id="score-cpu">0</span>
-                        </div>
+                        <!-- Grouped Timer and Score on the left -->
+                        <div class="score-timer-group">
+                            <!-- The half, the clock, and the countdown -->
+                            <div class="clock-wrap" id="clock-wrap">
+                                <span class="clock-half" id="half-label">HALF 1</span>
+                                <!-- role=timer implies aria-live=off: the countdown ticks every
+                                     second and must not be announced each tick. -->
+                                <div class="clock-row">
+                                    <span id="clock" role="timer" class="clock-num">2:00</span>
+                                </div>
+                            </div>
 
-                        <!-- Which end you are playing toward, and whose ball it is —
-                             the two facts that decide the next prompt. It sits
-                             between the scoreline and the clock so the eye reads
-                             score · situation · time straight across the capsule.
+                            <div class="score-timer-divider" aria-hidden="true"></div>
 
-                             NOTE: the engine assigns #role-badge.className and
-                             #possession-chip.className outright, so neither carries
-                             any other class — `.attack`/`.defend` and
-                             `.chip you`/`.chip cpu` are the only states they can be
-                             in. -->
-                        <div id="role-strip" hidden>
-                            <div class="status-row">
-                                <span id="role-badge">ATTACK</span>
-                                <span id="possession-chip">YOU</span>
+                            <!-- NOTE: the engine assigns `.textContent` on #score-you and
+                                 #score-cpu outright, so neither may wrap a <strong>. The
+                                 team colour is carried by the span itself instead. -->
+                            <div class="score-mini" aria-label="Score">
+                                <span class="sc sc-you" id="score-you">0</span>
+                                <span class="sc-dash" aria-hidden="true">–</span>
+                                <span class="sc sc-cpu" id="score-cpu">0</span>
                             </div>
                         </div>
+                    </div>
+                </div>
 
-                        <!-- The half, the clock, and the hairline that drains as the
-                             half runs out — three lines inside one field, because the
-                             capsule has the height for it. -->
-                        <div class="clock-wrap" id="clock-wrap">
-                            <span class="clock-half" id="half-label">HALF 1</span>
-                            <!-- role=timer implies aria-live=off: the countdown ticks every
-                                 second and must not be announced each tick. -->
-                            <div class="clock-row">
-                                <span id="clock" role="timer" class="clock-num">2:00</span>
-                            </div>
+                <!-- Center section: CPU Attack / Role & Possession status -->
+                <div class="hud-center" id="hud-center">
+                    <div id="role-strip" hidden>
+                        <div class="status-row">
+                            <span id="role-badge">ATTACK</span>
+                            <span id="possession-chip">YOU</span>
                         </div>
-
                     </div>
                 </div>
 
@@ -193,6 +188,19 @@ import '../styles/global.css';
 
                 <span class="panel panel-pens" id="so-turn">YOUR KICK</span>
             </section>
+
+            <!-- ============================== DECISION RING ==============================
+                 The decision window, drawn ON the pitch centre circle.
+                 Circular progress bar showing remaining response time to make a move,
+                 draining clockwise around the 9.15m centre circle, with remaining seconds. -->
+            <div class="panel-plan" id="plan-panel" hidden aria-label="Decision window">
+                <span class="sr-only" id="plan-state">PLANNING</span>
+                <span class="sr-only" id="plan-clock" role="timer">10</span>
+                <svg class="ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+                    <circle class="ring-track" cx="50" cy="50" r="46"></circle>
+                    <circle class="ring-fill" id="plan-bar" cx="50" cy="50" r="46" pathLength="1"></circle>
+                </svg>
+            </div>
 
             <!-- ============================== HUD (BOTTOM) ==============================
                  The two controls in the CORNERS, the transient banner, and — last
@@ -250,6 +258,15 @@ import '../styles/global.css';
                      bottom-centre: the strip behind the near goal, clear of both
                      corner controls and of the play. -->
             </footer>
+
+            <!-- Match Log: live play-by-play commentary (PC screen only, docked left flank) -->
+            <aside id="match-log" class="match-log" aria-label="Match events log" hidden>
+                <div class="match-log-header">
+                    <span class="match-log-indicator"></span>
+                    <span>MATCH LOG</span>
+                </div>
+                <div class="match-log-entries" id="match-log-entries"></div>
+            </aside>
 
             <!-- the goal celebration: a word bursting off the turf, over the pitch -->
             <div id="goal-fx" aria-hidden="true"><span id="goal-fx-word">GOAL</span></div>
@@ -400,48 +417,87 @@ import '../styles/global.css';
                         </div>
                     </div>
 
-                    <!-- The four groups the in-game menu sheet also edits, drawn once
-                         here as one scrollable strip of chips. Each chip carries its
-                         own group, so the pressed pill is the value and the engine's
-                         sync keeps both surfaces identical. -->
+                    <!-- Match settings: organized as responsive dropdown selects without horizontal scroll -->
                     <div class="quick">
                         <div class="qchip">
-                            <span class="qchip-label">Difficulty</span>
-                            <div class="segmented segmented-num" id="difficulty-start" role="group"
-                                aria-label="Difficulty">
-                                <button type="button" class="btn" data-diff="0.35" aria-pressed="false">LOW</button>
-                                <button type="button" class="btn" data-diff="0.75" aria-pressed="true">MID</button>
-                                <button type="button" class="btn" data-diff="1.25" aria-pressed="false">HARD</button>
-                                <button type="button" class="btn" data-diff="1.85" aria-pressed="false">EXTREME</button>
+                            <label class="qchip-label" for="difficulty-start">
+                                <svg class="qchip-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
+                                    <path d="M8 2.5l5.5 3v4.5C13.5 13.5 8 15 8 15s-5.5-1.5-5.5-5V5.5l5.5-3z" />
+                                </svg>
+                                Difficulty
+                            </label>
+                            <div class="select-wrapper">
+                                <select class="setting-select" id="difficulty-start" aria-label="Difficulty">
+                                    <option value="0.35">Low</option>
+                                    <option value="0.75" selected>Mid</option>
+                                    <option value="1.25">Hard</option>
+                                    <option value="1.85">Extreme</option>
+                                </select>
+                                <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
+                                    <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
+                                </svg>
                             </div>
                         </div>
 
                         <div class="qchip">
-                            <span class="qchip-label">Timer</span>
-                            <div class="segmented segmented-num" id="plan-window-start" role="group"
-                                aria-label="Move timer seconds">
-                                <button type="button" class="btn" data-lock="3" aria-pressed="false">3s</button>
-                                <button type="button" class="btn" data-lock="5" aria-pressed="false">5s</button>
-                                <button type="button" class="btn" data-lock="10" aria-pressed="true">10s</button>
-                                <button type="button" class="btn" data-lock="20" aria-pressed="false">20s</button>
+                            <label class="qchip-label" for="plan-window-start">
+                                <svg class="qchip-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
+                                    <circle cx="8" cy="8" r="6" />
+                                    <path d="M8 4.5v3.5l2.5 1.5" />
+                                </svg>
+                                Timer
+                            </label>
+                            <div class="select-wrapper">
+                                <select class="setting-select" id="plan-window-start" aria-label="Move timer seconds">
+                                    <option value="3">3s</option>
+                                    <option value="5">5s</option>
+                                    <option value="10" selected>10s</option>
+                                    <option value="20">20s</option>
+                                </select>
+                                <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
+                                    <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
+                                </svg>
                             </div>
                         </div>
 
                         <div class="qchip">
-                            <span class="qchip-label">Length</span>
-                            <div class="segmented segmented-num" id="half-length-start" role="group"
-                                aria-label="Half length">
-                                <button type="button" class="btn" data-half="60" aria-pressed="false">1:00</button>
-                                <button type="button" class="btn" data-half="120" aria-pressed="true">2:00</button>
-                                <button type="button" class="btn" data-half="180" aria-pressed="false">3:00</button>
+                            <label class="qchip-label" for="half-length-start">
+                                <svg class="qchip-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
+                                    <rect x="2.5" y="3.5" width="11" height="9" rx="1.5" />
+                                    <line x1="8" y1="3.5" x2="8" y2="12.5" />
+                                    <circle cx="8" cy="8" r="1.8" />
+                                </svg>
+                                Length
+                            </label>
+                            <div class="select-wrapper">
+                                <select class="setting-select" id="half-length-start" aria-label="Half length">
+                                    <option value="60">1:00 min</option>
+                                    <option value="120" selected>2:00 min</option>
+                                    <option value="180">3:00 min</option>
+                                </select>
+                                <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
+                                    <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
+                                </svg>
                             </div>
                         </div>
 
                         <div class="qchip">
-                            <span class="qchip-label">Sound</span>
-                            <div class="segmented segmented-num" id="sound-start" role="group" aria-label="Sound">
-                                <button type="button" class="btn" data-sound="on" aria-pressed="true">ON</button>
-                                <button type="button" class="btn" data-sound="off" aria-pressed="false">OFF</button>
+                            <label class="qchip-label" for="sound-start">
+                                <svg class="qchip-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
+                                    <polygon points="2.5 6 5.5 6 8.5 3 8.5 13 5.5 10 2.5 10 2.5 6" />
+                                    <path d="M11 5.5a3.5 3.5 0 0 1 0 5" />
+                                    <path d="M12.8 3.8a6 6 0 0 1 0 8.4" />
+                                </svg>
+                                Sound
+                            </label>
+                            <div class="select-wrapper">
+                                <select class="setting-select" id="sound-start" aria-label="Sound">
+                                    <option value="on" selected>ON</option>
+                                    <option value="off">OFF</option>
+                                </select>
+                                <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
+                                    <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
+                                </svg>
                             </div>
                         </div>
                     </div>
