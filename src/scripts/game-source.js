@@ -722,6 +722,16 @@ import {
     const targetEntersGoal = (target, goal) => !!target
         && isOnTarget(target.x, goal.x, GOAL_HALF_WIDTH)
         && (goal.y === 0 ? target.y <= 0 : target.y >= 100);
+    /** Live goal-line check during flight: returns the goal the ball is entering
+        (GOAL.cpu when crossing y=0, GOAL.you when crossing y=100), or null.
+        §0 — both ends are checked, so a shot that curves or deflects into the
+        shooter's own net is caught as an own goal and scored for the opponent. */
+    const liveGoalEntry = () => {
+        if (!ball.dir) return null;
+        if (ball.y <= 0 && ball.dir.y < 0) return GOAL.cpu;
+        if (ball.y >= 100 && ball.dir.y > 0) return GOAL.you;
+        return null;
+    };
     /** The half a team attacks (+) or defends (−), as a y coordinate. */
     const attackSide = team => (team === 'you' ? 1 : -1);
 
@@ -1639,7 +1649,6 @@ import {
         return m;
     }
     const aimLine = groundLine(COL.aim, 2);       // pass preview
-    const diveLine = groundLine(COL.gkYou, 2);    // keeper dive preview
     const shotLine = groundLine(COL.ghost, 2);    // shot preview
 
     /** Free-standing ring marker, used for a destination or a dive point. */
@@ -1655,7 +1664,6 @@ import {
         return m;
     }
     const runnerMarker = mkRing(COL.aim, 0.9, 1.25);
-    const diveMarker = mkRing(COL.gkYou, 1.0, 1.5);
 
     /* --- §8.b the stacked moves (§17.b) -------------------------------------
        A ring per queued run, plus one line for the queued ball. These show the
@@ -2207,10 +2215,8 @@ import {
 
     function hideOverlays() {
         aimLine.visible = false;
-        diveLine.visible = false;
         shotLine.visible = false;
         runnerMarker.visible = false;
-        diveMarker.visible = false;
         hideQueueMarkers();
         /* §12.d — the two drawn strokes belong to the window, so they come off
            the turf with it. Without this a pass line drawn in the last window
@@ -2226,20 +2232,6 @@ import {
         and kickoff() wipe the keeper's dive state, hideOverlays() wipes the
         objects, and the line comes off with them. The board still never
         announces the CPU's instruction, and the shootout keeps its own flow. */
-    function drawDiveGuide() {
-        if (SO.active || drag.kind === 'keeper') return;
-        const k = keeperOf('you');
-        const d = k ? (k.queuedDive || k.dive) : null;
-        if (!d) {
-            diveLine.visible = false;
-            diveMarker.visible = false;
-            return;
-        }
-        diveLine.setEnds(k, d);
-        diveLine.visible = true;
-        diveMarker.position.set(worldX(d.x), 0.09, worldZ(d.y));
-        diveMarker.visible = true;
-    }
 
     /* ==========================================================================
        § 9.b FEEL — audio, shake, banner (rides on top; never inside the rulebook)
@@ -2393,9 +2385,11 @@ import {
         scoreYou: el('score-you'),
         scoreCpu: el('score-cpu'),
         halfLabel: el('half-label'), clock: el('clock'), clockBar: el('clock-bar'), clockExtra: el('clock-extra'),
-        instruction: el('instruction'),
         mute: el('btn-mute'), pause: el('btn-pause'), help: el('btn-help'),
         shoot: el('btn-shoot'),
+        /* #instruction is the one short in-match guide line: middle track
+           between the buttons on mobile, docked right-centre on PC. */
+        guide: el('instruction'),
         plan: el('plan-panel'), planState: el('plan-state'),
         planClock: el('plan-clock'), planBar: el('plan-bar'),
         done: el('btn-done'),
@@ -2486,15 +2480,17 @@ import {
         }
         /* §17.b — one short line, and the only thing it has to say is what the
            human is being asked to do with their thumb right now. The tutorial
-           screen is where the long-form explanation lives. */
+           screen is where the long-form explanation lives. The coached opening
+           wins over the generic copy while it is live. */
         const planning = !!(PLAN && !PLAN.armed && state.phase === 'play');
-        setText(ui.instruction, planning
-            ? (attacking
-                ? 'Stack your moves, then MOVES DONE.'
-                : 'Close the lane, then MOVES DONE.')
-            : (attacking
-                ? 'Running — you attack the top goal.'
-                : 'Running — you defend the bottom goal.'));
+        const guideText = (state.tutorTargets && TUTOR_STEPS[state.tutor - 1]) || (planning
+                ? (attacking
+                    ? 'Stack your moves, then MOVES DONE.'
+                    : 'Close the lane, then MOVES DONE.')
+                : (attacking
+                    ? 'Running — you attack the top goal.'
+                    : 'Running — you defend the bottom goal.'));
+        setText(ui.guide, guideText);
     });
     bus.on('log', d => pushLog(d.text, d.cls));
     /* §17.b — the stacked-move markers are redrawn only when the stack changes */
@@ -2701,15 +2697,16 @@ import {
         t.passer = from;
         state.tutor = 2;
         state.tutorClock = 0;
+        bus.emit('role');
     }
 
     /** Steps 2–4 are all "the human dragged somebody"; which somebody differs. */
     function tutorOnSend(player, dest) {
         const t = state.tutorTargets;
         if (!t || player.team !== 'you') return;
-        if (state.tutor === 2) { state.tutor = 3; state.tutorClock = 0; return; }
+        if (state.tutor === 2) { state.tutor = 3; state.tutorClock = 0; bus.emit('role'); return; }
         if (state.tutor === 3) {
-            if (player === t.passer) { state.tutor = 4; state.tutorClock = 0; }
+            if (player === t.passer) { state.tutor = 4; state.tutorClock = 0; bus.emit('role'); }
             return;
         }
         if (state.tutor === 4) {
@@ -2733,10 +2730,10 @@ import {
         if (state.tutor === 1 && (AIM.pass || AIM.move)) {
             state.tutor = 2;
             state.tutorClock = 0;
+            bus.emit('role');
             return;
         }
         const step = TUTOR_STEPS[state.tutor - 1];
-        if (step) setText(ui.instruction, step);
         if (state.tutorClock > TUTOR_DELAY + TUTOR_STEP_MS / 1000) finishTutor();
     }
 
@@ -3400,30 +3397,35 @@ import {
             ball.h = 0.42 + frac * ball.arc;
 
             /* Check boundary bounce during flight: if a pass or wide shot crosses the pitch line,
-               it immediately rebounds back into the pitch instead of flying into run-off. */
-            const goal = PLAY ? PLAY.goal : (state.possession === 'you' ? GOAL.cpu : GOAL.you);
-            const inMouth = Math.abs(ball.x - goal.x) <= GOAL_HALF_WIDTH + POST_R;
-            const atGoalLine = (ball.y <= 0 && ball.dir && ball.dir.y < 0) || (ball.y >= 100 && ball.dir && ball.dir.y > 0);
-            const isGoalMouthEntry = (ball.mode === 'shot' || ball.mode === 'pass') && inMouth && atGoalLine;
+                it immediately rebounds back into the pitch instead of flying into run-off.
 
-            if (isGoalMouthEntry) {
-                const post = postStruck(goal);
-                if (post) {
-                    ball.x = post.x; ball.y = post.y;
-                    reboundBall(post.nx, post.ny, BOUNCE_POST);
-                    spillLoose();
-                    Sfx.post(); shake(.34);
-                    banner('POST', CSS.warn);
-                    return;
-                }
-                if (isOnTarget(ball.x, goal.x, GOAL_HALF_WIDTH)) {
-                    ball.alive = false;
-                    scoreGoal(scorerForEnteredGoal(goal));
-                    return;
+                §0 — OWN GOAL LAW: scoring is decided by the net the ball entered, not
+                by the side that kicked it. The live check returns the goal the ball is
+                entering at this instant — attacking OR defending — so a shot that
+                curves or deflects into the shooter's own net is scored for the opponent,
+                and the kickoff goes to the side that conceded. */
+            const entered = liveGoalEntry();
+            if (entered && (ball.mode === 'shot' || ball.mode === 'pass')) {
+                const inMouth = Math.abs(ball.x - entered.x) <= GOAL_HALF_WIDTH + POST_R;
+                if (inMouth) {
+                    const post = postStruck(entered);
+                    if (post) {
+                        ball.x = post.x; ball.y = post.y;
+                        reboundBall(post.nx, post.ny, BOUNCE_POST);
+                        spillLoose();
+                        Sfx.post(); shake(.34);
+                        banner('POST', CSS.warn);
+                        return;
+                    }
+                    if (isOnTarget(ball.x, entered.x, GOAL_HALF_WIDTH)) {
+                        ball.alive = false;
+                        scoreGoal(scorerForEnteredGoal(entered));
+                        return;
+                    }
                 }
             }
 
-            if (!isGoalMouthEntry && (ball.x <= 0 || ball.x >= 100 || ball.y <= 0 || ball.y >= 100)) {
+            if (ball.x <= 0 || ball.x >= 100 || ball.y <= 0 || ball.y >= 100) {
                 bounceOffBoards();
                 spillLoose();
                 return;
@@ -4161,7 +4163,6 @@ import {
            the regulation log and instruction line would only be stale copy. */
         ui.pens.hidden = false;
         ui.roleStrip.hidden = true;
-        setText(ui.instruction, 'Draw your aim, then the dive.');
         bus.emit('half');
         soHudState();
         soSetupKick(Math.random() < 0.5 ? 'you' : 'cpu');
@@ -4544,7 +4545,7 @@ import {
     const LAYOUT_CONTAINERS = ['#hud-top', '#hud-bottom'];
     const CARD_SELECTORS = [
         '#hud-top', '#hud-bottom', '#hud-pens', '#btn-menu-open',
-        '#instruction', '#banner', '.hud-actions', '.hud-capsule'
+        '#banner', '.hud-actions', '.hud-capsule'
     ];
 
     /* Things that are painted OVER the middle of the board, or that only exist
@@ -4554,7 +4555,7 @@ import {
        and gut the board), #menu-sheet and its scrim are a dropdown over the
        pitch that would shove the camera every time it opened, and #goal-fx is
        the goal flash. None of them is docked to an edge. */
-    const NEVER_MEASURE = '#plan-panel, #menu-sheet, .sheet-scrim, #goal-fx';
+    const NEVER_MEASURE = ' #menu-sheet, .sheet-scrim, #goal-fx';
 
     function measureHudInsets(w, h) {
         const t = { t: 0, r: 0, b: 0, l: 0 };
@@ -4794,10 +4795,6 @@ import {
                 drag.player.queuedDive = target;
                 drag.player.dive = null;
             }
-            diveLine.setEnds(drag.player, target);
-            diveLine.visible = true;
-            diveMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
-            diveMarker.visible = true;
         } else if (drag.kind === 'so-aim' && drag.moved > TAP_SLOP * 0.5) {
             /* no aim guide: the shot is the player's read, drawn blind */
             aimLine.visible = false;
@@ -4810,10 +4807,6 @@ import {
             const k = soDefKeeper();
             if (k) {
                 const target = { x: clamp(clampDiveX(pt.x, k.x), 4, 96), y: k.y };
-                diveLine.setEnds(k, target);
-                diveLine.visible = true;
-                diveMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
-                diveMarker.visible = true;
             }
         }
     }
@@ -5114,7 +5107,6 @@ import {
             Array.from(group.querySelectorAll('button[data-lock]')).forEach(b =>
                 b.setAttribute('aria-pressed', String(Number(b.dataset.lock) === planWindow)));
         });
-        refreshPlanHud();
     }
 
     let PLAN = null;
@@ -5140,10 +5132,12 @@ import {
         if (state.phase !== 'play' || SO.active || state.pendingHalf) {
             PLAN = null;
             clearIntents();
+            setText(ui.guide, '');
             return;
         }
         PLAN = newPlan();
         clearIntents();
+        if (ui.done) ui.done.hidden = false;
         /* A dive lives for exactly one execution, so both keepers start clean —
            this is what keeps a queued dive from leaking into the next window. */
         [keeperOf('you'), keeperOf('cpu')].forEach(k => { if (k) { k.dive = null; k.queuedDive = null; k.held = false; } });
@@ -5518,6 +5512,7 @@ import {
         if (!PLAN) return;
         const plan = PLAN;
         plan.armed = true;
+        if (ui.done) ui.done.hidden = true;
         hideQueueMarkers();
         /* runs are handed from the plan to the body all in one pass, so no side
            gets a head start on the other */
@@ -5670,24 +5665,10 @@ import {
 
         allPlayers.forEach(p => { animatePlayer(p, dt); syncToMesh(p); });
         updateCursor();
-        updateOverlayVisibility();
         tutorTick(dt);
     }
 
     /** Keep the guides honest without redrawing them every frame. */
-    function updateOverlayVisibility() {
-        if (SO.active) {
-            [...allPlayers].forEach(p => refreshRings());
-            return;
-        }
-        if (!PLAY) return;
-        /* the keeper's dive is never previewed — not the stacked one while the
-           window is open, not the live one once the shot is in flight. Where
-           he is going is the player's instruction, and the board does not
-           announce it. */
-        diveLine.visible = false;
-        diveMarker.visible = false;
-    }
 
     /* --- the shoot button ---------------------------------------------------
        §17.b — the button no longer fires a shot, it *stacks* one. It is enabled
@@ -5730,46 +5711,13 @@ import {
        carry the same information to a screen reader. Like the match clock this is
        change-guarded, so nothing is written to the DOM unless the bucket moved. */
     let lastPlanSec = -1, lastPlanBar = -1, lastPlanState = '', lastPlanShow = null;
-    function refreshPlanHud() {
-        if (!ui.plan || !ui.planClock) return;
-        const show = !!(PLAN && !PLAN.armed && state.phase === 'play' && !SO.active);
-        if (lastPlanShow !== show) {
-            lastPlanShow = show;
-            ui.plan.hidden = !show;
-            if (ui.done) ui.done.hidden = !show;
-        }
-        if (ui.done) ui.done.disabled = !show;
-        if (!show) { lastPlanSec = -1; lastPlanBar = -1; lastPlanState = ''; return; }
-
-        const secs = Math.max(0, Math.ceil(PLAN.t - 1e-6));
-        if (secs !== lastPlanSec) {
-            lastPlanSec = secs;
-            setText(ui.planClock, String(secs));
-            /* "low" has to mean something on every budget: a quarter of the
-               window, capped at the old three seconds, so a 3s window is not
-               painted red from the instant it opens and a 20s window still warns
-               at the same point it always did. */
-            ui.plan.classList.toggle('low', secs <= Math.min(3, Math.ceil(planWindow / 4)));
-        }
-        /* The ring is an SVG circle with pathLength="1" and stroke-dasharray:1,
-           so the dash offset is the fraction of the circle that is NOT drawn:
-           0 is a full ring, 1 is an empty one. It empties as the window closes —
-           over whichever budget the player chose. */
-        const k = clamp(PLAN.t / Math.max(1e-6, planWindow), 0, 1);
-        if (Math.abs(k - lastPlanBar) > 0.004) {
-            lastPlanBar = k;
-            if (ui.planBar) ui.planBar.style.strokeDashoffset = (1 - k).toFixed(4);
-        }
-        const label = PLAN.cpuPlanned ? 'CPU READY · YOUR MOVE' : 'PLANNING';
-        if (label !== lastPlanState) {
-            lastPlanState = label;
-            setText(ui.planState, label);
-        }
-    }
 
     function updateHud() {
         refreshShootButton();
-        refreshPlanHud();
+        if (ui.done) {
+            const show = !SO.active && !!(PLAN && !PLAN.armed) && state.phase === 'play' && !topScreen();
+            if (ui.done.hidden === show) ui.done.hidden = !show;
+        }
         if (SO.active) return;
         if (ui.clockExtra) {
             if (state.half === 1 && state.halfT > halfLength) {
@@ -5928,7 +5876,6 @@ import {
            stored, nothing replayed. `last` is still refreshed above, so no
            backlog of wall time leaks into the first portrait frame. */
         if (!rotateHold && !state.paused && !topScreen() && state.phase !== 'idle') update(dt);
-        drawDiveGuide();
         /* Two things pulse, and neither of them is the ball's brightness — that
            has no room left to move (see the ball's material). A small breath in
            size with the rim tightening as it swells, and the beacon ring, which

@@ -194,27 +194,6 @@ import '../styles/global.css';
                 <span class="panel panel-pens" id="so-turn">YOUR KICK</span>
             </section>
 
-            <!-- ============================== DECISION RING ==============================
-                 §17.b — the decision window, drawn ON the painted centre circle. No
-                 numerals on screen: the arc draining is the whole read-out. The label
-                 and the countdown stay in the DOM for screen readers, which is also
-                 what the engine writes to.
-
-                 This is a DIRECT CHILD OF #stage, not a child of #hud-bottom. The
-                 stage is the full-viewport box, so `left:50%;top:50%` resolves to the
-                 canvas centre — which is exactly where the camera puts game (50,50),
-                 the centre circle. Nested inside the bottom bar instead, the same
-                 50%/50% would resolve against that bar and the ring would sit under
-                 the pitch. Its diameter is written to --ring-d by fitView(). -->
-            <div class="panel-plan" id="plan-panel" hidden aria-label="Decision window">
-                <span class="sr-only" id="plan-state">PLANNING</span>
-                <span class="sr-only" id="plan-clock" role="timer">10</span>
-                <svg class="ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-                    <circle class="ring-track" cx="50" cy="50" r="46"></circle>
-                    <circle class="ring-fill" id="plan-bar" cx="50" cy="50" r="46" pathLength="1"></circle>
-                </svg>
-            </div>
-
             <!-- ============================== HUD (BOTTOM) ==============================
                  The two controls in the CORNERS, the transient banner, and — last
                  in the bar, so it lands on the bottom-centre band behind the near
@@ -240,6 +219,13 @@ import '../styles/global.css';
                     <button type="button" class="btn btn-done" id="btn-done" title="Lock in your moves (A or Enter)"
                         hidden>MOVES DONE</button>
 
+                    <!-- In-match instruction: the one short line telling the human
+                         what to do with their thumb right now. Mobile: sits in the
+                         middle track, between MOVES DONE and SHOOT. PC: leaves the
+                         row (fixed, right edge, vertically centred). Engine-owned
+                         textContent — see the `role` bus handler. -->
+                    <p id="instruction" aria-live="polite"></p>
+
                     <!-- The one action worth a button, and it sits in the RIGHT
                          corner, clear of the goal mouth. Disabled and dimmed until
                          the human is on the ball and inside range, so it doubles as
@@ -263,7 +249,6 @@ import '../styles/global.css';
                 <!-- The guide line closes the bar so its own centre is the stage's
                      bottom-centre: the strip behind the near goal, clear of both
                      corner controls and of the play. -->
-                <p id="instruction">Stack your moves, then press MOVES DONE.</p>
             </footer>
 
             <!-- the goal celebration: a word bursting off the turf, over the pitch -->
@@ -308,7 +293,7 @@ import '../styles/global.css';
            #btn-penalty  → beginShootout()
            #btn-tutorial → pushScreen('tutorial')
            #btn-verify   → the rulebook self-test, mirrored into #verify-out
-           #difficulty-start / #plan-window-start / #half-length-start /
+           #difficulty-start / #half-length-start /
            #sound-start  → the four `.segmented` groups the engine syncs.
          #menu-title is the dialog's accessible name.
 
@@ -493,7 +478,7 @@ import '../styles/global.css';
                 <li><strong>Your end</strong> — <strong>you defend the BOTTOM goal and attack the TOP one.</strong>
                     Six a side: your keeper and five outfielders all start in your own half, so you always play
                     away from yourself.</li>
-                <li><strong>The decision window</strong> — the moment either side wins the ball, the board freezes and
+                <li><strong>The decision window</strong> — the moment either side wins the ball, the match pauses and
                     the ring in the centre circle starts draining. Nothing moves until it empties. You
                     stack <em>as many moves as you like</em> in that time; they all resolve together.</li>
                 <li><strong>The pass</strong> — <em>drag from the ball-carrier onto a team-mate</em> to pass to them,
