@@ -64,6 +64,23 @@ import '../styles/global.css';
                            ring, centred on the pitch centre circle and sized
                            from the camera fit. -->
     <div id="app">
+        <!-- Boot veil: the one surface the player sees before the pitch exists.
+             Phase one is the load: the engine holds it here until the background
+             music has fully loaded (see the boot block in game-source.js) — or
+             on error, or after a grace timeout, so a broken track can never
+             trap anyone here. Phase two is the gate: a browser will not start
+             sound without a user gesture, so once the track is in the veil asks
+             for one — TAP TO KICK OFF — and the tap both starts the music and
+             lifts the veil. Decorative to AT, which reads the menu behind it. -->
+        <div id="loading-veil" aria-hidden="true">
+            <div class="lv-card">
+                <div class="lv-ball-wrap"><span class="lv-ball"></span><span class="lv-shadow"></span></div>
+                <p class="lv-word">GUESS <span>&amp;</span> PASS</p>
+                <p class="lv-tag">rolling out the pitch…</p>
+                <span class="lv-bar"><i></i></span>
+                <p class="lv-enter">TAP TO KICK OFF</p>
+            </div>
+        </div>
         <section id="stage">
             <!-- One WebGL canvas: 3D characters standing on a 2D top-view board.
                  The pitch sits directly behind the camera centre, which is what
@@ -121,8 +138,8 @@ import '../styles/global.css';
                              in. -->
                         <div id="role-strip" hidden>
                             <div class="status-row">
-                                <span id="role-badge" class="attack">ATTACK</span>
-                                <span id="possession-chip" class="chip you"><i class="dot"></i>YOU</span>
+                                <span id="role-badge">ATTACK</span>
+                                <span id="possession-chip">YOU</span>
                             </div>
                         </div>
 
@@ -135,9 +152,7 @@ import '../styles/global.css';
                                  second and must not be announced each tick. -->
                             <div class="clock-row">
                                 <span id="clock" role="timer" class="clock-num">2:00</span>
-                                <span id="clock-extra" class="clock-extra" hidden>+1s</span>
                             </div>
-                            <span class="clock-line"><span id="clock-bar"></span></span>
                         </div>
 
                     </div>
@@ -301,6 +316,12 @@ import '../styles/global.css';
          chips instead of four labelled rows: the engine still owns every pill and
          every aria-pressed, so there is no second copy of a setting to drift. -->
     <div class="screen" id="screen-menu">
+        <!-- The menu's background animation: a muted, looping video laid over the
+             turf at reduced opacity, so the landing surface reads as a moving
+             programme cover without ever competing with the frame above it. It is
+             decorative, so it takes no pointer events and is invisible to AT. -->
+        <video class="menu-bg-video" src="/menu-bg.mp4" autoplay muted loop playsinline
+            preload="auto" aria-hidden="true" tabindex="-1"></video>
         <!-- Weathering: a vignette to settle the turf at its edges, and fine grain so
              the large flat fills do not band on a wide-gamut panel. Both are
              decorative, so neither may take a pointer event. -->

@@ -1507,8 +1507,8 @@ body {
    The menu is not a dialog floating over the app: it is the first thing anybody
    sees, so it is dressed as the pitch itself. Three zones — the nav capsule, the
    hero, and the settings strip with its kick-off — sit in one flex frame; the
-   turf is painted by `#screen-menu` itself and weathered by two decorative
-   layers on top of it, never by an image.
+   turf is painted by `#screen-menu::before`, translucent over the looping menu
+   video, and weathered by two decorative layers on top of it.
 
    Everything is a layout-flow length (clamp()/vmin or a percentage), so the same
    three zones hold together on a 320px phone and on a 2560px display; at 860px
@@ -1538,14 +1538,32 @@ body {
     overflow: hidden;
     font-family: 'Rajdhani', var(--f-sans);
     color: var(--chalk);
+    /* The turf no longer paints here: it lives on ::before, ABOVE the menu
+       video, so the moving picture sits behind the texture and ghosts through
+       it. The element itself keeps only a solid fallback for the (impossible)
+       case where the pseudo never paints. */
+    background: var(--turf-0);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+/* --- the turf, painted ABOVE the video ------------------------------------
+   The looping video is the menu's moving light, full-bleed at the very back of
+   the stack (z 0). This re-draw of the old turf — glow, sheen, mow stripes —
+   is translucent, so the video shows through it at roughly a fifth strength
+   while the stripes still read as turf. Lower the alphas to let more video
+   through; raise them to quiet the video again. */
+#screen-menu::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
     background:
         radial-gradient(ellipse 620px 420px at 50% -8%, rgba(242, 166, 60, 0.16), transparent 66%),
         repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 4px),
-        repeating-linear-gradient(115deg, var(--turf-1) 0 46px, var(--turf-2) 46px 92px),
-        var(--turf-0);
-    /* The turf is opaque, so the app behind it must not also show through. */
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
+        repeating-linear-gradient(115deg, rgba(14, 42, 29, 0.60) 0 46px, rgba(20, 56, 36, 0.60) 46px 92px),
+        rgba(8, 28, 19, 0.45);
 }
 
 /* `.screen[hidden]` is (0,2,0) and loses to the id rule above, so hiding has to
@@ -1561,7 +1579,7 @@ body {
 #screen-menu .vignette {
     position: absolute;
     inset: 0;
-    z-index: 0;
+    z-index: 2;
     pointer-events: none;
     background: radial-gradient(ellipse 340px 600px at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.35) 100%);
 }
@@ -1569,7 +1587,7 @@ body {
 #screen-menu .grain {
     position: absolute;
     inset: 0;
-    z-index: 0;
+    z-index: 2;
     pointer-events: none;
     opacity: 0.5;
     mix-blend-mode: overlay;
@@ -1590,7 +1608,7 @@ body {
    1120px measure at 860px, in global.css, which loads last. */
 .menu-frame {
     position: relative;
-    z-index: 1;
+    z-index: 3;
     display: flex;
     flex: 1 1 0%;
     min-height: 0;
@@ -2752,4 +2770,206 @@ body {
     .rotate-phone {
         animation: none;
     }
+}
+/* ==========================================================================
+   BOOT VEIL — the loading screen the engine lifts when the music is in
+   ========================================================================== */
+
+#loading-veil {
+    position: fixed;
+    inset: 0;
+    z-index: 400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+        radial-gradient(130% 100% at 50% 0%, #14301d 0%, var(--pitch-turf) 48%, #081509 100%);
+    transition: opacity .55s ease, visibility 0s linear .55s;
+}
+
+/* a faint centre-circle chalk ring behind the card — the pitch, hinted */
+#loading-veil::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 72vmin;
+    height: 72vmin;
+    transform: translate(-50%, -50%);
+    border: 1px solid rgba(244, 247, 244, .06);
+    border-radius: 50%;
+}
+
+#loading-veil.is-lifted {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.lv-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+}
+
+/* the ball: white with the classic patch pattern, bouncing on its shadow */
+.lv-ball-wrap {
+    position: relative;
+    width: 34px;
+    height: 66px;
+}
+
+.lv-ball {
+    position: absolute;
+    left: 0;
+    bottom: 6px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 50% 24%, #171717 0 4.5px, transparent 5px),
+        radial-gradient(circle at 17% 50%, #171717 0 3.4px, transparent 3.9px),
+        radial-gradient(circle at 83% 50%, #171717 0 3.4px, transparent 3.9px),
+        radial-gradient(circle at 33% 84%, #171717 0 3.4px, transparent 3.9px),
+        radial-gradient(circle at 67% 84%, #171717 0 3.4px, transparent 3.9px),
+        radial-gradient(circle at 32% 28%, #ffffff, #e2e8ea 62%, #a9b8be 100%);
+    box-shadow: inset -3px -4px 6px rgba(8, 21, 9, .35);
+    animation: lv-drop 1.05s infinite;
+}
+
+.lv-shadow {
+    position: absolute;
+    left: 3px;
+    bottom: 0;
+    width: 28px;
+    height: 7px;
+    border-radius: 50%;
+    background: rgba(4, 10, 5, .55);
+    filter: blur(1px);
+    animation: lv-shadow 1.05s infinite;
+}
+
+@keyframes lv-drop {
+    0%   { transform: translateY(-30px); animation-timing-function: cubic-bezier(.55, 0, .85, .36); }
+    44%  { transform: translateY(0); }
+    50%  { transform: translateY(-1px) scale(1.12, .86); }
+    56%  { transform: translateY(0); animation-timing-function: cubic-bezier(.15, .6, .45, 1); }
+    100% { transform: translateY(-30px); }
+}
+
+@keyframes lv-shadow {
+    0%, 100% { transform: scale(.5); opacity: .25; }
+    44%, 56% { transform: scale(1); opacity: .55; }
+    50%      { transform: scale(1.18); opacity: .6; }
+}
+
+.lv-word {
+    margin: 6px 0 0;
+    font-family: var(--f-sans);
+    font-size: clamp(20px, 5vw, 30px);
+    font-weight: 600;
+    letter-spacing: .18em;
+    color: #f4f7f4;
+}
+
+.lv-word span { color: var(--c-cyan); }
+
+.lv-tag {
+    margin: 0;
+    font-family: var(--f-mono);
+    font-size: 12px;
+    letter-spacing: .08em;
+    color: #9fb8a6;
+}
+
+.lv-bar {
+    position: relative;
+    width: 190px;
+    height: 2px;
+    margin-top: 6px;
+    border-radius: 2px;
+    background: rgba(244, 247, 244, .14);
+    overflow: hidden;
+}
+
+.lv-bar i {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 40%;
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, transparent, var(--c-cyan), transparent);
+    animation: lv-sweep 1.1s linear infinite;
+}
+
+@keyframes lv-sweep {
+    0%   { transform: translateX(-110%); }
+    100% { transform: translateX(300%); }
+}
+
+/* --- the ready gate --------------------------------------------------------
+   A browser will not start sound until the player has gestured, so once the
+   track is loaded the loading chrome swaps for a prompt, and the tap that
+   answers it is the gesture that starts the music. Hidden until the engine
+   adds `.is-ready`. */
+.lv-enter {
+    display: none;
+    margin: 8px 0 0;
+    font-family: var(--f-mono);
+    font-size: 13px;
+    letter-spacing: .24em;
+    color: var(--c-cyan);
+    animation: lv-pulse 1.6s ease-in-out infinite;
+}
+
+#loading-veil.is-ready {
+    cursor: pointer;
+}
+
+#loading-veil.is-ready .lv-tag,
+#loading-veil.is-ready .lv-bar {
+    display: none;
+}
+
+#loading-veil.is-ready .lv-enter {
+    display: block;
+}
+
+@keyframes lv-pulse {
+    0%, 100% { opacity: .45; }
+    50%      { opacity: 1; }
+}
+
+/* reduced motion: the veil still works, it simply holds still */
+@media (prefers-reduced-motion: reduce) {
+    .lv-ball, .lv-shadow, .lv-bar i { animation: none; }
+    .lv-bar i { width: 60%; }
+    .lv-enter { animation: none; opacity: 1; }
+}
+
+/* ==========================================================================
+   MENU BACKGROUND — the looping video at the very back of the menu stack
+   --------------------------------------------------------------------------
+   Ladder, bottom to top: video (0) → translucent turf on ::before (1) →
+   vignette + grain (2) → the menu frame (3). The turf's alpha is what dims the
+   picture, so the video itself runs at full opacity and object-fit: cover
+   fills the screen edge to edge — cropped, never stretched.
+   ========================================================================== */
+
+.menu-bg-video {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+    opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .menu-bg-video { display: none; }
 }

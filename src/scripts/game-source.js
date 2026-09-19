@@ -234,6 +234,40 @@ import {
     const KEEPER_DIVE_MAX = 4.0;     // furthest a dive may travel, from his feet
     const KEEPER_SAVE_REACH = 2.6;   // his arms around the point he dives to
 
+    /* --- §0.d AND THE PASS AT HIS GOAL --------------------------------------
+       A shot is a race the keeper commits to the instant it is struck, above.
+       A PASS whose line runs into his own mouth is the other ball he must go
+       for, and it is the one neither keeper ever moved for: the human's held
+       his line, and the CPU's was deliberately excluded from the sweep by
+       `ball.mode !== 'pass'` — so a ball played into the net was awarded with
+       the keeper standing wherever the passer left him. From above, that is
+       the keeper who "cannot even reach" a pass aimed at his goal.
+
+       He now READS the passer's line after a short reaction and slides along
+       his line to the point it will cross, capped to the mouth he defends.
+       Nothing here awards a save: the KEEPER_TOUCH_R contact (§0.b) still
+       decides whether his gloves actually reached the ball, so a ball struck
+       firm into a corner still beats him. The mouth keeps its corners because
+       he works from the centre of it and cannot cover a 12.5-unit post from
+       close range in the time a hard pass gives him.
+       ---------------------------------------------------------------------- */
+    const KEEPER_REACT_DELAY = 0.18; // seconds before he reads a struck ball
+
+    /* --- §0.d and the REFLEX — track the shot, then lunge at it -------------
+       The dive set at the strike is a commitment made on a guess. A keeper with
+       NO commitment — the human's, whom nobody guesses for — now runs with the
+       ball: he reads the shot's line, takes up KEEPER_TRACK_GAIN of the ground
+       to where it will cross, and once the ball is within KEEPER_REFLEX_DIST of
+       his line he lunges at the true crossing point, capped by the same
+       KEEPER_DIVE_MAX every dive answers to. Whether he is allowed the lunge at
+       all is rolled ONCE per flight at the strike (KEEPER_REFLEX_CHANCE) and
+       stashed on the ball — never re-rolled frame by frame — so a flight has
+       one character: sometimes he dives, sometimes he only tracks. No save is
+       awarded here: shotOutcome()'s race still decides from his live target. */
+    const KEEPER_REFLEX_DIST = 9;      // how close the ball must be before he lunges
+    const KEEPER_REFLEX_CHANCE = 0.55; // one roll per flight: is he allowed the lunge
+    const KEEPER_TRACK_GAIN = 0.5;     // how much of the crossing point he runs to
+
     /* ----------------------------------------------------------------------
        § 0.c THE PACE DIAL — one number, under every body on the board.
 
@@ -304,8 +338,10 @@ import {
        receiver instead of crawling to him: v0 = PASS_PACE·BALL_SPEED = 30.0, and
        still PASS_SLOW·v0 = 21.6 when it arrives — faster than a 18.2 run all the
        way down, and only beatable in the final stride. `dec` is solved
-       backwards from that single requirement, so the arrival fraction is exactly
-       PASS_SLOW at every distance.
+       backwards from that single requirement, and the arrival fraction is
+       PASS_SLOW for a ball into feet, falling to PASS_SLOW_FAR over
+       PASS_DECAY_DIST, so a ball played a long way visibly runs out of steam on
+       the way instead of arriving as hard as it left.
 
        PASS_REACH is how much of the aimed distance the ball covers before it
        resolves, and it is 1.0 — the whole of it — because the aimed distance IS
@@ -317,13 +353,26 @@ import {
        picks the NEAREST body: a receiver standing on the drawn spot is at
        distance 0 and no defender can be nearer than that. */
     const BALL_CARRY = 1.15;      // how far ahead of the boot the ball is carried
-    const PASS_SLOW = 0.72;       // speed at resolution, as a fraction of the kick
+    const PASS_SLOW = 0.72;       // a SHORT pass resolves at this fraction of its kick
+    /* §12.b — and the ball keeps losing pace the further it is asked to go. A
+       ball into feet dies to PASS_SLOW of its kick; a ball played the far
+       reference distance dies to PASS_SLOW_FAR of it, so striking it harder does
+       not rescue a long ball from running out of steam — it only makes it faster
+       on the way there. PASS_DECAY_DIST is the aiming distance (canonical units)
+       at which the far fraction is reached, and both ends are read through
+       passArrivalFrac() below, so every rolled ball solves its flight from the
+       same two numbers. Even the far end still arrives at nearly half again a
+       running man's pace (PASS_SLOW_FAR · PASS_PACE · BALL_SPEED ≈ 26.4 against
+       18.2), so the §12.b guarantee holds at every distance. */
+    const PASS_SLOW_FAR = 0.55;   // ...and a LONG pass resolves at this fraction of its kick
+    const PASS_DECAY_DIST = 60;   // aiming distance (u) at which the far fraction is reached
     /* §12.b — "increase ball speed." The rulebook's BALL_SPEED (23.8) is pinned by
        the 28 property tests and may not move, so the whole of the increase lives
        here, in the one number that turns it into a kick: v0 = PASS_PACE·BALL_SPEED.
        1.12 → 1.26 is a quarter of a chord more on every ball that leaves a boot,
-       and the arrival fraction is a RATIO of that kick (PASS_SLOW, below), so the
-       ball is quicker than a running man by a wider margin than before — the §12.b
+       and the arrival fraction is a RATIO of that kick (PASS_SLOW…PASS_SLOW_FAR,
+       below), so the ball is quicker than a running man by a wider margin than
+       before — the §12.b
        guarantee gets stronger, never weaker. Nothing in ./rules.js has moved. */
     const PASS_PACE = 1.26;       // kick speed, as a multiple of BALL_SPEED
     const PASS_REACH = 1.0;       // and it has covered this much ground by then
@@ -334,9 +383,10 @@ import {
        longer the line" actually means. Both ends have now been lifted: the floor
        from 0.85 to 0.92, so even a nudge into feet is a struck ball rather than a
        rolled one, and the ceiling from 1.45 to 1.60, so a full-length line is a
-       genuine clearance. PASS_SLOW still scales the whole span, so the floor is
-       still the slowest ball in the game and the profile still protects the
-       "quicker than a runner" rule at every power level. */
+       genuine clearance. The roll still dies to a fraction of whatever it was
+       struck at (passArrivalFrac, below), so the floor is still the slowest ball
+       in the game and the profile still protects the "quicker than a runner"
+       rule at every power level. */
     const PACE_MIN = 0.92;        // a flick into feet
     const PACE_MAX = 1.60;        // a full-length line, struck as hard as he can
     const BALL_ROLL_STOP = 11.5;  // turf friction for a loose ball, u/s²
@@ -391,12 +441,26 @@ import {
        the one body on the pitch that must not be caught out of position. */
     const CHASE_SECOND = 26;      // the second man joins the race inside this
     const KEEPER_RACE_DIST = 14;  // and a keeper races only this far from his goal
-    /* The mean speed of a rolled pass, taken from the same two numbers the roll
-       itself is built from. It is what turns a distance into a flight time, and
-       it is read by the roll in launchBall() and by the lead pass in leadSpot() —
-       two places that have to agree, because a lead worked out from one average
-       and a ball flown at another is a lead that is wrong by the difference. */
-    const PASS_AVG = BALL_SPEED * PASS_PACE * (1 + PASS_SLOW) * 0.5;
+    /* §12.b — how much of the kick a rolled pass has left when it resolves, and
+       the mean speed that follows from it. Both are functions of the AIMED
+       DISTANCE `d` in canonical units: the further the ball has to travel, the
+       lower the fraction it dies to, which is the whole of "it loses its speed
+       over distance". Each ball is still struck at the same speed for its power,
+       so a long ball is quicker off the boot and slower into the target — it
+       decelerates over more ground.
+
+       These two functions are the ONLY place the profile's two ends are worked
+       out. They are read by the roll in launchBall() and by the lead pass in
+       leadSpot() — two places that have to agree, because a lead worked out from
+       one average and a ball flown at another is a lead that is wrong by the
+       difference. */
+    function passArrivalFrac(d) {
+        return PASS_SLOW + (PASS_SLOW_FAR - PASS_SLOW)
+            * clamp(d / Math.max(1e-6, PASS_DECAY_DIST), 0, 1);
+    }
+    function passMeanSpeed(v0, d) {
+        return v0 * (1 + passArrivalFrac(d)) * 0.5;
+    }
     /* --- §12.d THE STROKE — the freehand line is the input, and its own two
        properties are the mechanic. Nothing else sets power, and nothing else
        decides whether the ball clears an outstretched leg:
@@ -1490,18 +1554,22 @@ import {
            requirement that is about the rules rather than the look: THE BALL HAS
            TO BE FASTER THAN A RUNNING MAN UNTIL THE MOMENT IT RESOLVES. So the
            KICK speed is fixed first — PASS_PACE·BALL_SPEED, 30.0, a firmly struck
-           pass — and `dec`
-           is then chosen so that the ball is still moving at PASS_SLOW of that
-           kick when it reaches PASS_REACH of the aimed distance. Total time is
-           the mean of the two speeds. Pass the `speed` argument in and it is
-           ignored for a roll: the profile is the profile. */
+           pass — and `dec` is then chosen so that the ball has died to the
+           distance's own fraction of that kick by the time it reaches PASS_REACH
+           of the aimed distance — PASS_SLOW into feet, falling to PASS_SLOW_FAR
+           over PASS_DECAY_DIST, so the further a ball is sent the more of its
+           pace it has lost when it gets there. Total time is the mean of the two
+           speeds. Pass the `speed` argument in and it is ignored for a roll: the
+           profile is the profile. */
         if (ball.roll) {
             /* §12.d — `pace` is the stroke's length, mapped across PACE_MIN…PACE_MAX
                of a standard kick. It multiplies BOTH the launch speed and the mean
                speed the flight time is solved from, which is the only way to add
-               power without changing the arrival fraction: the ball still dies
-               into PASS_SLOW of whatever it was struck at, so the rule about
-               being quicker than a runner holds at every power level. The span is
+               power without changing the arrival fraction: `pace` scales both
+               ends of the roll and `dec` together, so a harder-struck ball still
+               dies to the SAME distance-determined fraction — the rule about
+               being quicker than a runner holds at every power level, and power
+               buys speed on the way there rather than a slower death. The span is
                what makes the ball answer the drawn line: a short flick is the
                floor, and a line drawn the full length of the pitch is the ceiling
                — a good half again as quick.
@@ -1513,8 +1581,15 @@ import {
             const pace = base * (ball.air ? CHIP_GAIN : 1);
             const v0 = BALL_SPEED * PASS_PACE * pace;
             ball.s0 = ball.s = ball.speed = v0;
-            ball.total = PASS_REACH * d / Math.max(1e-6, PASS_AVG * pace);
-            ball.dec = v0 * (1 - PASS_SLOW) / Math.max(1e-6, ball.total);
+            /* §12.b — the flight time is the aimed distance over the roll's own
+               MEAN speed (the kick and the arrival speed, averaged), and `dec` is
+               solved from the same two ends. Distance enters twice — through the
+               fraction it dies to and through the mean the time is solved from —
+               which is what makes a long ball both slower at the end AND slower
+               on average, while still covering exactly the drawn distance. */
+            const r = passArrivalFrac(d);
+            ball.total = PASS_REACH * d / Math.max(1e-6, passMeanSpeed(v0, d));
+            ball.dec = v0 * (1 - r) / Math.max(1e-6, ball.total);
             ball.arc = BALL_ROLL_ARC;
         } else {
             ball.total = d / Math.max(1e-6, speed);
@@ -1575,6 +1650,26 @@ import {
        drawn, so the window is a decision and not a read-out of the answer. */
     const queueRings = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(() => mkRing(COL.aim, 0.55, 0.95));
     const queueLine = groundLine(COL.aim, 2);
+
+    /* --- §8.b the run paths --------------------------------------------------
+       Every queued run keeps its line on the grass: the straight move the
+       player will actually take, drawn from where he stands to where he is
+       going. One pooled LineSegments object carries them all — RUN_PATH_MAX
+       segments, a preallocated dynamic buffer, one draw call for any number of
+       runs — and it is rebuilt from the SAME queued points the rings above sit
+       on, so a path and its ring can never disagree about where a man was
+       sent. Nothing here is allocated mid-gesture. */
+    const RUN_PATH_MAX = 16;
+    const runPathsGeo = new THREE.BufferGeometry();
+    const runPathsAttr = new THREE.BufferAttribute(new Float32Array(RUN_PATH_MAX * 6), 3);
+    runPathsAttr.setUsage(THREE.DynamicDrawUsage);
+    runPathsGeo.setAttribute('position', runPathsAttr);
+    runPathsGeo.setDrawRange(0, 0);
+    const runPaths = new THREE.LineSegments(runPathsGeo,
+        new THREE.LineBasicMaterial({ color: COL.aim, transparent: true, opacity: .5 }));
+    runPaths.frustumCulled = false;
+    runPaths.visible = false;
+    scene.add(runPaths);
 
     /* --- §8.c the freehand stroke (§12.d) -----------------------------------
        groundLine() can only ever draw two points, and a second point is exactly
@@ -1752,6 +1847,7 @@ import {
     function hideQueueMarkers() {
         queueRings.forEach(m => { m.visible = false; });
         queueLine.visible = false;
+        runPaths.visible = false;
     }
 
     /** Drop every stacked move, and every line that was drawn for them. Called
@@ -1766,14 +1862,29 @@ import {
         the line of the queued ball when the human is the side in possession. */
     function drawQueueMarkers() {
         if (SO.active || !PLAN || PLAN.armed) { hideQueueMarkers(); return; }
-        let n = 0;
+        let n = 0, rn = 0;
         allPlayers.forEach(p => {
             if (p.team !== 'you' || !p.queued || !queueRings[n]) return;
             const m = queueRings[n++];
             m.visible = true;
             m.position.set(worldX(p.queued.x), 0.09, worldZ(p.queued.y));
+            /* §8.b — and the run's path, replacing the freehand stroke on
+               release: the straight move he will take, written into the
+               shared buffer beside the ring that marks its end. */
+            if (rn < RUN_PATH_MAX) {
+                const o = rn++ * 6;
+                runPathsAttr.array[o] = worldX(p.x);
+                runPathsAttr.array[o + 1] = .1;
+                runPathsAttr.array[o + 2] = worldZ(p.y);
+                runPathsAttr.array[o + 3] = worldX(p.queued.x);
+                runPathsAttr.array[o + 4] = .1;
+                runPathsAttr.array[o + 5] = worldZ(p.queued.y);
+            }
         });
         for (let i = n; i < queueRings.length; i++) queueRings[i].visible = false;
+        runPathsGeo.setDrawRange(0, rn * 2);
+        runPathsAttr.needsUpdate = true;
+        runPaths.visible = rn > 0;
 
         const c = PLAY && PLAY.carrier;
         const move = PLAN.atk === 'you' ? (PLAN.shot.you || PLAN.pass.you) : null;
@@ -1832,10 +1943,10 @@ import {
     /** §12.c — where a receiver will actually BE when the pass to `dest` arrives.
 
         The ball is quicker than a man — that is the whole point of §12.b — so a
-        ball aimed at a runner's DESTINATION always beats him to it by
-        (1 − PLAYER_SPEED/PASS_AVG) of the distance, and it ends up sitting at a
-        spot the receiver has not reached yet. That is harmless when the aim is a
-        line the human drew, because he drew it and he can see where it goes, and
+        ball aimed at a runner's DESTINATION always beats him to it, and it ends
+        up sitting at a spot the receiver has not reached yet. That is harmless
+        when the aim is a line the human drew, because he drew it and he can see
+        where it goes, and
         it is exactly what "the ball rolls and the player runs onto it" means.
         It is not harmless for the CPU, which picks a spot and then has to live
         with it: the ball would land in the gap with only the defender who read
@@ -1855,7 +1966,13 @@ import {
         const o = kickFrom(from);
         let aim = { x: dest.x, y: dest.y };
         for (let k = 0; k < 2; k++) {
-            const t = Math.max(1e-6, dist(o, aim)) / PASS_AVG;
+            /* §12.b — the flight time comes from the roll's OWN mean speed, read
+               from the same function `launchBall` builds the roll from, so a lead
+               and the ball it is waiting for cannot disagree. A long ball's mean
+               is lower, so the receiver is led further: he has longer to run
+               before it arrives. */
+            const dd = Math.max(1e-6, dist(o, aim));
+            const t = dd / Math.max(1e-6, passMeanSpeed(BALL_SPEED * PASS_PACE, dd));
             const run = Math.min(PLAYER_SPEED * t, dist(mate, dest));
             const d = unit(dest.x - mate.x, dest.y - mate.y);
             aim = { x: mate.x + d.x * run, y: mate.y + d.y * run };
@@ -1891,6 +2008,29 @@ import {
         return { x: 50, y: own.y + attackSide(team) * KEEPER_LINE };
     }
     const keeperSlideX = () => clamp(50 + (ball.x - 50) * 0.35, 40, 60);
+
+    /** §0.d — a ball in flight that is heading into this keeper's own mouth.
+
+        Returns the x at which the ball's line will cross the keeper's working
+        line (his standing y), or null when the ball is no threat to his goal:
+        not a pass in flight, moving away from his end, or passing wide of a
+        post. It reads the BALL's own line — `from` and `dir`, which a rolled
+        pass keeps for the whole of its travel — so it is the same line the
+        player sees drawn on the grass and not a guess at where the ball is
+        going. Used by updateKeeper() to send him across, and by the claim in
+        contestFlight() to let him go for a ball chipped over his line. */
+    function keeperThreatX(k) {
+        if (!k || !ball.alive || ball.mode !== 'pass') return null;
+        const from = ball.from, dir = ball.dir;
+        if (!from || !dir || Math.abs(dir.y) < 1e-6) return null;
+        const home = keeperHome(k.team);
+        const t = (home.y - from.y) / dir.y;   // when it reaches his line
+        if (t <= 0) return null;               // behind him, or moving away
+        const x = from.x + dir.x * t;
+        const gx = ownGoal(k.team).x;
+        if (Math.abs(x - gx) > GOAL_HALF_WIDTH) return null;   // wide of the mouth
+        return x;
+    }
 
     /** Where a defender must be to meet a pass at the earliest possible moment.
        §12.b — the race is run with the contact radius, not the rulebook's
@@ -2065,6 +2205,29 @@ import {
         aimReset();
     }
 
+    /** §0.d — the keeper's dive guide, redrawn every frame from his committed
+        state. While the finger is down the gesture owns the line; after release
+        the line stays and tracks his body, so the instruction the player gave
+        his keeper stays legible for the whole window — and shortens as he
+        dives into the point. It clears with the commitment itself: openPlan()
+        and kickoff() wipe the keeper's dive state, hideOverlays() wipes the
+        objects, and the line comes off with them. The board still never
+        announces the CPU's instruction, and the shootout keeps its own flow. */
+    function drawDiveGuide() {
+        if (SO.active || drag.kind === 'keeper') return;
+        const k = keeperOf('you');
+        const d = k ? (k.queuedDive || k.dive) : null;
+        if (!d) {
+            diveLine.visible = false;
+            diveMarker.visible = false;
+            return;
+        }
+        diveLine.setEnds(k, d);
+        diveLine.visible = true;
+        diveMarker.position.set(worldX(d.x), 0.09, worldZ(d.y));
+        diveMarker.visible = true;
+    }
+
     /* ==========================================================================
        § 9.b FEEL — audio, shake, banner (rides on top; never inside the rulebook)
        ========================================================================== */
@@ -2093,6 +2256,26 @@ import {
             } else {
                 audio.pause();
             }
+        }
+        /** §9.b — the boot preload: resolve once the background track is fully
+            loaded. The menu used to open to silence and start the track half
+            way through, because the multi-megabyte file was the slowest thing
+            on first load; the boot veil (see the end of boot) waits on this.
+            An error — a missing track — also resolves: a broken file must
+            never trap the player on a loading screen. */
+        function preloadBgm(onReady) {
+            const audio = initBgm();
+            if (!audio) { if (onReady) onReady(); return; }
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                if (onReady) onReady();
+                syncBgm(); /* the menu is up behind the veil: start it if policy allows */
+            };
+            audio.addEventListener('canplaythrough', finish, { once: true });
+            audio.addEventListener('error', finish, { once: true });
+            audio.load();
         }
         function ensure() {
             if (ctx) return ctx;
@@ -2130,6 +2313,7 @@ import {
         return {
             unlock,
             syncBgm,
+            preloadBgm,
             get muted() { return muted; },
             toggle() { muted = !muted; syncBgm(); return muted; },
             kick() { tone(150, .12, 'triangle', .4); tone(90, .16, 'sine', .3, .01); },
@@ -2783,7 +2967,15 @@ import {
                     diveSpeed: keeperDiveSpeed
                 });
                 if (r.outcome === 'SAVED' && ball.t >= r.t - 1e-6) return keeperContact(k, atk);
-            } else if (!ball.air && (ball.mode !== 'pass' || ball.travel >= TOUCH_R) && ballPathDist(k, fromX, fromY) <= KEEPER_TOUCH_R) {
+            } else if ((!ball.air || keeperThreatX(k) !== null) &&
+                (ball.mode !== 'pass' || ball.travel >= TOUCH_R) &&
+                ballPathDist(k, fromX, fromY) <= KEEPER_TOUCH_R) {
+                /* §0.d — a keeper goes for a ball at his OWN MOUTH whether it is
+                   on the deck or chipped over his line: he has hands, which is
+                   exactly why §0.b gives a keeper more contact than an
+                   outfielder's feet. A chip anywhere else on the pitch is still
+                   uncuttable, as §12.f says. keeperThreatX() is what scopes that
+                   to a ball actually heading into his net. */
                 return caughtByKeeper(k, atk);
             }
         }
@@ -3316,9 +3508,69 @@ import {
             moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED * KEEPER_SCALE, dt);
             return;
         }
-        /* the human's keeper is the player's alone: no sweep, no slide with
-           the ball. He holds his line unless a dive is drawn for him, and
-           walks back to it once the dive is spent. */
+        /* --- §0.d the ball coming at his goal -------------------------------
+           A pass whose line runs into his own mouth is the one ball a keeper
+           must go for, and it is the ball neither keeper used to move for at
+           all — the human's held his line, and the CPU's was excluded from the
+           sweep below by `ball.mode !== 'pass'`. So a ball played into the net
+           was resolved with the keeper standing where the passer left him.
+
+           He reads the line once he has had KEEPER_REACT_DELAY to react, then
+           slides ALONG HIS LINE to the point it will cross, at his own burst
+           speed, capped to the mouth he defends. This moves a body and nothing
+           else: whether the ball actually reached his gloves is still the
+           KEEPER_TOUCH_R geometry in contestFlight(), so a ball struck firm
+           into a corner still beats him and the mouth keeps its corners. He is
+           never sent outside the mouth, so a pass that is going wide leaves him
+           where he was. */
+        if (k.team !== state.possession && ball.mode === 'pass' && ball.t >= KEEPER_REACT_DELAY) {
+            /* only the keeper who is actually DEFENDING this ball — the one
+               contestFlight() lets claim it, keeperOf(other(possession)). A
+               keeper whose own team is in possession has nothing to stop: his
+               side's pass cannot be his to collect while it is a pass. */
+            const tx = keeperThreatX(k);
+            if (tx !== null) {
+                const gx = ownGoal(k.team).x;
+                moveToward(k, clamp(tx, gx - GOAL_HALF_WIDTH, gx + GOAL_HALF_WIDTH),
+                    home.y, DIVE_SPEED * KEEPER_SCALE, dt);
+                return;
+            }
+        }
+        /* --- §0.d the reflex: track the shot, then lunge at it ---------------
+           A keeper with no committed dive — the human's, or a CPU keeper whose
+           guess has not been handed to him — runs with the ball instead of
+           standing on his spot: he reads the shot's line and takes up HALF the
+           ground to where it will cross (a corner must still outrun him), and
+           when the ball is close to his line he lunges at the true crossing
+           point, from his own feet, so no read can send him past his length.
+           The lunge is allowed only when the strike-time roll said so; a dive
+           already on him (drawn or committed) is never overwritten here, and
+           the CPU's committed guess is never re-read — his coin flip and the
+           open far post stay exactly as §0.d designed. No save is awarded by
+           any of this: shotOutcome()'s race still runs against his live dive
+           target, so a firm shot into a corner still beats him. */
+        if (ball.mode === 'shot' && ball.alive && k.team !== state.possession && !k.dive) {
+            const t = (ball.from && ball.dir && Math.abs(ball.dir.y) > 1e-6)
+                ? (home.y - ball.from.y) / ball.dir.y : -1;
+            if (t > 0) {
+                const crossX = ball.from.x + ball.dir.x * t;
+                const gx = ownGoal(k.team).x;
+                if (Math.abs(ball.y - home.y) <= KEEPER_REFLEX_DIST && ball.keeperReflex) {
+                    /* the lunge — committed like any dive, and moved onto now */
+                    k.dive = { x: clamp(clampDiveX(crossX, k.x), 8, 92), y: k.y };
+                    moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED * KEEPER_SCALE, dt);
+                    return;
+                }
+                /* the run: part of the way to the crossing point, on his line */
+                moveToward(k, k.x + (clamp(crossX, gx - GOAL_HALF_WIDTH, gx + GOAL_HALF_WIDTH) - k.x) * KEEPER_TRACK_GAIN,
+                    home.y, DIVE_SPEED * KEEPER_SCALE, dt);
+                return;
+            }
+        }
+        /* the human's keeper is the player's alone: no sweep of his own half and
+           no drift with the ball's x — the goal threat above is the ONE ball he
+           reads without being told to. He holds his line unless a dive is drawn
+           for him, and walks back to it once the dive is spent. */
         if (k.team !== 'cpu') {
             if (dist(k.x, k.y, home.x, home.y) > 0.5) {
                 moveToward(k, home.x, home.y, DRILL_SPEED * 1.5 * KEEPER_SCALE, dt);
@@ -3693,6 +3945,10 @@ import {
         const k = keeperOf(other(state.possession));
         if (k) {
             ball.keeperFrom = { x: k.x, y: k.y };
+            /* §0.d — one reflex roll per flight, here, beside the CPU's guess.
+               A dive the human already drew (queuedDive below) outranks it;
+               a keeper who lost this roll still tracks, but never lunges. */
+            ball.keeperReflex = Math.random() < KEEPER_REFLEX_CHANCE;
             if (k.queuedDive) {
                 k.dive = k.queuedDive;
             } else if (k.team === 'cpu' && !k.held && !k.dive) {
@@ -4661,6 +4917,9 @@ import {
                    this player will end up, and the step itself waits for the
                    window to close so it fires alongside everybody else's. */
                 setIntent(player, dest);
+                /* the straight pooled path replaces the freehand stroke the same
+                   instant it is queued, so a run is never drawn twice. */
+                moveCurve.visible = false;
                 log(player.label + ' set to run.', '');
                 tutorOnSend(player, dest);
             }
@@ -5609,6 +5868,7 @@ import {
            stored, nothing replayed. `last` is still refreshed above, so no
            backlog of wall time leaks into the first portrait frame. */
         if (!rotateHold && !state.paused && !topScreen() && state.phase !== 'idle') update(dt);
+        drawDiveGuide();
         /* Two things pulse, and neither of them is the ball's brightness — that
            has no room left to move (see the ball's material). A small breath in
            size with the rim tightening as it swells, and the beacon ring, which
@@ -5855,6 +6115,54 @@ import {
     bus.emit('score'); bus.emit('half'); bus.emit('role');
     pushScreen('menu', { focus: '#btn-start' });
     requestAnimationFrame(frame);
+
+    /* --- the boot veil -------------------------------------------------------
+       The shell mounts under #loading-veil (see index.astro) so the player
+       never lands on a menu whose music is still arriving — and, because a
+       browser refuses to start sound without a user gesture, the veil is ALSO
+       the gesture that lets the music begin. Three phases:
+
+       LOADING — ball and shimmer bar, until the track reports canplaythrough
+       (or errors) AND a 0.9 s dwell has passed; the dwell is what stops a
+       cached track turning the veil into a sub-frame flash.
+
+       READY — the loading chrome swaps for TAP TO KICK OFF, and the first tap
+       (or Enter/Space) is handed to Sfx.unlock(): the gesture that resumes the
+       audio clock and starts the track, so the menu is revealed already
+       singing instead of starting it half-way through.
+
+       and the lift itself — with a grace: a player who never taps is still
+       never trapped, because after 15 s the veil lifts on its own and the
+       track simply waits for their next gesture, exactly as before. */
+    const bootVeil = document.getElementById('loading-veil');
+    if (bootVeil) {
+        let veilLifted = false, audioReady = false, dwellDone = false;
+        const onPointer = () => onEnter();
+        const onKey = e => {
+            if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                e.preventDefault();
+                onEnter();
+            }
+        };
+        function onEnter() {
+            if (veilLifted) return;
+            veilLifted = true;
+            window.removeEventListener('pointerdown', onPointer);
+            window.removeEventListener('keydown', onKey);
+            Sfx.unlock(); /* the gesture: resumes Web Audio and starts the track */
+            bootVeil.classList.add('is-lifted');
+            setTimeout(() => bootVeil.remove(), 700);
+        }
+        function showGate() {
+            if (veilLifted || !audioReady || !dwellDone) return;
+            bootVeil.classList.add('is-ready');
+            window.addEventListener('pointerdown', onPointer, { passive: true });
+            window.addEventListener('keydown', onKey);
+        }
+        Sfx.preloadBgm(() => { audioReady = true; showGate(); });
+        setTimeout(() => { dwellDone = true; showGate(); }, 900);
+        setTimeout(onEnter, 15000); /* never trap: lift without sound if untapped */
+    }
 
     /* --- the rulebook's own suite: always available, reported on load --- */
     const verify = runVerification(false);
