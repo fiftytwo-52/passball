@@ -534,14 +534,6 @@ import '../styles/global.css';
                         </svg>
                         Vs Computer
                     </button>
-                    <button type="button" class="btn btn-pvp-cta" id="btn-main-pvp" title="Play online vs another player">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
-                            <circle cx="8" cy="8" r="3" />
-                            <circle cx="16" cy="8" r="3" />
-                            <path d="M3 20c0-3 2.5-5 5-5s5 2 5 5M11 20c0-3 2.5-5 5-5s5 2 5 5" />
-                        </svg>
-                        Online 1v1 PvP
-                    </button>
                     <button type="button" class="btn kickoff-alt" id="btn-penalty" title="Direct penalty shootout mode">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
                             <circle cx="12" cy="12" r="9" />
@@ -672,7 +664,7 @@ import '../styles/global.css';
                 <button type="button" class="btn btn-icon-xs" id="btn-pvp-close" aria-label="Close PvP">✕</button>
             </div>
 
-            <div class="pvp-tabs" role="tablist">
+            <div class="pvp-tabs" id="pvp-tabs" role="tablist">
                 <button type="button" class="pvp-tab active" id="tab-btn-custom" role="tab" aria-selected="true">Custom Room</button>
                 <button type="button" class="pvp-tab" id="tab-btn-open" role="tab" aria-selected="false">Open Matchmaking</button>
             </div>
@@ -776,24 +768,108 @@ import '../styles/global.css';
 
             <!-- Open Matchmaking Pane -->
             <div class="pvp-pane" id="pane-open" hidden>
-                <div class="pvp-section">
-                    <span class="pvp-section-title">Search Online Players</span>
+                <div id="pvp-open-idle">
+                    <div class="pvp-section">
+                        <span class="pvp-section-title">Match Settings</span>
+                        <!-- The same two dials the private room carries: a
+                             matchmade game is configured before a challenger is
+                             picked, and the challenger's pair is the one the
+                             host adopts for both sides. -->
+                        <div class="pvp-room-settings">
+                            <div class="pvp-settings-row">
+                                <div class="pvp-setting-item">
+                                    <label for="pvp-open-timer" class="pvp-setting-label">
+                                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                                            <circle cx="8" cy="8" r="6.5" />
+                                            <polyline points="8 4.5 8 8 10.5 10" />
+                                        </svg>
+                                        Turn Time
+                                    </label>
+                                    <div class="select-wrapper">
+                                        <select class="setting-select" id="pvp-open-timer" aria-label="Turn response time">
+                                            <option value="5">5s (Fast)</option>
+                                            <option value="10" selected>10s (Standard)</option>
+                                            <option value="15">15s (Tactical)</option>
+                                            <option value="20">20s (Relaxed)</option>
+                                        </select>
+                                        <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                            <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
+                                        </svg>
+                                    </div>
+                                </div>
 
-                    <div id="pvp-open-idle">
-                        <button type="button" class="btn btn-primary btn-block" id="btn-pvp-search-open">Find Random Match</button>
+                                <div class="pvp-setting-item">
+                                    <label for="pvp-open-length" class="pvp-setting-label">
+                                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                                            <rect x="2.5" y="3.5" width="11" height="9" rx="1.5" />
+                                            <line x1="8" y1="3.5" x2="8" y2="12.5" />
+                                            <circle cx="8" cy="8" r="1.8" />
+                                        </svg>
+                                        Match Length
+                                    </label>
+                                    <div class="select-wrapper">
+                                        <select class="setting-select" id="pvp-open-length" aria-label="Match total length">
+                                            <option value="60">2:00 min</option>
+                                            <option value="120" selected>4:00 min</option>
+                                            <option value="180">6:00 min</option>
+                                        </select>
+                                        <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                            <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
-                    <div id="pvp-open-searching" class="pvp-search-box" hidden>
-                        <span class="pvp-spinner"></span>
-                        <span id="pvp-search-msg">Scanning public lobbies...</span>
-                        <button type="button" class="btn btn-ghost-sm" id="btn-pvp-cancel-search">Cancel</button>
-                    </div>
-
-                    <div id="pvp-open-not-found" class="pvp-not-found-box" hidden>
-                        <p>No active players found looking for a match right now.</p>
-                        <button type="button" class="btn btn-primary btn-block" id="btn-pvp-host-open">Host Public Match (Wait for player)</button>
+                    <div class="pvp-section pvp-players-section">
+                        <div class="pvp-players-head">
+                            <span class="pvp-section-title">Players Online</span>
+                            <span class="pvp-players-count" id="pvp-players-count">—</span>
+                        </div>
+                        <!-- Filled by the engine: one row per waiting lobby, each
+                             with its own MATCH button. -->
+                        <div class="pvp-player-list" id="pvp-player-list" role="list"></div>
+                        <p class="pvp-players-empty" id="pvp-players-empty">
+                            Checking who is online… press Refresh to scan again.
+                        </p>
+                        <div class="pvp-open-actions">
+                            <button type="button" class="btn btn-ghost-sm" id="btn-pvp-refresh-players">Refresh</button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-pvp-search-open">Quick Match</button>
+                            <button type="button" class="btn btn-primary btn-sm" id="btn-pvp-host-open">Host &amp; Wait</button>
+                        </div>
                     </div>
                 </div>
+
+                <div id="pvp-open-searching" class="pvp-search-box" hidden>
+                    <span class="pvp-spinner"></span>
+                    <span id="pvp-search-msg">Scanning public lobbies...</span>
+                    <button type="button" class="btn btn-ghost-sm" id="btn-pvp-cancel-search">Cancel</button>
+                </div>
+            </div>
+
+            <!-- Both humans are connected: the kick-off handshake. The lobby
+                 panes stand down while this shows, so there is exactly one thing
+                 left to do — press START MATCH. -->
+            <div class="pvp-ready" id="pvp-ready" hidden>
+                <div class="pvp-ready-head">
+                    <span class="pvp-ready-side" id="pvp-ready-you">YOU</span>
+                    <span class="pvp-ready-vs">VS</span>
+                    <span class="pvp-ready-side" id="pvp-ready-them">OPPONENT</span>
+                </div>
+                <p class="pvp-ready-msg" id="pvp-ready-msg">Opponent connected. Press Start Match when you are ready.</p>
+                <button type="button" class="btn btn-primary btn-block" id="btn-pvp-start-match">START MATCH</button>
+                <div class="pvp-wait-box" id="pvp-ready-wait" hidden>
+                    <span class="pvp-spinner"></span>
+                    <span id="pvp-ready-wait-msg">Waiting for the opponent to press Start Match...</span>
+                </div>
+            </div>
+
+            <!-- The 5-2-1 that precedes kick-off, driven by the host's packet so
+                 both sides count the same seconds. -->
+            <div class="pvp-ready" id="pvp-countdown" hidden>
+                <span class="pvp-countdown-num" id="pvp-countdown-num">5</span>
+                <p class="pvp-ready-msg" id="pvp-countdown-msg">Kick-off in 5...</p>
             </div>
 
             <!-- Network Status Bar -->

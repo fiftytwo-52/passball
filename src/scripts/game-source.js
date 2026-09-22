@@ -30,7 +30,7 @@ import {
     penaltyKickOutcome, shootoutDecided, getShootoutTarget, formatClock,
     mulberry32, runVerification
 } from './rules.js';
-import { pvp, EMOJIS } from './pvp-network.js';
+import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
 
 (function () {
     'use strict';
@@ -50,6 +50,15 @@ import { pvp, EMOJIS } from './pvp-network.js';
     let lastPvpBroadcast = 0;
     let hostDone = false;
     let guestDone = false;
+    /* The kick-off handshake. `pvpPhase` is which face of the PvP card is on
+       screen; the two ready flags are the humans, not the sockets — a match
+       only starts when both have pressed START MATCH. See setupPvpUI(). */
+    let pvpPhase = 'lobby';   // 'lobby' | 'ready' | 'countdown'
+    let pvpMeReady = false;
+    let pvpThemReady = false;
+    let pvpAutoStart = false; // this side picked its opponent off the online list
+    let pvpStartTimer = null;
+    let pvpScanning = false;
 
     const myTeam = () => (pvpActive && pvpRole === 'guest' ? 'cpu' : 'you');
     const opponentTeam = () => (pvpActive && pvpRole === 'guest' ? 'you' : 'cpu');
@@ -2544,6 +2553,9 @@ import { pvp, EMOJIS } from './pvp-network.js';
             /* and the hoardings / the netting — a dull thud, deliberately quiet:
                it happens often and it must never compete with the woodwork. */
             bounce() { tone(140, .09, 'sine', .12); },
+            /* the kick-off countdown: a dry click per second, deliberately the
+               smallest sound in the game so the last one never startles */
+            tick() { tone(880, .05, 'square', .13); },
             whistle() { tone(1750, .16, 'square', .12); setTimeout(() => tone(1750, .18, 'square', .12), 170); }
         };
     })();
@@ -6985,16 +6997,23 @@ import { pvp, EMOJIS } from './pvp-network.js';
     function startPvpGame(role) {
         pvpActive = true;
         pvpRole = role;
+        /* The handshake is spent — this is a match now, so no stale ready flags
+           or countdown can leak into the next one. */
+        pvpAutoStart = false;
+        pvpMeReady = false;
+        pvpThemReady = false;
+        pvpPhase = 'lobby';
+        if (pvpStartTimer) { clearInterval(pvpStartTimer); pvpStartTimer = null; }
         while (topScreen()) popScreen();
 
         const badge = document.getElementById('hud-pvp-badge');
-        const roleText = document.getElementById('pvp-role-text');
-        const pingText = document.getElementById('pvp-ping-text');
+        const roleText = document.getElementById('hud-pvp-role');
+        const pingText = document.getElementById('hud-pvp-ping');
         const emojiDock = document.getElementById('emoji-dock');
 
         if (badge) badge.hidden = false;
         if (roleText) roleText.textContent = role === 'host' ? 'HOST' : 'GUEST';
-        if (pingText) pingText.textContent = '0ms';
+        if (pingText) pingText.textContent = '0 ms';
         if (emojiDock) emojiDock.hidden = false;
 
         banner('ONLINE MATCH CONNECTED', CSS.goal);
@@ -7015,6 +7034,7 @@ import { pvp, EMOJIS } from './pvp-network.js';
         pvpActive = false;
         pvpRole = null;
         pvp.disconnect();
+        resetPvpHandshake();
 
         const badge = document.getElementById('hud-pvp-badge');
         const emojiDock = document.getElementById('emoji-dock');
@@ -7022,40 +7042,366 @@ import { pvp, EMOJIS } from './pvp-network.js';
         if (emojiDock) emojiDock.hidden = true;
     }
 
+    /* ----------------------------------------------------------------------
+       ONLINE PVP — the three faces of one card
+       ----------------------------------------------------------------------
+         LOBBY     the two tabs (a private room, or the public ring)
+         READY     both sockets are up: press START MATCH, and while the other
+                   human has not, that press reads as a spinner
+         COUNTDOWN the host's 5-2-1, which both sides count from one packet
+
+       Nothing here decides the match: the host still owns gameplay state after
+       kick-off (see startPvpGame). This layer only decides *when* it starts.
+       ---------------------------------------------------------------------- */
+    let pvpTab = 'custom';   // which lobby pane is showing
+
+    /** The dials this side is proposing; the host has the final word. */
+    function pvpSettings() { return { planWindow, halfLength }; }
+
+    function applyPvpSettings(s) {
+        if (!s) return;
+        if (s.planWindow) setPlanWindow(s.planWindow);
+        if (s.halfLength) setHalfLength(s.halfLength);
+    }
+
+    /** The open pane's dials, applied the moment a match is started from it. */
+    function readPvpOpenSettings() {
+        const timerSel = el('pvp-open-timer');
+        const lengthSel = el('pvp-open-length');
+        if (timerSel) setPlanWindow(parseInt(timerSel.value, 10));
+        if (lengthSel) setHalfLength(parseInt(lengthSel.value, 10));
+        return pvpSettings();
+    }
+
+    function renderPvpCard() {
+        const lobby = pvpPhase === 'lobby';
+        const tabs = el('pvp-tabs');
+        const paneCustom = el('pane-custom');
+        const paneOpen = el('pane-open');
+        if (tabs) tabs.hidden = !lobby;
+        if (paneCustom) paneCustom.hidden = !(lobby && pvpTab === 'custom');
+        if (paneOpen) paneOpen.hidden = !(lobby && pvpTab === 'open');
+        const ready = el('pvp-ready');
+        const countdown = el('pvp-countdown');
+        if (ready) ready.hidden = pvpPhase !== 'ready';
+        if (countdown) countdown.hidden = pvpPhase !== 'countdown';
+    }
+
+    function setPvpPhase(phase) {
+        pvpPhase = phase;
+        renderPvpCard();
+    }
+
+    /** Back to the lobby, with no half-finished handshake left behind. */
+    function resetPvpHandshake() {
+        if (pvpStartTimer) { clearInterval(pvpStartTimer); pvpStartTimer = null; }
+        pvpMeReady = false;
+        pvpThemReady = false;
+        pvpAutoStart = false;
+        pvpPhase = 'lobby';
+        const btn = el('btn-pvp-start-match');
+        const wait = el('pvp-ready-wait');
+        if (btn) { btn.hidden = false; btn.disabled = false; }
+        if (wait) wait.hidden = true;
+        renderPvpCard();
+    }
+
+    /** Opened from the menu: a clean card, and the empty list until it scans. */
+    function openPvpLobby(focus) {
+        resetPvpHandshake();
+        renderPvpPlayerList([]);
+        const count = el('pvp-players-count');
+        const empty = el('pvp-players-empty');
+        if (count) count.textContent = '—';
+        if (empty) {
+            empty.hidden = false;
+            empty.textContent = 'Press Refresh to see who is online right now.';
+        }
+        const searching = el('pvp-open-searching');
+        const idle = el('pvp-open-idle');
+        if (searching) searching.hidden = true;
+        if (idle) idle.hidden = false;
+        pvpTab = 'custom';
+        const tabCustom = el('tab-btn-custom');
+        const tabOpen = el('tab-btn-open');
+        if (tabCustom) { tabCustom.classList.add('active'); tabCustom.setAttribute('aria-selected', 'true'); }
+        if (tabOpen) { tabOpen.classList.remove('active'); tabOpen.setAttribute('aria-selected', 'false'); }
+        const btnCreate = el('btn-pvp-create');
+        if (btnCreate) btnCreate.disabled = false;
+        const createIdle = el('pvp-create-idle');
+        const createActive = el('pvp-create-active');
+        if (createIdle) createIdle.hidden = false;
+        if (createActive) createActive.hidden = true;
+        const statusMsg = el('pvp-status-msg');
+        if (statusMsg) statusMsg.textContent = 'Ready';
+        renderPvpCard();
+        pushScreen('pvp', { focus: focus || '#btn-pvp-create' });
+    }
+
+    /** Both sockets are up: the lobby panes step aside for the handshake. */
+    function showPvpReady() {
+        pvpMeReady = false;
+        pvpThemReady = false;
+        const you = el('pvp-ready-you');
+        const them = el('pvp-ready-them');
+        const msg = el('pvp-ready-msg');
+        const btn = el('btn-pvp-start-match');
+        const wait = el('pvp-ready-wait');
+        const waitMsg = el('pvp-ready-wait-msg');
+        if (you) you.textContent = 'YOU · ' + (pvp.role === 'host' ? 'HOST' : 'GUEST');
+        if (them) them.textContent = 'OPPONENT';
+        if (msg) msg.textContent = 'Opponent connected. Press Start Match — the match begins when you both have.';
+        if (btn) { btn.hidden = false; btn.disabled = false; }
+        if (wait) {
+            wait.hidden = true;
+            if (waitMsg) waitMsg.textContent = 'Waiting for the opponent to press Start Match...';
+        }
+        setPvpPhase('ready');
+        setStatus('Opponent connected — press START MATCH.', true);
+        Sfx.pass();
+        /* A matchmade game has already been agreed by the click that picked the
+           lobby, so this side readies itself instead of asking twice. */
+        if (pvpAutoStart) armPvpReady(true);
+    }
+
+    /** This human's half of the handshake. UI only — see armPvpReady(). */
+    function markPvpMeReady() {
+        if (pvpMeReady) return;
+        pvpMeReady = true;
+        const btn = el('btn-pvp-start-match');
+        const wait = el('pvp-ready-wait');
+        const msg = el('pvp-ready-msg');
+        const waitMsg = el('pvp-ready-wait-msg');
+        if (btn) btn.hidden = true;
+        if (msg) msg.textContent = 'You are ready.';
+        if (wait) {
+            wait.hidden = false;
+            if (waitMsg) waitMsg.textContent = pvpThemReady
+                ? 'Both players are ready — starting...'
+                : 'Waiting for the opponent to press Start Match...';
+        }
+    }
+
+    /** START MATCH: tell the opponent, and start the clock if they are in too. */
+    function armPvpReady(auto) {
+        if (pvpPhase !== 'ready') return;
+        markPvpMeReady();
+        pvp.sendStartRequest({ auto: auto === true, settings: pvpSettings() });
+        if (pvpThemReady) beginPvpCountdown();
+    }
+
+    /* Only the host starts the clock — the guest runs on the packet, so the two
+       countdowns can never disagree about the second they began on. */
+    function beginPvpCountdown() {
+        if (pvpStartTimer || pvpPhase === 'countdown') return;
+        if (pvp.role !== 'host') return;
+        pvp.sendStartCountdown({ seconds: START_COUNTDOWN_SECONDS, settings: pvpSettings() });
+        runPvpCountdown(START_COUNTDOWN_SECONDS);
+    }
+
+    function runPvpCountdown(seconds) {
+        if (pvpStartTimer) return;
+        let n = Math.max(1, Math.round(Number(seconds)) || START_COUNTDOWN_SECONDS);
+        const num = el('pvp-countdown-num');
+        const msg = el('pvp-countdown-msg');
+        const paint = () => {
+            if (num) num.textContent = String(n);
+            if (msg) msg.textContent = n > 0 ? 'Kick-off in ' + n + '...' : 'Kick-off!';
+        };
+        paint();
+        setPvpPhase('countdown');
+        Sfx.tick();
+        pvpStartTimer = setInterval(() => {
+            n -= 1;
+            paint();
+            if (n > 0) { Sfx.tick(); return; }
+            clearInterval(pvpStartTimer);
+            pvpStartTimer = null;
+            startPvpGame(pvp.role);
+        }, 1000);
+    }
+
+    /** The PvP card's status line, and the dot that says whether it is live. */
+    function setStatus(msg, isConnected = false) {
+        const statusMsg = el('pvp-status-msg');
+        const statusDot = el('pvp-status-dot');
+        if (statusMsg) statusMsg.textContent = msg;
+        if (statusDot) statusDot.classList.toggle('online', isConnected);
+    }
+
+    /** One row per waiting lobby, each with its own MATCH button. */
+    function renderPvpPlayerList(players) {
+        const list = el('pvp-player-list');
+        const count = el('pvp-players-count');
+        const found = players || [];
+        if (count) count.textContent = found.length ? found.length + ' online' : 'nobody online';
+        if (!list) return;
+        list.textContent = '';
+        found.forEach(entry => {
+            const row = document.createElement('div');
+            row.className = 'pvp-player-row';
+            row.setAttribute('role', 'listitem');
+
+            const dot = document.createElement('span');
+            dot.className = 'pvp-player-dot';
+
+            const name = document.createElement('span');
+            name.className = 'pvp-player-name';
+            name.textContent = entry.name;
+
+            const lobby = document.createElement('span');
+            lobby.className = 'pvp-player-lobby';
+            lobby.textContent = entry.label;
+
+            const match = document.createElement('button');
+            match.type = 'button';
+            match.className = 'btn btn-primary btn-sm pvp-player-match';
+            match.textContent = 'MATCH';
+            match.addEventListener('click', () => challengePvpPlayer(entry, match));
+
+            row.appendChild(dot);
+            row.appendChild(name);
+            row.appendChild(lobby);
+            row.appendChild(match);
+            list.appendChild(row);
+        });
+    }
+
+    /** Sweep the public ring and draw whatever is waiting there. */
+    async function scanPvpPlayers() {
+        if (pvpScanning || pvpActive || pvpPhase !== 'lobby') return;
+        pvpScanning = true;
+        const idle = el('pvp-open-idle');
+        const searching = el('pvp-open-searching');
+        const msg = el('pvp-search-msg');
+        if (idle) idle.hidden = true;
+        if (searching) searching.hidden = false;
+        if (msg) msg.textContent = 'Scanning public lobbies...';
+        setStatus('Scanning for players online...');
+
+        let players = [];
+        try {
+            players = await pvp.scanOpenPlayers(text => { if (msg) msg.textContent = text; });
+        } catch (err) {
+            setStatus(err.message || 'Could not scan for players.');
+        }
+        pvpScanning = false;
+        if (searching) searching.hidden = true;
+        if (idle) idle.hidden = false;
+
+        renderPvpPlayerList(players);
+        const empty = el('pvp-players-empty');
+        if (empty) {
+            empty.hidden = players.length > 0;
+            if (!players.length) {
+                empty.textContent = 'No players online right now. Press Host & Wait and a '
+                    + 'challenger can pick you off this list.';
+            }
+        }
+        setStatus(players.length
+            ? players.length + ' player(s) online — press MATCH to challenge.'
+            : 'Nobody is hosting a public lobby right now.');
+    }
+
+    /** MATCH: challenge one of the listed lobbies. A matchmade game starts itself. */
+    async function challengePvpPlayer(entry, btn) {
+        if (pvpActive || pvpPhase !== 'lobby') return;
+        if (btn) btn.disabled = true;
+        /* Picked off the list, so the handshake is agreed up front: no second
+           click, and the 5-second countdown runs as soon as both are connected. */
+        pvpAutoStart = true;
+        readPvpOpenSettings();
+        setStatus('Challenging ' + entry.name + '...');
+        try {
+            await pvp.joinOpenPlayer(entry);
+        } catch (err) {
+            pvpAutoStart = false;
+            setStatus(err.message || (entry.name + ' did not answer.'));
+            scanPvpPlayers();
+        }
+    }
+
+    /** Host & Wait: open a public lobby and let a challenger pick this side. */
+    async function hostPvpLobby() {
+        if (pvpScanning || pvpActive || pvpPhase !== 'lobby') return;
+        const idle = el('pvp-open-idle');
+        const searching = el('pvp-open-searching');
+        const msg = el('pvp-search-msg');
+        if (idle) idle.hidden = true;
+        if (searching) searching.hidden = false;
+        if (msg) msg.textContent = 'Opening a public lobby...';
+        readPvpOpenSettings();
+        setStatus('Hosting a public match...');
+
+        let label = null;
+        try {
+            label = await pvp.hostOpenMatch(text => { if (msg) msg.textContent = text; });
+        } catch (err) {
+            setStatus(err.message || 'Could not open a lobby.');
+        }
+        if (label) {
+            /* The searching box stays up: waiting for a challenger *is* the state. */
+            setStatus(label + ' is open — waiting for an opponent.', true);
+            return;
+        }
+        if (searching) searching.hidden = true;
+        if (idle) idle.hidden = false;
+        setStatus('Every public lobby is taken. Try again in a moment.');
+        scanPvpPlayers();
+    }
+
+    /** Quick Match: take the first lobby that is waiting, or open one. */
+    async function quickPvpMatch() {
+        if (pvpScanning || pvpActive || pvpPhase !== 'lobby') return;
+        const idle = el('pvp-open-idle');
+        const searching = el('pvp-open-searching');
+        const msg = el('pvp-search-msg');
+        if (idle) idle.hidden = true;
+        if (searching) searching.hidden = false;
+        if (msg) msg.textContent = 'Looking for a match...';
+        readPvpOpenSettings();
+        pvpAutoStart = true;
+        setStatus('Looking for a match...');
+
+        let result = null;
+        try {
+            result = await pvp.findOpenMatch(text => { if (msg) msg.textContent = text; });
+        } catch (err) {
+            pvpAutoStart = false;
+            setStatus(err.message || 'Matchmaking failed.');
+            result = null;
+        }
+        if (result) return;   /* connected: the handshake card has taken over */
+
+        pvpAutoStart = false;
+        if (searching) searching.hidden = true;
+        if (idle) idle.hidden = false;
+        setStatus('Every public lobby is taken. Try again in a moment.');
+    }
+
     function setupPvpUI() {
-        // Tab switching
+        /* Tab switching. Opening the matchmaking side is also what asks who is
+           online: the list is a live sweep of the public ring, not a cache. */
         const tabCustom = document.getElementById('tab-btn-custom');
         const tabOpen = document.getElementById('tab-btn-open');
-        const paneCustom = document.getElementById('pane-custom');
-        const paneOpen = document.getElementById('pane-open');
 
-        if (tabCustom && tabOpen && paneCustom && paneOpen) {
-            tabCustom.addEventListener('click', () => {
-                tabCustom.classList.add('active');
-                tabCustom.setAttribute('aria-selected', 'true');
-                tabOpen.classList.remove('active');
-                tabOpen.setAttribute('aria-selected', 'false');
-                paneCustom.hidden = false;
-                paneOpen.hidden = true;
-            });
-            tabOpen.addEventListener('click', () => {
-                tabOpen.classList.add('active');
-                tabOpen.setAttribute('aria-selected', 'true');
-                tabCustom.classList.remove('active');
-                tabCustom.setAttribute('aria-selected', 'false');
-                paneOpen.hidden = false;
-                paneCustom.hidden = true;
-            });
-        }
-
-        const setStatus = (msg, isConnected = false) => {
-            const statusMsg = document.getElementById('pvp-status-msg');
-            const statusDot = document.getElementById('pvp-status-dot');
-            if (statusMsg) statusMsg.textContent = msg;
-            if (statusDot) {
-                statusDot.classList.toggle('online', isConnected);
+        const selectPvpTab = (name) => {
+            pvpTab = name === 'open' ? 'open' : 'custom';
+            const custom = pvpTab === 'custom';
+            if (tabCustom) {
+                tabCustom.classList.toggle('active', custom);
+                tabCustom.setAttribute('aria-selected', String(custom));
             }
+            if (tabOpen) {
+                tabOpen.classList.toggle('active', !custom);
+                tabOpen.setAttribute('aria-selected', String(!custom));
+            }
+            renderPvpCard();
+            if (!custom) scanPvpPlayers();
         };
+
+        if (tabCustom) tabCustom.addEventListener('click', () => selectPvpTab('custom'));
+        if (tabOpen) tabOpen.addEventListener('click', () => selectPvpTab('open'));
 
         // Custom room handlers
         const btnCreate = document.getElementById('btn-pvp-create');
@@ -7155,63 +7501,26 @@ import { pvp, EMOJIS } from './pvp-network.js';
             }
         }
 
-        // Open matchmaking handlers
+        /* Open matchmaking: three actions over one live list of the public ring.
+           The list itself is drawn by renderPvpPlayerList() after each sweep. */
+        const btnRefreshPlayers = document.getElementById('btn-pvp-refresh-players');
         const btnSearchOpen = document.getElementById('btn-pvp-search-open');
-        const openIdle = document.getElementById('pvp-open-idle');
-        const openSearching = document.getElementById('pvp-open-searching');
-        const searchMsg = document.getElementById('pvp-search-msg');
-        const btnCancelSearch = document.getElementById('btn-pvp-cancel-search');
-        const openNotFound = document.getElementById('pvp-open-not-found');
         const btnHostOpen = document.getElementById('btn-pvp-host-open');
+        const btnCancelSearch = document.getElementById('btn-pvp-cancel-search');
 
-        if (btnSearchOpen) {
-            btnSearchOpen.addEventListener('click', async () => {
-                btnSearchOpen.disabled = true;
-                if (openIdle) openIdle.hidden = true;
-                if (openNotFound) openNotFound.hidden = true;
-                if (openSearching) openSearching.hidden = false;
-                if (searchMsg) searchMsg.textContent = 'Scanning public lobbies...';
-                setStatus('Searching for online players...');
-
-                const match = await pvp.findOpenMatch((statusMsgText) => {
-                    if (searchMsg) searchMsg.textContent = statusMsgText;
-                });
-
-                if (match) {
-                    setStatus('Opponent found! Connecting...', true);
-                } else {
-                    btnSearchOpen.disabled = false;
-                    if (openSearching) openSearching.hidden = true;
-                    if (openNotFound) openNotFound.hidden = false;
-                    setStatus('No open match found. You can host one below!');
-                }
-            });
-        }
+        if (btnRefreshPlayers) btnRefreshPlayers.addEventListener('click', () => scanPvpPlayers());
+        if (btnSearchOpen) btnSearchOpen.addEventListener('click', () => quickPvpMatch());
+        if (btnHostOpen) btnHostOpen.addEventListener('click', () => hostPvpLobby());
 
         if (btnCancelSearch) {
             btnCancelSearch.addEventListener('click', () => {
                 pvp.disconnect();
+                const openSearching = document.getElementById('pvp-open-searching');
+                const openIdle = document.getElementById('pvp-open-idle');
                 if (openSearching) openSearching.hidden = true;
                 if (openIdle) openIdle.hidden = false;
-                if (btnSearchOpen) btnSearchOpen.disabled = false;
-                setStatus('Search cancelled. Ready');
-            });
-        }
-
-        if (btnHostOpen) {
-            btnHostOpen.addEventListener('click', async () => {
-                btnHostOpen.disabled = true;
-                if (openNotFound) openNotFound.hidden = true;
-                if (openSearching) openSearching.hidden = false;
-                if (searchMsg) searchMsg.textContent = 'Hosting public match... Waiting for opponent to join.';
-                setStatus('Hosting public match...');
-                const ok = await pvp.hostOpenMatch();
-                if (!ok) {
-                    btnHostOpen.disabled = false;
-                    if (openSearching) openSearching.hidden = true;
-                    if (openIdle) openIdle.hidden = false;
-                    setStatus('All public slots occupied. Try a private room.');
-                }
+                scanPvpPlayers();
+                setStatus('Cancelled. Ready');
             });
         }
 
@@ -7220,6 +7529,7 @@ import { pvp, EMOJIS } from './pvp-network.js';
         if (btnClose) {
             btnClose.addEventListener('click', () => {
                 pvp.disconnect();
+                resetPvpHandshake();
                 while (topScreen()) popScreen();
                 state.phase = 'idle';
                 pushScreen('menu', { focus: '#btn-start' });
@@ -7240,10 +7550,46 @@ import { pvp, EMOJIS } from './pvp-network.js';
         });
 
         // PeerJS Network event listeners
+        /* Both sockets up is not a match yet: it is the handshake. The lobby
+           panes give way to the START MATCH card and the match waits for both
+           humans — see armPvpReady()/beginPvpCountdown(). */
         pvp.on('connected', () => {
             setStatus('Connected!', true);
-            startPvpGame(pvp.role);
+            showPvpReady();
         });
+
+        /* The opponent pressed START MATCH. */
+        pvp.on('start-request', data => {
+            if (pvpPhase !== 'ready' && pvpPhase !== 'countdown') return;
+            pvpThemReady = true;
+            if (data && data.auto === true && pvp.role === 'host') {
+                /* A challenger picked this lobby off the online list, which is
+                   exactly the match this side was waiting for — so it accepts on
+                   the challenger's behalf and takes their dials for both. */
+                applyPvpSettings(data.settings);
+                markPvpMeReady();
+                beginPvpCountdown();
+                return;
+            }
+            if (pvpMeReady) { beginPvpCountdown(); return; }
+            const waitMsg = el('pvp-ready-wait-msg');
+            if (waitMsg) waitMsg.textContent = 'Opponent is ready and waiting for you.';
+            setStatus('Opponent is ready — press START MATCH.', true);
+        });
+
+        /* The host's countdown packet: the guest adopts the dials *and* the
+           clock from it, so both sides start on the same second. */
+        pvp.on('start-countdown', data => {
+            if (pvpPhase === 'lobby') return;
+            applyPvpSettings(data && data.settings);
+            pvpThemReady = true;
+            markPvpMeReady();
+            runPvpCountdown((data && data.seconds) || START_COUNTDOWN_SECONDS);
+        });
+
+        /* The one button in the handshake card. */
+        const btnStartMatch = el('btn-pvp-start-match');
+        if (btnStartMatch) btnStartMatch.addEventListener('click', () => armPvpReady(false));
 
         pvp.on('state', stateData => {
             if (pvpActive && pvpRole === 'guest') {
@@ -7262,9 +7608,9 @@ import { pvp, EMOJIS } from './pvp-network.js';
         });
 
         pvp.on('ping', latency => {
-            const elPing = document.getElementById('pvp-ping-text');
+            const elPing = document.getElementById('hud-pvp-ping');
             const elBadge = document.getElementById('pvp-ping-badge');
-            if (elPing) elPing.textContent = latency + 'ms';
+            if (elPing) elPing.textContent = latency + ' ms';
             if (elBadge) {
                 elBadge.hidden = false;
                 elBadge.textContent = latency + ' ms';
@@ -7277,8 +7623,17 @@ import { pvp, EMOJIS } from './pvp-network.js';
                 log('Opponent disconnected from PvP match.', 'bad');
                 endPvpGame();
                 pushScreen('menu', { focus: '#btn-start' });
+                setStatus('Disconnected', false);
+                return;
             }
-            setStatus('Disconnected', false);
+            /* Still in the lobby or mid-handshake: hand the card back to the
+               lobby with a clean slate, so a new opponent gets a new handshake. */
+            if (pvpPhase !== 'lobby') {
+                resetPvpHandshake();
+                setStatus('Opponent left. Ready for a new match.');
+            } else {
+                setStatus('Disconnected', false);
+            }
         });
 
         pvp.on('error', err => {
@@ -7351,10 +7706,11 @@ import { pvp, EMOJIS } from './pvp-network.js';
             beginShootout();
         });
     }
+    /* The settings strip's "Online PvP · LIVE" pill (`#btn-mode-pvp`) is the one
+       and only way into an online match — the duplicate CTA that used to sit in
+       the kick-off stack between Vs Computer and Penalty Shootout is gone. */
     const modePvpBtn = el('btn-mode-pvp');
-    if (modePvpBtn) modePvpBtn.addEventListener('click', () => pushScreen('pvp', { focus: '#btn-pvp-create' }));
-    const mainPvpBtn = el('btn-main-pvp');
-    if (mainPvpBtn) mainPvpBtn.addEventListener('click', () => pushScreen('pvp', { focus: '#btn-pvp-create' }));
+    if (modePvpBtn) modePvpBtn.addEventListener('click', () => openPvpLobby('#btn-pvp-create'));
     setupPvpUI();
     el('btn-tutorial').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
     el('btn-tut-close').addEventListener('click', () => popScreen());

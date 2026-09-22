@@ -8,7 +8,28 @@ export const EMOJIS = ['⚽', '🔥', '👏', '😱', '😂', '🧤'];
 
 const ROOM_PREFIX = 'passball-v1-room-';
 const OPEN_SLOT_PREFIX = 'passball-v1-open-';
-const OPEN_SLOTS_COUNT = 4;
+/* The public ring the online list is drawn from: one PeerJS id per seat, so a
+   waiting lobby is discoverable without any server of our own. */
+const OPEN_SLOTS_COUNT = 10;
+/* How long one sweep of the ring may take. Every seat is probed in parallel, so
+   this is the whole budget, not a per-seat one. */
+const OPEN_SCAN_TIMEOUT = 1800;
+/* The kick-off countdown that precedes a matchmade game. */
+export const START_COUNTDOWN_SECONDS = 5;
+
+/* There are no accounts on the public ring, so a waiting lobby is announced
+   under a friendly handle instead of a peer id. The handle is derived from the
+   seat, never random: the same lobby reads the same to everybody scanning it. */
+export const PLAYER_NAMES = [
+    'CoolDog', 'SexyCat', 'SwiftFox', 'BraveOwl', 'NeonWolf', 'TinyBear',
+    'IronPanda', 'LuckyDuck', 'WildHorse', 'SlickSeal', 'GrimLion', 'HappyGoat',
+    'RocketBee', 'SilentMoth', 'TurboSnail', 'ZeroFalcon', 'CosmicBat', 'RoyalToad'
+];
+
+export function slotPlayerName(slot) {
+    const i = Math.max(1, Math.round(Number(slot) || 1)) - 1;
+    return PLAYER_NAMES[i % PLAYER_NAMES.length];
+}
 
 const PEER_CONFIG = {
     debug: 1,
@@ -34,6 +55,9 @@ class PvpNetwork {
         this.connected = false;
         this.ping = 0;
         this.pingTimer = null;
+        /* Every seat opened by a list scan, so the ones that were not picked can
+           be released the moment one of them is. */
+        this.scanConns = [];
         this.listeners = {};
         this.callbacks = {
             onState: null,
@@ -88,12 +112,21 @@ class PvpNetwork {
         return Math.floor(1000 + Math.random() * 9000).toString();
     }
 
+    /** Release every seat a scan left open (the others were only discovered). */
+    closeScanConnections() {
+        (this.scanConns || []).forEach(entry => {
+            try { entry.conn.close(); } catch (e) {}
+        });
+        this.scanConns = [];
+    }
+
     /** Reset any existing connection */
     cleanup() {
         if (this.pingTimer) {
             clearInterval(this.pingTimer);
             this.pingTimer = null;
         }
+        this.closeScanConnections();
         if (this.conn) {
             try { this.conn.close(); } catch (e) {}
             this.conn = null;
@@ -126,8 +159,13 @@ class PvpNetwork {
 
     /** Setup listeners on the WebRTC data channel */
     setupConnection(conn, isHost) {
-        this.conn = conn;
-        this.role = isHost ? 'host' : 'guest';
+        /* A host may hold several unanswered connections at once — a scan opens
+           one data channel per lobby it finds. The socket that completes the
+           handshake is the only one that ever becomes `this.conn`, so a stray
+           probe can neither steal the host's `send()` target nor make the host
+           claim a match it has not got. */
+        if (!isHost || !this.connected) this.conn = conn;
+        if (!isHost || !this.role) this.role = isHost ? 'host' : 'guest';
 
         const sendGuestAuth = () => {
             if (!isHost) {
@@ -171,6 +209,10 @@ class PvpNetwork {
                 try {
                     conn.send({ type: 'AUTH_OK' });
                 } catch (e) {}
+                /* This is the connection that counts: adopt it explicitly, in
+                   case a later probe arrived while the handshake was in flight. */
+                this.conn = conn;
+                this.role = 'host';
                 this.connected = true;
                 this.startPing();
                 this.emit('status', 'Connected to opponent!');
@@ -209,10 +251,25 @@ class PvpNetwork {
             } else if (data.type === 'EMOJI') {
                 this.emit('emoji', data.emoji || data);
             }
+
+            /* The kick-off handshake. Both humans are asked to press START
+               MATCH; the host turns "both ready" into the countdown packet so
+               the two clocks are driven by the same decision. Kept outside the
+               if/else chain above because it is a protocol message, not
+               gameplay data. */
+            if (data.type === 'START_REQUEST') {
+                this.emit('start-request', data);
+            } else if (data.type === 'START_COUNTDOWN') {
+                this.emit('start-countdown', data);
+            }
         });
 
         conn.on('close', () => {
-            this.connected = false;
+            const wasLive = this.connected && this.conn === conn;
+            if (this.conn === conn) this.connected = false;
+            /* A scan leaves one unanswered connection per lobby it probed; those
+               closing is silence, not an opponent walking out of a match. */
+            if (!wasLive) return;
             this.emit('status', 'Opponent disconnected');
             this.emit('disconnected');
         });
@@ -220,6 +277,17 @@ class PvpNetwork {
         conn.on('error', (err) => {
             this.emit('error', err.message || 'Connection error');
         });
+    }
+
+    /** An inbound seat on a peer this side is hosting: only the handshake decides. */
+    acceptHostConnection(conn) {
+        if (this.connected) {
+            /* The match is already on: there is no second seat to give away. */
+            try { conn.close(); } catch (e) {}
+            return;
+        }
+        this.emit('status', 'Opponent joining, checking authentication...');
+        this.setupConnection(conn, true);
     }
 
     /** Create a custom private room with a code and optional password */
@@ -238,10 +306,7 @@ class PvpNetwork {
                 resolve(code);
             });
 
-            this.peer.on('connection', (conn) => {
-                this.emit('status', 'Opponent joining, checking authentication...');
-                this.setupConnection(conn, true);
-            });
+            this.peer.on('connection', (conn) => this.acceptHostConnection(conn));
 
             this.peer.on('error', (err) => {
                 if (err.type === 'unavailable-id') {
@@ -313,112 +378,175 @@ class PvpNetwork {
     }
 
     /**
-     * Unified Online Matchmaking:
-     * 1. Checks open slots for a waiting host.
-     * 2. If a host is found, joins immediately as guest.
-     * 3. If no host is found, automatically hosts open lobby and waits for an opponent.
+     * Sweep the public ring. Every seat is probed at once, so one sweep is one
+     * round trip instead of ten; each live seat becomes an entry in the online
+     * list:
+     *   { slot, label: 'Lobby #3', name: 'SwiftFox', conn }
+     * The socket the probe opened is kept on the entry, so whoever the player
+     * picks can be matched on that same data channel. The rest are released by
+     * joinOpenPlayer()/closeScanConnections(). Resolves with [] when nobody is
+     * hosting — the honest answer, not an error.
      */
-    async findOpenMatch(onProgress) {
+    async scanOpenPlayers(onProgress, timeout = OPEN_SCAN_TIMEOUT) {
         this.cleanup();
-        this.emit('status', 'Scanning for waiting players...');
+        this.emit('status', 'Scanning public lobbies...');
+        if (onProgress) onProgress('Scanning public lobbies...');
 
-        for (let i = 1; i <= OPEN_SLOTS_COUNT; i++) {
-            if (onProgress) onProgress(`Checking open lobby #${i}...`);
-            const slotId = OPEN_SLOT_PREFIX + i;
+        const found = [];
+        const probePeer = new Peer(undefined, PEER_CONFIG);
+        this.peer = probePeer;
+        this.scanConns = found;
 
-            const foundHost = await new Promise((resolve) => {
-                const probePeer = new Peer(undefined, PEER_CONFIG);
-                let settled = false;
-
-                const timer = setTimeout(() => {
-                    if (settled) return;
-                    settled = true;
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                if (!found.length) {
                     try { probePeer.destroy(); } catch (e) {}
-                    resolve(false);
-                }, 1800);
-
-                probePeer.on('open', () => {
-                    const conn = probePeer.connect(slotId, { reliable: true });
-
-                    conn.on('open', () => {
-                        if (settled) return;
-                        settled = true;
-                        clearTimeout(timer);
-                        this.peer = probePeer;
-                        this.roomCode = `OPEN-${i}`;
-                        this.setupConnection(conn, false);
-                        resolve(true);
-                    });
-
-                    conn.on('error', () => {
-                        if (settled) return;
-                        settled = true;
-                        clearTimeout(timer);
-                        try { probePeer.destroy(); } catch (e) {}
-                        resolve(false);
-                    });
-                });
-
-                probePeer.on('error', () => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timer);
-                    try { probePeer.destroy(); } catch (e) {}
-                    resolve(false);
-                });
-            });
-
-            if (foundHost) {
-                this.emit('status', `Connected to player in Lobby #${i}!`);
-                return `Lobby #${i}`;
-            }
-        }
-
-        // Step 2: No active host found. Automatically host on slot 1 and wait for opponent!
-        if (onProgress) onProgress('Waiting for an opponent in lobby...');
-        this.emit('status', 'Lobby created. Waiting for opponent to join...');
-
-        return new Promise((resolve, reject) => {
-            const slotId = OPEN_SLOT_PREFIX + '1';
-            const hostPeer = new Peer(slotId, PEER_CONFIG);
-            this.peer = hostPeer;
-            this.roomCode = 'OPEN-1';
-
-            hostPeer.on('open', () => {
-                if (onProgress) onProgress('Lobby ready. Waiting for opponent to join...');
-                this.emit('status', 'Lobby ready. Waiting for opponent to join...');
-
-                hostPeer.on('connection', (conn) => {
-                    this.emit('status', 'Opponent joining...');
-                    this.setupConnection(conn, true);
-                    // Resolve only after AUTH handshake completes (connected event),
-                    // not on the PeerJS signaling connection event.
-                    const onConn = () => {
-                        this.off('connected', onConn);
-                        resolve('Lobby #1');
-                    };
-                    this.on('connected', onConn);
-                });
-            });
-
-            hostPeer.on('error', (err) => {
-                if (err.type === 'unavailable-id') {
-                    // Slot 1 was just claimed by another host, retry to connect to them!
-                    resolve(this.findOpenMatch(onProgress));
-                } else {
-                    this.emit('error', err.message || 'Matchmaking error');
-                    reject(err);
+                    this.peer = null;
                 }
+                found.sort((a, b) => a.slot - b.slot);
+                if (onProgress) {
+                    onProgress(found.length
+                        ? `${found.length} player(s) online.`
+                        : 'No players online right now.');
+                }
+                resolve(found);
+            };
+            const timer = setTimeout(finish, timeout);
+
+            probePeer.on('open', () => {
+                for (let slot = 1; slot <= OPEN_SLOTS_COUNT; slot++) {
+                    const seat = slot;
+                    const conn = probePeer.connect(OPEN_SLOT_PREFIX + seat, { reliable: true });
+                    conn.on('open', () => {
+                        /* The sweep is over: this one opened a moment too late to
+                           be offered, so it must not be left hanging either. */
+                        if (done) { try { conn.close(); } catch (e) {} return; }
+                        found.push({
+                            slot: seat,
+                            label: `Lobby #${seat}`,
+                            name: slotPlayerName(seat),
+                            conn
+                        });
+                    });
+                    /* An empty seat never opens; PeerJS reports it as a
+                       connection error. That is simply "nobody is here". */
+                    conn.on('error', () => {});
+                }
+            });
+
+            probePeer.on('error', (err) => {
+                clearTimeout(timer);
+                this.emit('error', err.message || 'Unable to scan for players');
+                finish();
             });
         });
     }
 
-    searchOpenRoom(onProgress) {
-        return this.findOpenMatch(onProgress);
+    /** Take one of the lobbies a scan found as this side's opponent. */
+    joinOpenPlayer(entry) {
+        if (!entry || !entry.conn || !entry.conn.open) {
+            return Promise.reject(new Error('That player is not available any more. Refresh the list.'));
+        }
+        /* Only the seat that was picked stays open: the others were discovery. */
+        (this.scanConns || []).forEach(other => {
+            if (other === entry) return;
+            try { other.conn.close(); } catch (e) {}
+        });
+        this.scanConns = [entry];
+        this.roomCode = entry.label;
+        this.guestPassword = '';
+        this.emit('status', `Connecting to ${entry.name}...`);
+
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const settle = (fn, arg) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                this.off('connected', onConn);
+                this.off('error', onErr);
+                fn(arg);
+            };
+            const timer = setTimeout(
+                () => settle(reject, new Error(`${entry.name} did not answer.`)), 10000);
+            const onConn = () => settle(resolve, entry.label);
+            const onErr = err => settle(reject, typeof err === 'string' ? new Error(err) : err);
+
+            this.on('connected', onConn);
+            this.on('error', onErr);
+            /* The socket is already open, so the AUTH handshake goes out at once
+               and the host answers on this same channel. */
+            this.setupConnection(entry.conn, false);
+        });
     }
 
-    hostOpenMatch() {
-        return this.findOpenMatch();
+    /**
+     * Open a public lobby: take the lowest free seat in the ring and wait for a
+     * challenger. Resolves with the lobby's label once an opponent's handshake
+     * completes, or null when every seat in the ring is taken.
+     */
+    async hostOpenMatch(onProgress) {
+        this.cleanup();
+        this.emit('status', 'Looking for a free public lobby...');
+
+        for (let slot = 1; slot <= OPEN_SLOTS_COUNT; slot++) {
+            if (onProgress) onProgress(`Opening public lobby #${slot}...`);
+            const hostPeer = new Peer(OPEN_SLOT_PREFIX + slot, PEER_CONFIG);
+            this.peer = hostPeer;
+            /* Attached before the seat is claimed: a challenger can knock the
+               moment the seat appears in somebody's sweep. */
+            hostPeer.on('connection', conn => this.acceptHostConnection(conn));
+
+            const claimed = await new Promise((resolve) => {
+                let settled = false;
+                const settle = ok => { if (settled) return; settled = true; resolve(ok); };
+                const timer = setTimeout(() => settle(false), 4000);
+                hostPeer.on('open', () => { clearTimeout(timer); settle(true); });
+                hostPeer.on('error', () => { clearTimeout(timer); settle(false); });
+            });
+
+            if (!claimed) {
+                try { hostPeer.destroy(); } catch (e) {}
+                this.peer = null;
+                continue;
+            }
+
+            const label = `Lobby #${slot}`;
+            this.roomCode = `OPEN-${slot}`;
+            this.roomPassword = '';
+            this.emit('status', `${label} is open as ${slotPlayerName(slot)}. Waiting for an opponent...`);
+            if (onProgress) onProgress(`${label} open — waiting for an opponent to join...`);
+
+            hostPeer.on('error', err => this.emit('error', err.message || 'Lobby error'));
+
+            return new Promise((resolve) => {
+                const onConn = () => {
+                    this.off('connected', onConn);
+                    resolve(label);
+                };
+                this.on('connected', onConn);
+            });
+        }
+
+        this.emit('status', 'Every public lobby is taken right now.');
+        return null;
+    }
+
+    /**
+     * One-click matchmaking: take the first lobby that is waiting, and open one
+     * of our own when nobody is.
+     */
+    async findOpenMatch(onProgress) {
+        const players = await this.scanOpenPlayers(onProgress);
+        if (players.length) return this.joinOpenPlayer(players[0]);
+        return this.hostOpenMatch(onProgress);
+    }
+
+    searchOpenRoom(onProgress) {
+        return this.findOpenMatch(onProgress);
     }
 
     /** Send data packet over WebRTC (only works after AUTH handshake) */
@@ -466,6 +594,23 @@ class PvpNetwork {
             ...input,
             sender: this.role
         });
+    }
+
+    /**
+     * The guest's half of the kick-off handshake: "I have pressed START MATCH".
+     * `auto` marks a matchmade game — the challenger picked this lobby off the
+     * online list, so the host may accept on its own behalf instead of waiting
+     * for a second click. `settings` are the dials the challenger picked; the
+     * host applies them before it broadcasts the countdown, so both sides run
+     * the same clock.
+     */
+    sendStartRequest({ auto = false, settings = null } = {}) {
+        this.send({ type: 'START_REQUEST', auto: auto === true, settings });
+    }
+
+    /** The host's half: the one decision both countdowns are driven from. */
+    sendStartCountdown({ seconds = START_COUNTDOWN_SECONDS, settings = null } = {}) {
+        this.send({ type: 'START_COUNTDOWN', seconds, settings });
     }
 
     /** Send Authoritative State (Host only) */

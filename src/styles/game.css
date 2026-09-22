@@ -1615,6 +1615,13 @@ body {
     display: none;
 }
 
+/* The same trap, one screen later: `#screen-pvp` is an id rule that sets
+   `display: grid`, so `.screen[hidden]` loses to *it* as well — the PvP card
+   would never close and would sit over the menu on the very first page load. */
+#screen-pvp[hidden] {
+    display: none;
+}
+
 /* --- weathering: a vignette and a film of grain --------------------------
    The vignette sits the turf down at its edges; the grain keeps the large flat
    fills from banding on a wide-gamut panel. Both are decorative, so neither may
@@ -1648,7 +1655,15 @@ body {
 /* The frame holds all three zones. `1 0 auto` lets it fill a tall viewport (so
    the hero can centre) while never squeezing the zones together — a short
    viewport scrolls instead. The frame's own max-width is relaxed to the full
-   1120px measure at 860px, in global.css, which loads last. */
+   1120px measure at 860px, in global.css, which loads last.
+
+   The frame is therefore the scroller. `#screen-menu` is `overflow: hidden`
+   (full-bleed turf, nothing to rubber-band), so if the scroller lived any
+   higher a three-zone menu taller than the phone — which it is once the nav,
+   the settings strip and three kick-off buttons all stack — would simply have
+   its bottom CTA cut off with no way to reach it. On a tall screen nothing
+   changes: the frame is exactly the viewport and space-between still spreads
+   the zones. */
 .menu-frame {
     position: relative;
     z-index: 3;
@@ -1661,6 +1676,8 @@ body {
     width: 100%;
     max-width: 560px;
     margin-inline: auto;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
 }
 
 /* --- the two grouping capsules: one chrome, borrowed twice --------------- */
@@ -1763,13 +1780,16 @@ body {
 }
 
 /* --- hero: the shape, drawn --------------------------------------------
-   The drawing is the slack-absorber of the whole screen, so a tall phone
-   centres it and a short one simply scrolls. */
+   The drawing is the slack-absorber of the whole screen: on a tall phone it
+   takes the leftover height and centres itself, and on a short one it keeps
+   its own drawing and the frame scrolls (see .menu-frame). It is deliberately
+   NOT allowed to shrink — as `1 1 0%` with `min-height: 0` it collapsed into
+   whatever the nav and the settings strip left over, and `overflow: hidden`
+   then chopped the pitch and the title in half. */
 #screen-menu .hero {
     position: relative;
     display: flex;
-    flex: 1 1 0%;
-    min-height: 0;
+    flex: 1 0 auto;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -1839,16 +1859,21 @@ body {
 /* --- the mode pair -------------------------------------------------------
    A read-out, not a switch: the engine plays the CPU and has no second human
    seat, so the live mode is marked and the other carries a SOON tag instead of
-   offering a control that would do nothing when pressed. */
+   offering a control that would do nothing when pressed. The two pills always
+   stay side by side: a plain `1fr 1fr` track lets the longer "Online PvP LIVE"
+   cell overflow instead of wrapping below the CPU pill on narrow phones, so
+   both tracks are clamped to `minmax(0, 1fr)` and every cell keeps a zero
+   minimum width (see `.mode` below). */
 #screen-menu .mode-switch {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     margin-bottom: 12px;
 }
 
 #screen-menu .mode {
     display: flex;
+    min-width: 0;
     align-items: center;
     justify-content: center;
     gap: 7px;
@@ -1860,6 +1885,11 @@ body {
     font-weight: 700;
     line-height: 1;
     color: var(--sage);
+    white-space: nowrap;
+}
+
+#screen-menu .mode .badge-live {
+    flex: none;
 }
 
 #screen-menu .mode svg {
@@ -3436,6 +3466,12 @@ body {
     margin-bottom: 8px;
 }
 
+.pvp-tabs[hidden] {
+    /* `.pvp-tabs` sets `display: flex`, so `hidden` needs restating at the same
+       weight or the tab strip would stay on screen under the ready card. */
+    display: none;
+}
+
 .pvp-tab {
     flex: 1;
     padding: 5px 8px;
@@ -3698,18 +3734,182 @@ body {
     color: #d1d5db;
 }
 
-.pvp-not-found-box {
-    text-align: center;
-    padding: 10px;
-    background: rgba(239, 68, 68, 0.06);
-    border: 1px solid rgba(239, 68, 68, 0.2);
+/* Same trap as `.pvp-tabs`: `display: flex` above is an author rule, so it
+   outranks the UA `[hidden] { display: none }` and the searching box would sit
+   there spinning (with its Cancel button) long after the sweep had ended. */
+.pvp-search-box[hidden] {
+    display: none;
+}
+
+/* The online list: one row per waiting lobby, each with its own MATCH button */
+.pvp-players-section {
+    margin-top: 8px;
+}
+
+.pvp-players-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.pvp-players-head .pvp-section-title {
+    margin-bottom: 6px;
+}
+
+.pvp-players-count {
+    font-family: var(--f-mono, monospace);
+    font-size: 0.68rem;
+    color: #6b7280;
+}
+
+.pvp-player-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.pvp-player-list:empty {
+    display: none;
+}
+
+.pvp-player-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 7px;
+    background: rgba(0, 0, 0, 0.32);
+    border: 1px solid rgba(255, 255, 255, 0.09);
     border-radius: 6px;
 }
 
-.pvp-not-found-box p {
+.pvp-player-dot {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #34d399;
+    box-shadow: 0 0 6px rgba(52, 211, 153, 0.8);
+}
+
+.pvp-player-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #f3f4f6;
+}
+
+.pvp-player-lobby {
+    flex: 0 0 auto;
+    font-family: var(--f-mono, monospace);
+    font-size: 0.64rem;
+    color: #6b7280;
+}
+
+.pvp-player-match {
+    flex: 0 0 auto;
+    min-width: 62px;
+    min-height: 26px;
+    padding: 3px 10px;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    border-radius: 6px;
+}
+
+.pvp-players-empty {
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 0.74rem;
+    color: #9ca3af;
+    background: rgba(239, 68, 68, 0.06);
+    border: 1px dashed rgba(239, 68, 68, 0.28);
+    border-radius: 6px;
+}
+
+.pvp-players-empty[hidden] {
+    display: none;
+}
+
+.pvp-open-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.pvp-open-actions .btn {
+    flex: 1 1 0;
+    min-height: 30px;
+    padding: 4px 8px;
+    font-size: 0.74rem;
+    border-radius: 6px;
+}
+
+/* The kick-off handshake card: shown once both sockets are up */
+.pvp-ready {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 12px;
+    background: rgba(0, 0, 0, 0.34);
+    border: 1px solid rgba(80, 227, 194, 0.28);
+    border-radius: 8px;
+}
+
+.pvp-ready[hidden] {
+    display: none;
+}
+
+.pvp-ready-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     font-size: 0.8rem;
-    color: #fca5a5;
-    margin: 0 0 8px 0;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+}
+
+.pvp-ready-side {
+    color: #f3f4f6;
+}
+
+.pvp-ready-vs {
+    font-size: 0.68rem;
+    color: #50e3c2;
+    padding: 2px 6px;
+    border: 1px solid rgba(80, 227, 194, 0.35);
+    border-radius: 4px;
+}
+
+.pvp-ready-msg {
+    margin: 0;
+    text-align: center;
+    font-size: 0.76rem;
+    color: #9ca3af;
+    line-height: 1.35;
+}
+
+#btn-pvp-start-match {
+    min-height: 36px;
+    font-size: 0.84rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+}
+
+/* The countdown is the loudest thing in the card on purpose: for five seconds
+   there is nothing else to read and nothing else to press. */
+.pvp-countdown-num {
+    font-family: var(--f-mono, monospace);
+    font-size: 2.6rem;
+    font-weight: 800;
+    line-height: 1;
+    color: #50e3c2;
+    text-shadow: 0 0 16px rgba(80, 227, 194, 0.45);
 }
 
 /* Join Input Form */
@@ -3799,7 +3999,8 @@ body {
     background: #6b7280;
 }
 
-.status-dot.active {
+.status-dot.active,
+.status-dot.online {
     background: #10b981;
     box-shadow: 0 0 6px #10b981;
 }
@@ -3832,6 +4033,13 @@ body {
     color: #34d399;
 }
 
+/* The badge is only ever unhidden by a live PvP match, but `inline-flex` above
+   is an author rule: without this restatement it would ride along in the solo
+   HUD reading "PVP · -- ms" every time the HUD is up. */
+.hud-pvp-badge[hidden] {
+    display: none;
+}
+
 .pvp-live-dot {
     width: 6px;
     height: 6px;
@@ -3857,6 +4065,12 @@ body {
     -webkit-backdrop-filter: blur(10px);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
     pointer-events: auto;
+}
+
+/* Only a PvP match unhides the dock — restate the hide at the same weight as
+   `display: flex` above, or the reactions would float over a solo match too. */
+.emoji-dock[hidden] {
+    display: none;
 }
 
 .btn-emoji {
