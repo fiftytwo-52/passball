@@ -151,6 +151,10 @@ import '../styles/global.css';
                             <span id="possession-chip">YOU</span>
                         </div>
                     </div>
+                    <div id="hud-pvp-badge" class="hud-pvp-badge" hidden>
+                        <span class="pvp-live-dot"></span>
+                        <span id="hud-pvp-role">PVP</span> · <span id="hud-pvp-ping">-- ms</span>
+                    </div>
                 </div>
 
                 <!-- Right section: the floating menu button, on its own. It stays
@@ -186,7 +190,10 @@ import '../styles/global.css';
                     <span class="pens-dots" id="so-cpu"></span>
                 </span>
 
-                <span class="panel panel-pens" id="so-turn">YOUR KICK</span>
+                <span class="panel panel-pens pens-turn-group">
+                    <span id="so-turn">YOUR KICK</span>
+                    <span id="so-timer" class="so-countdown">3.0s</span>
+                </span>
             </section>
 
             <!-- ============================== DECISION RING ==============================
@@ -270,6 +277,19 @@ import '../styles/global.css';
 
             <!-- the goal celebration: a word bursting off the turf, over the pitch -->
             <div id="goal-fx" aria-hidden="true"><span id="goal-fx-word">GOAL</span></div>
+
+            <!-- Floating emoji reaction layer -->
+            <div id="emoji-layer" class="emoji-layer" aria-hidden="true"></div>
+
+            <!-- In-game Emoji Quick Reaction Dock -->
+            <div id="emoji-dock" class="emoji-dock" hidden aria-label="Quick reactions">
+                <button type="button" class="btn-emoji" data-emoji="⚽" title="Ball">⚽</button>
+                <button type="button" class="btn-emoji" data-emoji="🔥" title="Fire">🔥</button>
+                <button type="button" class="btn-emoji" data-emoji="👏" title="Clap">👏</button>
+                <button type="button" class="btn-emoji" data-emoji="😱" title="Shock">😱</button>
+                <button type="button" class="btn-emoji" data-emoji="😂" title="Laugh">😂</button>
+                <button type="button" class="btn-emoji" data-emoji="🧤" title="Save">🧤</button>
+            </div>
 
             <!-- The floating menu sheet. Buttons only — the match keeps running
                  underneath, so this is a dropdown and not a screen. -->
@@ -398,7 +418,7 @@ import '../styles/global.css';
                          marks PvP SOON rather than offering a switch that would do
                          nothing when pressed. -->
                     <div class="mode-switch">
-                        <div class="mode active" aria-current="true">
+                        <div class="mode active" id="btn-mode-ai" aria-current="true">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
                                 aria-hidden="true" focusable="false">
                                 <rect x="4" y="4" width="16" height="12" rx="1.5" />
@@ -406,15 +426,15 @@ import '../styles/global.css';
                             </svg>
                             Vs computer
                         </div>
-                        <div class="mode" title="Two-player is not built yet">
+                        <button type="button" class="mode mode-btn" id="btn-mode-pvp" title="Play online vs player">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
                                 aria-hidden="true" focusable="false">
                                 <circle cx="8" cy="8" r="3" />
                                 <circle cx="16" cy="8" r="3" />
                                 <path d="M3 20c0-3 2.5-5 5-5s5 2 5 5M11 20c0-3 2.5-5 5-5s5 2 5 5" />
                             </svg>
-                            PvP <span class="soon">soon</span>
-                        </div>
+                            Online PvP <span class="badge-live">LIVE</span>
+                        </button>
                     </div>
 
                     <!-- Match settings: organized as responsive dropdown selects without horizontal scroll -->
@@ -513,7 +533,15 @@ import '../styles/global.css';
                         </svg>
                         Kick off
                     </button>
-                    <button type="button" class="btn kickoff-alt" id="btn-penalty">Penalty shootout</button>
+                    <button type="button" class="btn kickoff-alt" id="btn-penalty" title="Direct penalty shootout mode">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
+                            <circle cx="12" cy="12" r="9" />
+                            <circle cx="12" cy="12" r="4" />
+                            <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+                            <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+                        </svg>
+                        Penalty Shootout
+                    </button>
                 </div>
 
                 <div class="test-result" id="verify-out" aria-live="polite" hidden></div>
@@ -620,6 +648,150 @@ import '../styles/global.css';
                 <button type="button" class="btn btn-primary" id="btn-pens" hidden>GO TO PENALTIES</button>
                 <button type="button" class="btn btn-secondary" id="btn-again">PLAY AGAIN</button>
                 <button type="button" class="btn btn-ghost-sm" id="btn-menu">MAIN MENU</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================== PVP LOBBY MODAL ============================== -->
+    <div class="screen" id="screen-pvp" hidden>
+        <div class="card card-pvp" role="dialog" aria-modal="true" aria-labelledby="pvp-title">
+            <div class="sheet-head pvp-sheet-head">
+                <div class="pvp-title-wrap">
+                    <h2 id="pvp-title">Online 1v1 PvP</h2>
+                    <span class="pvp-badge-live">LIVE</span>
+                </div>
+                <button type="button" class="btn btn-icon-xs" id="btn-pvp-close" aria-label="Close PvP">✕</button>
+            </div>
+
+            <div class="pvp-tabs" role="tablist">
+                <button type="button" class="pvp-tab active" id="tab-btn-custom" role="tab" aria-selected="true">Custom Room</button>
+                <button type="button" class="pvp-tab" id="tab-btn-open" role="tab" aria-selected="false">Open Matchmaking</button>
+            </div>
+
+            <!-- Custom Room Pane -->
+            <div class="pvp-pane" id="pane-custom">
+                <div class="pvp-section">
+                    <span class="pvp-section-title">Create Private Room</span>
+                    
+                    <div class="pvp-room-settings" id="pvp-room-settings-box">
+                        <div class="pvp-settings-row">
+                            <div class="pvp-setting-item">
+                                <label for="pvp-setting-timer" class="pvp-setting-label">
+                                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                                        <circle cx="8" cy="8" r="6.5" />
+                                        <polyline points="8 4.5 8 8 10.5 10" />
+                                    </svg>
+                                    Turn Time
+                                </label>
+                                <div class="select-wrapper">
+                                    <select class="setting-select" id="pvp-setting-timer" aria-label="Turn response time">
+                                        <option value="5">5s (Fast)</option>
+                                        <option value="10" selected>10s (Standard)</option>
+                                        <option value="15">15s (Tactical)</option>
+                                        <option value="20">20s (Relaxed)</option>
+                                    </select>
+                                    <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                        <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <div class="pvp-setting-item">
+                                <label for="pvp-setting-length" class="pvp-setting-label">
+                                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                                        <rect x="2.5" y="3.5" width="11" height="9" rx="1.5" />
+                                        <line x1="8" y1="3.5" x2="8" y2="12.5" />
+                                        <circle cx="8" cy="8" r="1.8" />
+                                    </svg>
+                                    Match Length
+                                </label>
+                                <div class="select-wrapper">
+                                    <select class="setting-select" id="pvp-setting-length" aria-label="Match total length">
+                                        <option value="60">2:00 min</option>
+                                        <option value="120" selected>4:00 min</option>
+                                        <option value="180">6:00 min</option>
+                                    </select>
+                                    <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                        <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="pvp-settings-row" style="margin-top: 6px;">
+                            <div class="pvp-setting-item" style="grid-column: 1 / -1;">
+                                <label for="pvp-create-pass" class="pvp-setting-label">
+                                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                                        <rect x="3" y="6.5" width="10" height="7.5" rx="1.5" />
+                                        <path d="M5 6.5V4.5a3 3 0 0 1 6 0v2" />
+                                    </svg>
+                                    Password <span class="pvp-label-hint">(Optional)</span>
+                                </label>
+                                <input type="password" id="pvp-create-pass" class="pvp-input pvp-pass-input" placeholder="Blank for none" autocomplete="new-password" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="pvp-create-idle">
+                        <button type="button" class="btn btn-primary btn-block" id="btn-pvp-create">Create Room</button>
+                    </div>
+
+                    <div id="pvp-create-active" hidden>
+                        <div class="room-code-display">
+                            <span class="room-code-label">ROOM CODE</span>
+                            <span class="room-code-num" id="pvp-room-code-val">----</span>
+                            <span id="pvp-room-settings-summary" class="pvp-summary-chip">10s Turns · 4:00 Min Match</span>
+                        </div>
+                        <div class="pvp-share-row">
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-pvp-copy-code">Copy Code</button>
+                            <button type="button" class="btn btn-ghost-sm" id="btn-pvp-cancel-host">Cancel</button>
+                        </div>
+                        <div class="pvp-wait-box">
+                            <span class="pvp-spinner"></span>
+                            <span>Waiting for opponent to connect...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pvp-divider"><span>OR</span></div>
+
+                <div class="pvp-section">
+                    <span class="pvp-section-title">Join With Room Code</span>
+                    <div class="pvp-join-form">
+                        <input type="text" id="pvp-join-input" class="pvp-input" placeholder="4-digit code" maxlength="6" autocomplete="off" />
+                        <input type="password" id="pvp-join-pass" class="pvp-input pvp-pass-input" placeholder="Password (if set)" autocomplete="current-password" />
+                        <button type="button" class="btn btn-primary" id="btn-pvp-join">Join</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Open Matchmaking Pane -->
+            <div class="pvp-pane" id="pane-open" hidden>
+                <div class="pvp-section">
+                    <span class="pvp-section-title">Search Online Players</span>
+
+                    <div id="pvp-open-idle">
+                        <button type="button" class="btn btn-primary btn-block" id="btn-pvp-search-open">Find Random Match</button>
+                    </div>
+
+                    <div id="pvp-open-searching" class="pvp-search-box" hidden>
+                        <span class="pvp-spinner"></span>
+                        <span id="pvp-search-msg">Scanning public lobbies...</span>
+                        <button type="button" class="btn btn-ghost-sm" id="btn-pvp-cancel-search">Cancel</button>
+                    </div>
+
+                    <div id="pvp-open-not-found" class="pvp-not-found-box" hidden>
+                        <p>No active players found looking for a match right now.</p>
+                        <button type="button" class="btn btn-primary btn-block" id="btn-pvp-host-open">Host Public Match (Wait for player)</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Network Status Bar -->
+            <div class="pvp-status-bar">
+                <span class="status-dot" id="pvp-status-dot"></span>
+                <span id="pvp-status-msg">Ready</span>
+                <span class="pvp-ping-badge" id="pvp-ping-badge" hidden>-- ms</span>
             </div>
         </div>
     </div>

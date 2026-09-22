@@ -295,13 +295,26 @@ export function defaultDiveTarget(keeper, target, reach = RULES.KEEPER_REACH) {
 export function penaltyKickOutcome(input) {
     const shotTarget = input.shotTarget;
     const divePoint = input.divePoint;
-    const reach = input.reach ?? RULES.PENALTY_KEEPER_REACH;
     const goalX = input.goalX ?? RULES.GOAL_X;
     const halfWidth = input.goalHalfWidth ?? RULES.GOAL_HALF_WIDTH;
 
     if (!isOnTarget(shotTarget.x, goalX, halfWidth)) {
         return { outcome: 'MISS', dist: Infinity, onTarget: false };
     }
+
+    if (input.byDirection) {
+        const deadzone = input.deadzone ?? 1.5;
+        const shotDir = shotTarget.x < goalX - deadzone ? 'left' : (shotTarget.x > goalX + deadzone ? 'right' : 'center');
+        const diveDir = divePoint.x < goalX - deadzone ? 'left' : (divePoint.x > goalX + deadzone ? 'right' : 'center');
+        const isSave = (shotDir === diveDir);
+        return {
+            outcome: isSave ? 'SAVED' : 'GOAL',
+            dist: Math.abs(shotTarget.x - divePoint.x),
+            onTarget: true
+        };
+    }
+
+    const reach = input.reach ?? RULES.PENALTY_KEEPER_REACH;
     const d = dist(shotTarget.x, shotTarget.y, divePoint.x, divePoint.y);
     return {
         outcome: d <= reach + 1e-9 ? 'SAVED' : 'GOAL',
@@ -311,16 +324,44 @@ export function penaltyKickOutcome(input) {
 }
 
 /**
- * Has the shootout been settled? Within the first `kicks` per side this also
- * catches an early clinch (one side can no longer catch up); after that it is
- * sudden death until a round ends unequal.
+ * Compute the target number of kicks per side for the current shootout stage:
+ * - Stage 1: 5 kicks each
+ * - If draw after 5: Next 5 kicks each (target 10)
+ * - If draw after 10: Goalkeepers take 1 kick each (target 11)
+ * - If draw after 11: Rounds of 3 kicks each (target 14, 17, 20...) until someone wins
  */
-export function shootoutDecided(you, cpu, takenYou, takenCpu, kicks = RULES.SHOOTOUT_KICKS) {
-    const remYou = Math.max(0, kicks - takenYou);
-    const remCpu = Math.max(0, kicks - takenCpu);
+export function getShootoutTarget(takenYou, takenCpu, you, cpu) {
+    let target = 5;
+    while (true) {
+        const remYou = Math.max(0, target - takenYou);
+        const remCpu = Math.max(0, target - takenCpu);
+        const clinched = (you > cpu + remCpu) || (cpu > you + remYou);
+        const completed = (takenYou >= target && takenCpu >= target);
+        if (!completed || clinched || you !== cpu) {
+            return target;
+        }
+        if (target === 5) target = 10;
+        else if (target === 10) target = 11;
+        else target += 3;
+    }
+}
+
+/**
+ * Has the shootout been settled? Evaluated against the active stage target:
+ * - 5 kicks per team
+ * - If draw: next 5
+ * - If draw: goalkeepers
+ * - If draw: 3/3 until someone wins
+ */
+export function shootoutDecided(you, cpu, takenYou, takenCpu, kicks) {
+    const target = (typeof kicks === 'number' && kicks !== RULES.SHOOTOUT_KICKS)
+        ? kicks
+        : getShootoutTarget(takenYou, takenCpu, you, cpu);
+    const remYou = Math.max(0, target - takenYou);
+    const remCpu = Math.max(0, target - takenCpu);
     if (you > cpu + remCpu) return true;
     if (cpu > you + remYou) return true;
-    if (takenYou >= kicks && takenCpu >= kicks) return you !== cpu;
+    if (takenYou >= target && takenCpu >= target) return you !== cpu;
     return false;
 }
 
@@ -592,7 +633,7 @@ export function runVerification(log = true) {
         return r.outcome === 'MISS' || 'an off-target penalty was not a miss';
     });
 
-    check('Shootout: level after five each goes to sudden death', () => {
+    check('Shootout: level after five each goes to next five', () => {
         return (
             shootoutDecided(3, 3, 5, 5) === false || 'a level shootout was called early'
         );
@@ -616,10 +657,18 @@ export function runVerification(log = true) {
         );
     });
 
-    check('Shootout: sudden death ends when a round breaks level', () => {
+    check('Shootout: tiebreakers progress to next 5, goalkeepers, then 3/3', () => {
+        const nextFiveLevel = shootoutDecided(7, 7, 10, 10);
+        const nextFiveWon = shootoutDecided(8, 7, 10, 10);
+        const gkLevel = shootoutDecided(8, 8, 11, 11);
+        const gkWon = shootoutDecided(9, 8, 11, 11);
+        const threeLevel = shootoutDecided(10, 10, 14, 14);
+        const threeWon = shootoutDecided(11, 10, 14, 14);
         return (
-            (shootoutDecided(6, 5, 6, 6) === true && shootoutDecided(6, 6, 6, 6) === false) ||
-            'sudden death handled wrongly'
+            (nextFiveLevel === false && nextFiveWon === true &&
+             gkLevel === false && gkWon === true &&
+             threeLevel === false && threeWon === true) ||
+            'shootout tiebreaker progression failed'
         );
     });
 

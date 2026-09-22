@@ -27,9 +27,10 @@ import {
     clamp, flightTime, projectOnSegment,
     resolvePassRace, interceptionTime,
     isOnTarget, shotOutcome, defaultDiveTarget,
-    penaltyKickOutcome, shootoutDecided, formatClock,
+    penaltyKickOutcome, shootoutDecided, getShootoutTarget, formatClock,
     mulberry32, runVerification
 } from './rules.js';
+import { pvp, EMOJIS } from './pvp-network.js';
 
 (function () {
     'use strict';
@@ -42,6 +43,16 @@ import {
         }
         console.error(msg);
     }
+
+    /* --- Online PvP State & Helpers --- */
+    let pvpActive = false;
+    let pvpRole = null; // 'host' | 'guest'
+    let lastPvpBroadcast = 0;
+    let hostDone = false;
+    let guestDone = false;
+
+    const myTeam = () => (pvpActive && pvpRole === 'guest' ? 'cpu' : 'you');
+    const opponentTeam = () => (pvpActive && pvpRole === 'guest' ? 'you' : 'cpu');
 
     /* ----------------------------------------------------------------------
        PORTRAIT GATE — touch/mobile devices play portrait-only.
@@ -1756,6 +1767,9 @@ import {
     const playerDragLine = groundLine(COL.aim, 2);
     const diveLine = groundLine(COL.ghost, 2);
     const diveMarker = mkRing(COL.ghost, 0.9, 1.25);
+    const soAimLine = groundLine(COL.you, 2);
+    const soDiveLine = groundLine(COL.gkYou, 2);
+    const soTargetMarker = mkRing(COL.you, 0.6, 0.95);
 
     /* --- §8.b the stacked moves (§17.b) -------------------------------------
        A ring per queued run, plus one line for the queued ball. These show the
@@ -2028,10 +2042,28 @@ import {
         return p.team === 'you' ? COL.you : COL.cpu;
     }
     function refreshRings() {
+        if (SO && SO.active) {
+            allPlayers.forEach(p => {
+                if (p.ring) {
+                    const isMyControlled = p.controlled && (!pvpActive || p.team === myTeam());
+                    p.ring.visible = !!isMyControlled;
+                    if (isMyControlled) {
+                        p.ring.material.color.setHex(COL.aim);
+                        p.ring.material.opacity = 0.75;
+                        p.ring.scale.setScalar(1.0);
+                    }
+                }
+            });
+            return;
+        }
         allPlayers.forEach(p => {
-            p.ring.material.color.setHex(p.controlled ? COL.aim : teamRingHex(p));
-            p.ring.material.opacity = p.controlled ? (p.hasBall ? 0.95 : 0.6) : 0.3;
-            p.ring.scale.setScalar(p.hasBall ? 1.1 : p.controlled ? 1 : 0.82);
+            if (p.ring) {
+                p.ring.visible = true;
+                const isMyControlled = p.controlled && (!pvpActive || p.team === myTeam());
+                p.ring.material.color.setHex(isMyControlled ? COL.aim : teamRingHex(p));
+                p.ring.material.opacity = isMyControlled ? (p.hasBall ? 0.95 : 0.6) : (p.controlled ? 0.45 : 0.3);
+                p.ring.scale.setScalar(p.hasBall ? 1.1 : isMyControlled ? 1 : 0.82);
+            }
         });
     }
 
@@ -2350,7 +2382,22 @@ import {
         allPlayers.forEach(p => { p.controlled = false; p.duty = null; });
         if (!PLAY) return;
         const atk = PLAY.atk;
-        if (atk === 'you') {
+        const def = other(atk);
+        if (pvpActive) {
+            // Both sides are human controlled in PvP
+            if (PLAY.carrier) PLAY.carrier.controlled = true;
+            const atkMates = teamOutfield(atk).filter(p => p !== PLAY.carrier);
+            atkMates.forEach(m => { m.controlled = true; });
+            const sorted = atkMates.slice().sort((a, b) => dist(a, PLAY.goal) - dist(b, PLAY.goal));
+            PLAY.receiver = sorted[0];
+            if (PLAY.receiver) PLAY.receiver.duty = 'receiver';
+
+            const defNear = teamOutfield(def).slice().sort((a, b) => dist(a, ball) - dist(b, ball));
+            if (defNear[0]) { defNear[0].controlled = true; defNear[0].duty = 'interceptor'; }
+            if (defNear[1]) { defNear[1].controlled = true; defNear[1].duty = 'marker'; }
+            const k = keeperOf(def);
+            if (k) k.controlled = true;
+        } else if (atk === 'you') {
             PLAY.carrier.controlled = true;
             const mates = teamOutfield('you').filter(p => p !== PLAY.carrier);
             mates.forEach(m => { m.controlled = true; });
@@ -2374,6 +2421,9 @@ import {
         aimLine.visible = false;
         shotLine.visible = false;
         runnerMarker.visible = false;
+        if (typeof soAimLine !== 'undefined') soAimLine.visible = false;
+        if (typeof soDiveLine !== 'undefined') soDiveLine.visible = false;
+        if (typeof soTargetMarker !== 'undefined') soTargetMarker.visible = false;
         hideQueueMarkers();
         /* §12.d — the two drawn strokes belong to the window, so they come off
            the turf with it. Without this a pass line drawn in the last window
@@ -2564,7 +2614,7 @@ import {
         sheet: el('menu-sheet'), scrim: el('sheet-scrim'),
         goalFx: el('goal-fx'), goalWord: el('goal-fx-word'),
         soTitle: el('so-title'), soYou: el('so-you'), soCpu: el('so-cpu'),
-        soScore: el('so-score'), soTurn: el('so-turn')
+        soScore: el('so-score'), soTurn: el('so-turn'), soTimer: el('so-timer')
     };
 
     let lastClock = -1, lastBar = -1;
@@ -2688,7 +2738,8 @@ import {
     /* --- screen stack (game-ui-ux: push/pop, focus handed to the top screen) --- */
     const SCREENS = {
         menu: el('screen-menu'), tutorial: el('screen-tutorial'),
-        pause: el('screen-pause'), over: el('screen-over'), halftime: el('screen-halftime')
+        pause: el('screen-pause'), over: el('screen-over'), halftime: el('screen-halftime'),
+        pvp: el('screen-pvp')
     };
     const stack = [];
     let focusMemory = [];
@@ -3278,8 +3329,8 @@ import {
         reboundBall(0, ny, BOUNCE_POST);
         spillLoose();
         Sfx.save(); shake(.3);
-        banner('PARRIED', CSS.warn);
-        log(k.team === 'you' ? 'Your keeper parried it.' : 'Computer keeper parried it.',
+        banner('SAVED', CSS.warn);
+        log(k.team === 'you' ? 'Your keeper saved it.' : 'Computer keeper saved it.',
             k.team === 'you' ? 'you' : 'cpu');
     }
 
@@ -4423,12 +4474,12 @@ import {
         turn: 'you',             // whose kick it is
         you: 0, cpu: 0,
         takenYou: 0, takenCpu: 0,
+        kicksYou: [],            // individual kick results for accurate dots
+        kicksCpu: [],            // individual kick results for accurate dots
         aim: null, dive: null,
         result: null,
         t: 0,
         from: null, to: null,
-        /* true when the spot settles a level quick match, false when the player
-           picked PENALTY SHOOTOUT from the menu. Read by PLAY AGAIN only. */
         fromMatch: false
     };
 
@@ -4444,9 +4495,9 @@ import {
        opens with `SO.t -= dt`. */
     const SO_FLIGHT = 0.55;        // ball in flight
     const SO_KICK_BEAT = 0.75;     // the keeper sets, then the strike; the dive breaks on it
-    const SO_DIVE_WINDOW = 4.5;    // the human's time to draw a dive
+    const SO_DIVE_WINDOW = 5.0;    // 5 second timer to choose keeper dive
     const SO_RESULT_PAUSE = 1.2;   // the banner, before the next kicker
-    const SO_AIM_WINDOW = 10;      // the human's time to draw the aim
+    const SO_AIM_WINDOW = 6.0;     // 6 second timer to aim and shoot
     const SO_CPU_BEAT = 1.0;       // the CPU's routine before it strikes
 
     function setPenaltyView(on) {
@@ -4465,10 +4516,16 @@ import {
         SO.active = true;
         SO.you = 0; SO.cpu = 0;
         SO.takenYou = 0; SO.takenCpu = 0;
+        SO.kicksYou = [];
+        SO.kicksCpu = [];
         SO.result = null;
         SO.fromMatch = !!fromMatch;
         state.phase = 'shootout';
         state.matchMode = SO.fromMatch ? 'quick' : 'shootout';
+        state.paused = false;
+        if (!state.seed) state.seed = (Math.random() * 1e9) | 0;
+        Sfx.unlock();
+        Sfx.whistle();
         /* §17.b — penalties are their own machine: no decision window survives it */
         PLAN = null;
         clearIntents();
@@ -4479,14 +4536,23 @@ import {
         ui.roleStrip.hidden = true;
         bus.emit('half');
         soHudState();
-        soSetupKick(Math.random() < 0.5 ? 'you' : 'cpu');
-        log('Penalties. Five kicks each, then sudden death.', '');
+        soSetupKick('you');
+        log('Penalties. 5 kicks each, then next 5, then goalkeepers, then 3/3 until someone wins.', '');
     }
 
     function endShootout(silent) {
         SO.active = false;
-        /* Restore visibility of all players after shootout */
-        allPlayers.forEach(p => { if (p.mesh) p.mesh.visible = true; });
+        /* Restore visibility and scale of all players, rings and shadows after shootout */
+        allPlayers.forEach(p => {
+            if (p.mesh) { p.mesh.visible = true; p.mesh.scale.set(1.0, 1.0, 1.0); }
+            if (p.ring) p.ring.visible = true;
+            if (p.shadow) { p.shadow.visible = true; p.shadow.scale.set(1.0, 1.0, 1.0); }
+        });
+        if (typeof soAimLine !== 'undefined') soAimLine.visible = false;
+        if (typeof soDiveLine !== 'undefined') soDiveLine.visible = false;
+        if (typeof soTargetMarker !== 'undefined') soTargetMarker.visible = false;
+        if (typeof diveMarker !== 'undefined') diveMarker.visible = false;
+        refreshRings();
         if (!silent) return;
         /* the shootout's readouts are tear-down too, so leaving penalties never
            leaves a stale dots row behind in the regulation HUD */
@@ -4500,12 +4566,15 @@ import {
 
     function soSetupKick(turn) {
         SO.turn = turn;
-        SO.phase = 'aim';
         SO.aim = null;
         SO.dive = null;
         SO.result = null;
         SO.t = 0;
         hideOverlays();
+        if (typeof soAimLine !== 'undefined') soAimLine.visible = false;
+        if (typeof soDiveLine !== 'undefined') soDiveLine.visible = false;
+        if (typeof soTargetMarker !== 'undefined') soTargetMarker.visible = false;
+        if (typeof diveMarker !== 'undefined') diveMarker.visible = false;
 
         /* place the kicker and the keeper on the line */
         const spot = soSpot();
@@ -4514,49 +4583,104 @@ import {
         const defTeam = other(turn);
         const k = keeperOf(defTeam);
         const keeperY = goal.y;  // Set keeper on the goal line
+
         allPlayers.forEach(p => {
             p.controlled = false;
             p.dest = null;
             p.dive = null;
             p.queuedDive = null;
             p.held = false;
-            /* Hide all players except the kicker and keeper during shootout */
+            /* Hide all players, their rings, and shadows except the active kicker and keeper */
             const isKicker = p === kicker;
             const isKeeper = p === k;
-            if (p.mesh) p.mesh.visible = (isKicker || isKeeper);
+            const show = (isKicker || isKeeper);
+            if (p.mesh) p.mesh.visible = show;
+            if (p.shadow) p.shadow.visible = show;
+            if (p.ring) p.ring.visible = false; // Hide all standard ground rings in shootout
         });
-        /* Only the human's own bodies ever carry the "controlled" ring: the
-           kicker on your own kick, your keeper on the CPU's. The ring is a
-           promise that a drag will move that player, so painting it on the
-           opposing goalkeeper while you are the shooter reads as if you are
-           holding their keeper. */
-        if (kicker) { kicker.controlled = turn === 'you'; setPlayerPos(kicker, spot.x, spot.y); }
-        if (k) { k.controlled = defTeam === 'you'; setPlayerPos(k, 50, keeperY); }
+
+        // Hide tactical queue markers
+        queueRings.forEach(r => { r.visible = false; });
+        if (typeof runnerMarker !== 'undefined') runnerMarker.visible = false;
+        if (typeof diveMarker !== 'undefined') diveMarker.visible = false;
+        if (typeof soTargetMarker !== 'undefined') soTargetMarker.visible = false;
+
+        /* Only the human's own player is controlled: the kicker when you shoot,
+           your keeper when the CPU shoots. */
+        if (kicker) {
+            kicker.controlled = turn === 'you';
+            setPlayerPos(kicker, spot.x, spot.y);
+            // Both shooter and goalkeeper are scaled to the same compact size (0.8)
+            if (kicker.mesh) kicker.mesh.scale.set(0.8, 0.8, 0.8);
+            if (kicker.shadow) kicker.shadow.scale.set(0.8, 0.8, 0.8);
+        }
+        if (k) {
+            k.controlled = defTeam === 'you';
+            setPlayerPos(k, 50, keeperY);
+            k.diveStartX = null;
+            k.diveStartY = null;
+            // Defending goalkeeper is scaled to the same compact size (0.8)
+            if (k.mesh) k.mesh.scale.set(0.8, 0.8, 0.8);
+            if (k.shadow) k.shadow.scale.set(0.8, 0.8, 0.8);
+        }
         ball.mode = 'held'; ball.holder = kicker; ball.alive = false;
         if (kicker) { ball.x = spot.x; ball.y = spot.y; ball.h = 0.42; }
 
+        refreshRings();
         bus.emit('role');
         soHudState();
-        /* Every phase runs on the same countdown, so the kick gets one too. The
-           human's aim phase used to be started with no clock at all (SO.t was
-           left at 0 and only the CPU's branch tested the timeout), which meant a
-           tap that never became a drag had nothing to expire it: the shootout
-           stopped on the first kick and never resumed. */
-        SO.t = turn === 'cpu' ? SO_CPU_BEAT : SO_AIM_WINDOW;
-        if (turn === 'cpu') log('CPU steps up…', '');
-        else log('Your kick — drag from the spot and release.', '');
+
+        const taken = turn === 'you' ? SO.takenYou : SO.takenCpu;
+        const isGkKick = (taken === 10);
+
+        if (turn === 'cpu') {
+            /* CPU is shooting: CPU precomputes aim immediately, and human controls keeper dive with 3s timer */
+            const rng = mulberry32(hashSeed(state.seed, 7, SO.takenYou + SO.takenCpu));
+            const isExtreme = state.difficulty >= 1.5;
+            const isHard = state.difficulty >= 1.0;
+            const spread = GOAL_HALF_WIDTH * (isExtreme ? 0.88 : (isHard ? 0.78 : (0.55 + 0.5 * state.difficulty)));
+            const wild = rng() < 0.18 * Math.max(0, 1 - state.difficulty);
+            const aimX = wild
+                ? clamp(soGoal().x + (rng() < .5 ? -1 : 1) * (GOAL_HALF_WIDTH + randRange(rng, 1, 9)), 2, 98)
+                : (isExtreme
+                    ? clamp(soGoal().x + (rng() < .5 ? -1 : 1) * randRange(rng, spread * 0.85, spread), 2, 98)
+                    : clamp(soGoal().x + randRange(rng, -spread, spread), 2, 98));
+            SO.aim = { x: aimX, y: soGoal().y };
+
+            SO.phase = 'dive';
+            SO.t = SO_DIVE_WINDOW;
+            log(isGkKick ? 'CPU Goalkeeper shooting — dive to save! (3s)' : 'CPU kicking — drag to choose your keeper dive! (3s)', '');
+        } else {
+            /* Human is shooting: 3s timer to drag direction line and release */
+            SO.phase = 'aim';
+            SO.t = SO_AIM_WINDOW;
+            log(isGkKick ? 'Your Goalkeeper takes the kick — drag to aim! (3s)' : 'Your kick — drag to aim and release! (3s)', '');
+        }
     }
     /* §10 — the keeper works from the goal line, KEEPER_LINE out from it. */
     function PENALTY_LINE() { return SO_KEEPER_LINE; }
     const SO_KEEPER_LINE = 4;
 
-    /** The shootout's kickers: the five outfield players, in shirt order. */
+    /**
+     * The shootout's kickers:
+     * - Kicks 1..5: Outfield players in order (0..4)
+     * - Kicks 6..10 ("next 5"): Outfield players again (0..4)
+     * - Kick 11 ("then goal keepers"): Goalkeeper steps up
+     * - Kicks 12+ ("then 3/3 until someone wins"): Outfield players rotation
+     */
     function soKickerOf(team) {
         const roster = teamOutfield(team);
-        if (!roster.length) return null;
+        const keeper = keeperOf(team);
+        if (!roster.length) return keeper || null;
         const taken = team === 'you' ? SO.takenYou : SO.takenCpu;
-        const kicks = RULES.SHOOTOUT_KICKS;
-        return roster[taken % roster.length] || roster[roster.length - 1];
+        if (taken < 10) {
+            return roster[taken % roster.length] || roster[0];
+        } else if (taken === 10) {
+            return keeper || roster[0];
+        } else {
+            const outfieldIndex = (taken - 11) % roster.length;
+            return roster[outfieldIndex] || roster[0];
+        }
     }
 
     function setPlayerPos(p, x, y) {
@@ -4570,12 +4694,20 @@ import {
         SO.aim = target;
     }
 
+    /**
+     * Maximum realistic dive travel for the goalkeeper's body (in pitch units from center x = 50).
+     * The torso/hips lunge up to 6.2 units laterally; outstretched body and arms reach the post.
+     */
+    const SO_DIVE_MAX_OFFSET = 6.2;
+
     /** CHECK_ON_TARGET then DIVE. */
     function soCommitAim() {
         /* Guarded on the phase as well as the aim: committing twice would re-roll
            the keeper's read, and a stray release from the gesture that started
            the kick could reach here while the dive is already playing. */
         if (!SO.aim || SO.phase !== 'aim') return;
+        if (typeof soAimLine !== 'undefined') soAimLine.visible = false;
+        if (typeof soTargetMarker !== 'undefined') soTargetMarker.visible = false;
         const goal = soGoal();
         const off = !isOnTarget(SO.aim.x, goal.x, GOAL_HALF_WIDTH);
         if (off) {
@@ -4585,119 +4717,190 @@ import {
         SO.phase = 'dive';
         SO.t = 0;
         const k = soDefKeeper();
-        if (soDefTeam() === 'cpu') {
+        if (soDefTeam() === 'cpu' && !pvpActive) {
             /* the CPU's keeper reads the kick with probability scaled by difficulty */
             const isHard = state.difficulty >= 1.0;
             const isExtreme = state.difficulty >= 1.5;
-            const readChance = clamp(0.22 + 0.45 * state.difficulty + (isExtreme ? 0.34 : (isHard ? 0.16 : 0)), 0, 0.97);
+            const readChance = clamp(0.24 + 0.44 * state.difficulty + (isExtreme ? 0.28 : (isHard ? 0.14 : 0)), 0, 0.95);
             const read = Math.random() < readChance;
-            const side = Math.random() < 0.5 ? -1 : 1;
-            /* The guess is capped at KEEPER_DIVE_MAX from where the keeper
-               stands — even a perfect read cannot send him beyond his reach. */
-            const kx = k ? k.x : 50;
-            const target = read
-                ? { x: clampDiveX(SO.aim.x, kx), y: k.y }
-                : { x: clamp(clampDiveX(SO.aim.x + side * (GOAL_HALF_WIDTH * 1.35), kx), 4, 96), y: k.y };
-            /* Held as a QUEUED dive, not a live one. The keeper has made his
-               read, but he does not break for the corner until the ball is
-               actually struck (soStrike). Setting k.dive here launched him
-               during the beat below, so he was airborne BEFORE the kick — a
-               keeper who dives before the shot. */
+            const goalX = soGoal().x;
+            const shotDir = SO.aim.x < goalX - 1.5 ? 'left' : (SO.aim.x > goalX + 1.5 ? 'right' : 'center');
+            let diveX = goalX;
+            if (read) {
+                // Same direction: CPU keeper dives toward the shot with realistic athletic reach
+                if (shotDir === 'left') {
+                    diveX = clamp(goalX - randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), goalX - SO_DIVE_MAX_OFFSET, 48.0);
+                } else if (shotDir === 'right') {
+                    diveX = clamp(goalX + randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), 52.0, goalX + SO_DIVE_MAX_OFFSET);
+                } else {
+                    diveX = goalX;
+                }
+            } else {
+                // Opposite direction: CPU keeper dives the wrong way!
+                if (shotDir === 'left') {
+                    diveX = clamp(goalX + randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), 52.0, goalX + SO_DIVE_MAX_OFFSET);
+                } else if (shotDir === 'right') {
+                    diveX = clamp(goalX - randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), goalX - SO_DIVE_MAX_OFFSET, 48.0);
+                } else {
+                    diveX = Math.random() < 0.5 ? goalX - 5.0 : goalX + 5.0;
+                }
+            }
+            const target = { x: diveX, y: k ? k.y : soGoal().y };
             if (k) k.queuedDive = target;
             SO.dive = target;
             /* a beat for the keeper to set, then the strike — the dive breaks on it */
             SO.t = off ? SO_KICK_BEAT * 0.6 : SO_KICK_BEAT;
             setPenaltyView(true);
         } else {
-            log(off ? 'Off target — the keeper dives anyway.' : 'Draw your dive — anywhere along the line.', '');
-            SO.t = SO_DIVE_WINDOW;   // no dive? default to the shot's side
+            SO.t = SO_DIVE_WINDOW;
         }
+    }
+
+    /**
+     * Compute keeper dive target from drawn line:
+     * Natural athletic lunge capped at SO_DIVE_MAX_OFFSET so the keeper stays realistically within the goal area.
+     * Drawing longer lines dives the keeper to the maximum realistic distance;
+     * drawing short lines dives the keeper in a short distance.
+     */
+    function calcSoDiveTarget(pt, origin, k) {
+        const kx = k ? k.x : 50;
+        const ky = k ? k.y : 100;
+        let deltaX = 0;
+        if (origin && Math.abs(origin.x - kx) < 8 && origin.y > 80) {
+            deltaX = pt.x - kx;
+        } else if (origin) {
+            deltaX = pt.x - origin.x;
+        } else {
+            deltaX = pt.x - kx;
+        }
+        const clampedDelta = clamp(deltaX, -SO_DIVE_MAX_OFFSET, SO_DIVE_MAX_OFFSET);
+        return { x: kx + clampedDelta, y: ky };
     }
 
     function soCommitDive(point) {
         if (SO.phase !== 'dive') return;
+        if (typeof soDiveLine !== 'undefined') soDiveLine.visible = false;
+        if (typeof diveMarker !== 'undefined') diveMarker.visible = false;
         const k = soDefKeeper();
-        /* The drawn dive is capped at KEEPER_DIVE_MAX from the keeper's spot —
-           a drag to the far corner is pulled back to the furthest he can go. */
-        if (k && point) point = { x: clamp(clampDiveX(point.x, k.x), 4, 96), y: k.y };
+        const kx = k ? k.x : 50;
+        if (k && point) point = { x: clamp(point.x, kx - SO_DIVE_MAX_OFFSET, kx + SO_DIVE_MAX_OFFSET), y: k.y };
         SO.dive = point;
-        /* Queued, exactly like the CPU's read: the drawn dive is committed the
-           moment it is drawn, but the keeper only sets off when the strike
-           fires. */
         if (k) k.queuedDive = point;
         soStrike();
     }
 
-    /** The kick itself: the ball travels to the goal, and only then is the
-        outcome read. Resolving the moment the dive was drawn skipped the flight
-        entirely — the ball sat on the spot while the banner appeared. */
+    /** The kick itself: the ball travels to the goal, hits the net on a goal or gets stopped/misses, and only then is the outcome read. */
     function soStrike() {
         if (SO.phase !== 'dive') return;
         SO.phase = 'flight';
-        SO.t = SO_FLIGHT;                 // a countdown, like every other phase
-        /* NOW the dive breaks. The keeper's committed point was held as
-           `queuedDive` for the whole pre-strike beat; promoting it to the live
-           `dive` on the exact frame the ball leaves is what makes him react to
-           the kick instead of guessing before it. */
+        SO.t = SO_FLIGHT;
+        if (typeof soAimLine !== 'undefined') soAimLine.visible = false;
+        if (typeof soDiveLine !== 'undefined') soDiveLine.visible = false;
+        if (typeof soTargetMarker !== 'undefined') soTargetMarker.visible = false;
+        if (typeof diveMarker !== 'undefined') diveMarker.visible = false;
         const k = soDefKeeper();
-        if (k && k.queuedDive) { k.dive = k.queuedDive; k.queuedDive = null; }
+        if (k) {
+            k.diveStartX = k.x;
+            k.diveStartY = k.y;
+            if (k.queuedDive) { k.dive = k.queuedDive; k.queuedDive = null; }
+        }
+
+        const shotTarget = SO.aim || { x: soGoal().x, y: soGoal().y };
+        const divePoint = SO.dive || (k ? { x: k.x, y: k.y } : { x: soGoal().x, y: soGoal().y });
+
+        // Player shot direction and dive direction same means saved, opposite direction means goal
+        SO.result = penaltyKickOutcome({
+            shotTarget,
+            divePoint,
+            byDirection: true,
+            goalX: soGoal().x,
+            goalHalfWidth: GOAL_HALF_WIDTH
+        });
+
         SO.from = { x: ball.x, y: ball.y };
-        SO.to = { x: SO.aim ? SO.aim.x : soGoal().x, y: soGoal().y };
+        if (SO.result.outcome === 'GOAL') {
+            // Ball flies cleanly into the back of the net!
+            SO.to = { x: shotTarget.x, y: 102.2 };
+        } else if (SO.result.outcome === 'SAVED') {
+            // Ball is met and stopped by the diving keeper
+            const meetX = lerp(divePoint.x, shotTarget.x, 0.4);
+            SO.to = { x: meetX, y: 100.0 };
+        } else {
+            // Ball flies off target / wide past the goal line
+            SO.to = { x: shotTarget.x, y: 103.5 };
+        }
         SO.after = () => soResolve();
     }
 
     function soResolve() {
-        if (!SO.result) {
-            SO.result = penaltyKickOutcome({
-                shotTarget: SO.aim,
-                divePoint: SO.dive || { x: soGoal().x, y: soGoal().y },
-                /* a keeper who never left his line only stops what is within
-                   arm's reach — the full penalty reach belongs to the dive */
-                reach: SO.dive ? RULES.PENALTY_KEEPER_REACH : KEEPER_SAVE_REACH,
-                goalX: soGoal().x,
-                goalHalfWidth: GOAL_HALF_WIDTH
-            });
-        }
         SO.phase = 'result';
-        SO.t = SO_RESULT_PAUSE;           // a beat to read the banner, then on
+        SO.t = SO_RESULT_PAUSE;
 
         const kicker = SO.turn;
-        if (SO.result.outcome === 'GOAL') {
+        const isGoal = SO.result.outcome === 'GOAL';
+
+        if (isGoal) {
             if (kicker === 'you') SO.you++; else SO.cpu++;
+            Sfx.bounce();
             if (kicker === 'you') Sfx.goal(); else Sfx.concede();
             shake(.5);
+            fireGoalFx(kicker);
             banner('GOAL', kicker === 'you' ? CSS.you : CSS.cpu);
         } else if (SO.result.outcome === 'SAVED') {
-            /* posture picks the word, exactly as in open play: a keeper who
-               dove throws his legs at it and parries; one who stood his
-               ground gets his body behind it and catches */
             const k = soDefKeeper();
             Sfx.save(); shake(.25);
-            banner(k && k.dive ? 'PARRIED' : 'SAVED', CSS.warn);
+            banner('SAVED', CSS.warn);
         } else {
             Sfx.bad();
             banner('MISS', CSS.bad);
         }
-        if (kicker === 'you') SO.takenYou++; else SO.takenCpu++;
+
+        if (kicker === 'you') {
+            SO.takenYou++;
+            SO.kicksYou.push(isGoal);
+        } else {
+            SO.takenCpu++;
+            SO.kicksCpu.push(isGoal);
+        }
+
         log((kicker === 'you' ? 'You' : 'CPU') + ': ' + SO.result.outcome + ' — ' + SO.you + '–' + SO.cpu,
-            (SO.result.outcome === 'GOAL') === (kicker === 'you') ? 'good' : 'bad');
+            isGoal === (kicker === 'you') ? 'good' : 'bad');
         soHudState();
     }
 
     function soHudState() {
         if (!ui.soScore) return;
         ui.soScore.textContent = SO.you + ' – ' + SO.cpu;
-        ui.soTurn.textContent = SO.turn === 'you' ? 'YOUR KICK' : 'CPU KICK';
-        const dots = (n, taken) => {
+        if (ui.scoreYou) setText(ui.scoreYou, SO.you);
+        if (ui.scoreCpu) setText(ui.scoreCpu, SO.cpu);
+
+        if (ui.soTurn) ui.soTurn.textContent = SO.turn === 'you' ? 'YOUR KICK' : 'CPU KICK';
+        const target = getShootoutTarget(SO.takenYou, SO.takenCpu, SO.you, SO.cpu);
+        if (ui.soTitle) {
+            if (target === 5) ui.soTitle.textContent = 'PENALTIES (5 SHOTS)';
+            else if (target === 10) ui.soTitle.textContent = 'NEXT 5 SHOTS';
+            else if (target === 11) ui.soTitle.textContent = 'GOALKEEPERS';
+            else {
+                const roundNum = Math.floor((target - 11) / 3);
+                ui.soTitle.textContent = 'TIEBREAKER: 3/3 (' + roundNum + ')';
+            }
+        }
+        const dots = (history, taken) => {
             let s = '';
-            for (let i = 0; i < Math.max(RULES.SHOOTOUT_KICKS, taken); i++) {
-                s += '<i class="dot' + (i < taken ? ' taken' : '') + (i < n ? ' scored' : '') + '"></i>';
+            for (let i = 0; i < target; i++) {
+                const isTaken = i < taken;
+                const isScored = isTaken && (history && history[i] === true);
+                s += '<i class="dot' + (isTaken ? ' taken' : '') + (isScored ? ' scored' : '') + '"></i>';
             }
             return s;
         };
-        ui.soYou.innerHTML = dots(SO.you, SO.takenYou);
-        ui.soCpu.innerHTML = dots(SO.cpu, SO.takenCpu);
-        ui.soTitle.textContent = (SO.takenYou + SO.takenCpu) >= RULES.SHOOTOUT_KICKS * 2 ? 'SUDDEN DEATH' : 'PENALTIES';
+        ui.soYou.innerHTML = dots(SO.kicksYou, SO.takenYou);
+        ui.soCpu.innerHTML = dots(SO.kicksCpu, SO.takenCpu);
+        if (ui.soTimer) {
+            const rem = Math.max(0, SO.t);
+            ui.soTimer.textContent = rem.toFixed(1) + 's';
+            ui.soTimer.classList.toggle('urgent', rem <= 1.0);
+        }
     }
 
     function soNext() {
@@ -4721,13 +4924,24 @@ import {
 
     function soUpdate(dt) {
         SO.t -= dt;
+
+        if (ui.soTimer) {
+            if (SO.phase === 'aim' || SO.phase === 'dive') {
+                const rem = Math.max(0, SO.t);
+                ui.soTimer.textContent = rem.toFixed(1) + 's';
+                ui.soTimer.classList.toggle('urgent', rem <= 1.0);
+                ui.soTimer.style.display = '';
+            } else {
+                ui.soTimer.style.display = 'none';
+            }
+        }
+
         if (SO.phase === 'aim' && SO.t <= 0) {
-            if (SO.turn === 'cpu') {
+            if (SO.turn === 'cpu' && !pvpActive) {
                 const rng = mulberry32(hashSeed(state.seed, 7, SO.takenYou + SO.takenCpu));
                 const isExtreme = state.difficulty >= 1.5;
                 const isHard = state.difficulty >= 1.0;
                 const spread = GOAL_HALF_WIDTH * (isExtreme ? 0.88 : (isHard ? 0.78 : (0.55 + 0.5 * state.difficulty)));
-                /* miss the target occasionally, more often on the lower settings */
                 const wild = rng() < 0.18 * Math.max(0, 1 - state.difficulty);
                 const aim = wild
                     ? clamp(soGoal().x + (rng() < .5 ? -1 : 1) * (GOAL_HALF_WIDTH + randRange(rng, 1, 9)), 2, 98)
@@ -4737,30 +4951,24 @@ import {
                 soSetAim({ x: aim, y: soGoal().y });
                 soCommitAim();
             } else {
-                /* §7 — no aim given: take the percentage ball, straight down the
-                   middle, and let the keeper's read decide it. */
-                soSetAim({ x: soGoal().x, y: soGoal().y });
+                /* Time out on aim: take selected aim or straight percentage ball */
+                if (typeof soAimLine !== 'undefined') soAimLine.visible = false;
+                if (typeof soTargetMarker !== 'undefined') soTargetMarker.visible = false;
+                if (!SO.aim) soSetAim({ x: soGoal().x, y: soGoal().y });
                 soCommitAim();
             }
         } else if (SO.phase === 'dive') {
             if (SO.t <= 0) {
                 const k = soDefKeeper();
+                if (typeof soDiveLine !== 'undefined') soDiveLine.visible = false;
+                if (typeof diveMarker !== 'undefined') diveMarker.visible = false;
                 if (k && (k.dive || k.queuedDive)) {
-                    /* The keeper is already committed — the CPU's own read, or the
-                       dive the human just drew. Strike without touching it: the
-                       old fallback re-derived the dive here, which handed the CPU
-                       keeper a second, better guess on every kick the human took
-                       and quietly turned an honest read into a free save. The
-                       commitment now lives in `queuedDive` until the strike, so it
-                       is checked here too — falling through would re-roll it. */
                     soStrike();
-                } else if (soDefTeam() === 'cpu') {
-                    /* §7 — no input means the default dive, to the shot's side */
+                } else if (soDefTeam() === 'cpu' && !pvpActive) {
                     soCommitDive(k ? defaultDiveTarget(k, SO.aim, KEEPER_REACH)
                         : { x: SO.aim.x, y: soGoal().y });
                 } else {
-                    /* the human's keeper holds his line: no dive unless the
-                       player drew one, and the strike fires on his feet */
+                    /* Human keeper timed out without input: holds line, strike fires */
                     soStrike();
                 }
             }
@@ -4771,6 +4979,14 @@ import {
                 ball.y = lerp(SO.from.y, SO.to.y, f);
                 ball.h = 0.42 + Math.sin(Math.PI * f) * ARC_SHOT;
             }
+            const k = soDefKeeper();
+            if (k && k.dive && k.diveStartX !== undefined && k.diveStartX !== null) {
+                // Smooth athletic dive: explosive burst off feet then cushioned deceleration into landing
+                const diveF = 1 - Math.pow(1 - f, 2.2);
+                k.x = lerp(k.diveStartX, k.dive.x, diveF);
+                k.y = lerp(k.diveStartY || 100, k.dive.y, diveF);
+                syncToMesh(k);
+            }
             if (f >= 1) {
                 const cb = SO.after; SO.after = null;
                 if (cb) cb();
@@ -4778,9 +4994,11 @@ import {
         } else if (SO.phase === 'result') {
             if (SO.t <= 0) soNext();
         }
-        /* the keeper's dive always plays out */
+        /* during non-flight phases, keeper positions settle normally */
         const k = soDefKeeper();
-        if (k && k.dive) moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED * KEEPER_SCALE, dt);
+        if (k && k.dive && SO.phase !== 'flight') {
+            moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED * KEEPER_SCALE, dt);
+        }
     }
 
     /* ==========================================================================
@@ -4995,16 +5213,16 @@ import {
                stack resolves to the human's player, not to the defender pressed
                against them (the CPU player is not draggable, so picking it makes
                the touch look dead). */
-            const own = p.team === 'you';
-            const bestOwn = best && best.team === 'you';
+            const own = p.team === myTeam();
+            const bestOwn = best && best.team === myTeam();
             if (bestOwn && !own) return;
             if (d < bd || (!bestOwn && own)) { bd = d; best = p; }
         });
         return best;
     }
 
-    const humanAttacking = () => PLAY && PLAY.atk === 'you';
-    const humanDefending = () => PLAY && PLAY.atk === 'cpu';
+    const humanAttacking = () => PLAY && PLAY.atk === myTeam();
+    const humanDefending = () => PLAY && PLAY.atk === opponentTeam();
 
     function onDown(e) {
         if (rotateHold || topScreen() || state.paused) return;
@@ -5017,9 +5235,34 @@ import {
 
         /* --- §10 shootout gestures --- */
         if (SO.active) {
-            if (SO.phase === 'aim' && SO.turn === 'you') drag.kind = 'so-aim';
-            else if (SO.phase === 'dive' && SO.turn === 'cpu') drag.kind = 'so-dive';
-            else drag.kind = null;
+            if (SO.phase === 'aim' && SO.turn === myTeam()) {
+                drag.kind = 'so-aim';
+                const spot = soSpot();
+                const target = { x: clamp(pt.x, 2, 98), y: soGoal().y };
+                soAimLine.setEnds(spot, target);
+                const onTarget = isOnTarget(target.x, soGoal().x, GOAL_HALF_WIDTH);
+                soAimLine.material.color.setHex(onTarget ? COL.you : 0xff2d87);
+                soAimLine.visible = true;
+                soTargetMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
+                soTargetMarker.material.color.setHex(onTarget ? COL.you : 0xff2d87);
+                soTargetMarker.visible = true;
+                SO.aim = target;
+            } else if (SO.phase === 'dive' && SO.turn === opponentTeam()) {
+                drag.kind = 'so-dive';
+                const k = soDefKeeper();
+                if (k) {
+                    const target = calcSoDiveTarget(pt, { x: drag.x0, y: drag.y0 }, k);
+                    soDiveLine.setEnds({ x: k.x, y: k.y }, target);
+                    soDiveLine.material.color.setHex(COL.gkYou);
+                    soDiveLine.visible = true;
+                    diveMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
+                    diveMarker.material.color.setHex(COL.gkYou);
+                    diveMarker.visible = true;
+                    k.queuedDive = target;
+                }
+            } else {
+                drag.kind = null;
+            }
             return;
         }
         /* §17.b — a gesture only means anything while the decision window is open.
@@ -5046,10 +5289,10 @@ import {
                same end. Seeding this with the touch point is what made a stroke
                drawn from the carrier's chest ride a body-width off his own ball. */
             drag.path = [ballPoint()];
-        } else if (p && p.team === 'you' && p.role === 'keeper') {
+        } else if (p && p.team === myTeam() && p.role === 'keeper') {
             /* the human's keeper: a pre-dive, or a dive during a shot */
             drag.kind = 'keeper'; drag.player = p;
-        } else if (p && p.team === 'you') {
+        } else if (p && p.team === myTeam()) {
             drag.kind = 'move'; drag.player = p; p.selected = true;
         } else if (humanAttacking() && !p) {
             /* a bare tap on the turf nobody is standing on. There is no gesture
@@ -5124,18 +5367,28 @@ import {
                 drag.player.queuedDive = target;
                 drag.player.dive = null;
             }
-        } else if (drag.kind === 'so-aim' && drag.moved > TAP_SLOP * 0.5) {
-            /* no aim guide: the shot is the player's read, drawn blind */
-            aimLine.visible = false;
-            shotLine.visible = false;
-        } else if (drag.kind === 'so-dive' && drag.moved > TAP_SLOP * 0.5) {
-            /* The dive belongs to the keeper on the line — the defending side's,
-               which is *your* keeper exactly because the shootout only opens this
-               gesture when the CPU is the kicker. Taken from soDefKeeper() rather
-               than hard-coded to 'you' so the two can never drift apart. */
+        } else if (drag.kind === 'so-aim') {
+            const spot = soSpot();
+            const target = { x: clamp(pt.x, 2, 98), y: soGoal().y };
+            soAimLine.setEnds(spot, target);
+            const onTarget = isOnTarget(target.x, soGoal().x, GOAL_HALF_WIDTH);
+            soAimLine.material.color.setHex(onTarget ? COL.you : 0xff2d87);
+            soAimLine.visible = true;
+            soTargetMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
+            soTargetMarker.material.color.setHex(onTarget ? COL.you : 0xff2d87);
+            soTargetMarker.visible = true;
+            SO.aim = target;
+        } else if (drag.kind === 'so-dive') {
             const k = soDefKeeper();
             if (k) {
-                const target = { x: clamp(clampDiveX(pt.x, k.x), 4, 96), y: k.y };
+                const target = calcSoDiveTarget(pt, { x: drag.x0, y: drag.y0 }, k);
+                soDiveLine.setEnds({ x: k.x, y: k.y }, target);
+                soDiveLine.material.color.setHex(COL.gkYou);
+                soDiveLine.visible = true;
+                diveMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
+                diveMarker.material.color.setHex(COL.gkYou);
+                diveMarker.visible = true;
+                k.queuedDive = target;
             }
         }
     }
@@ -5165,6 +5418,10 @@ import {
         if (dist(c, PLAY.goal) > SHOT_RANGE) {
             log('Shooting only works inside ' + SHOT_RANGE + ' units of the goal.', '');
             return false;
+        }
+        if (pvpActive && pvpRole === 'guest') {
+            shootFromButton();
+            return true;
         }
         return queueShot();
     }
@@ -5256,6 +5513,22 @@ import {
                        what makes an angle an upgrade of a pass into a shot rather
                        than the replacement of one. */
                     const queued = queuePass(landed.end, landed, t ? true : false);
+                    if (pvpActive && pvpRole === 'guest') {
+                        if (t) {
+                            pvp.sendInput({
+                                type: 'shot',
+                                target: landed.end,
+                                power: landed.power
+                            });
+                        } else {
+                            pvp.sendInput({
+                                type: 'pass',
+                                to: landed.end,
+                                stroke: landed,
+                                receiverIdx: lockedReceiver ? allPlayers.indexOf(lockedReceiver) : -1
+                            });
+                        }
+                    }
                     if (t) {
                         log(isOnTarget(t.x, PLAY.goal.x, GOAL_HALF_WIDTH)
                             ? 'Angle set: the ball goes down the drawn line — SHOOT to strike it.'
@@ -5280,10 +5553,16 @@ import {
                     lastTap = { t: now, x: pt.x, y: pt.y };
                     /* a first tap nominates the nearest teammate as the receiver */
                     if (PLAY && humanAttacking()) {
-                        const near = teamOutfield('you')
+                        const near = teamOutfield(myTeam())
                             .filter(m => m !== PLAY.carrier)
                             .sort((a, b) => dist(a, { x: pt.x, y: pt.y }) - dist(b, { x: pt.x, y: pt.y }))[0];
-                        if (near) { PLAY.receiver = near; PLAY.receiver.duty = 'receiver'; }
+                        if (near) {
+                            PLAY.receiver = near;
+                            PLAY.receiver.duty = 'receiver';
+                            if (pvpActive && pvpRole === 'guest') {
+                                pvp.sendInput({ type: 'receiver', idx: allPlayers.indexOf(near) });
+                            }
+                        }
                     }
                 }
             }
@@ -5295,6 +5574,13 @@ import {
                    this player will end up, and the step itself waits for the
                    window to close so it fires alongside everybody else's. */
                 setIntent(player, dest);
+                if (pvpActive && pvpRole === 'guest') {
+                    pvp.sendInput({
+                        type: 'intent',
+                        idx: allPlayers.indexOf(player),
+                        dest
+                    });
+                }
                 /* the straight pooled path replaces the freehand stroke the same
                    instant it is queued, so a run is never drawn twice. */
                 moveCurve.visible = false;
@@ -5314,6 +5600,9 @@ import {
                     player.queuedDive = target;
                     player.dive = null;
                 }
+                if (pvpActive && pvpRole === 'guest') {
+                    pvp.sendInput({ type: 'dive', target });
+                }
                 log('Keeper set to ' + (target.x < 50 ? 'their left' : 'their right') + '.', '');
             } else {
                 player.held = false;
@@ -5328,18 +5617,24 @@ import {
             const c = PLAY && PLAY.carrier;
             if (c && moved <= TAP_SLOP && dist(c, PLAY.goal) <= SHOT_RANGE) tryShootAt();
         } else if (kind === 'so-aim') {
-            aimLine.visible = false;
-            shotLine.visible = false;
-            if (moved > TAP_SLOP * 0.5) {
-                soSetAim({ x: clamp(pt.x, 0, 100), y: soGoal().y });
-                soCommitAim();
+            soAimLine.visible = false;
+            soTargetMarker.visible = false;
+            const target = { x: clamp(pt.x, 2, 98), y: soGoal().y };
+            soSetAim(target);
+            soCommitAim();
+            if (pvpActive && pvpRole === 'guest') {
+                pvp.sendInput({ type: 'so-aim', target });
             }
         } else if (kind === 'so-dive') {
-            diveLine.visible = false;
+            soDiveLine.visible = false;
             diveMarker.visible = false;
             const k = soDefKeeper();
-            if (k && moved > TAP_SLOP * 0.5) {
-                soCommitDive({ x: clamp(pt.x, 4, 96), y: k.y });
+            if (k) {
+                const target = calcSoDiveTarget(pt, { x: drag.x0, y: drag.y0 }, k);
+                soCommitDive(target);
+                if (pvpActive && pvpRole === 'guest') {
+                    pvp.sendInput({ type: 'so-dive', target });
+                }
             }
         }
         refreshRings();
@@ -5347,11 +5642,11 @@ import {
 
     function updateCursor() {
         /* In the shootout only the two human gestures are "active": drawing your
-           own kick, and drawing your keeper's dive against the CPU's. While the
+           own kick, and drawing your keeper's dive against the opponent's. While the
            opponent's keeper is setting off there is nothing to drag, so the
            crosshair would be a promise the input cannot keep. */
         const active = SO.active
-            ? (SO.phase === 'aim' && SO.turn === 'you') || (SO.phase === 'dive' && SO.turn === 'cpu')
+            ? (SO.phase === 'aim' && SO.turn === myTeam()) || (SO.phase === 'dive' && SO.turn === opponentTeam())
             : !!(state.phase === 'play' && PLAN && !PLAN.armed);
         canvas.style.cursor = drag.kind ? 'grabbing' : (active ? 'crosshair' : 'default');
     }
@@ -5398,7 +5693,7 @@ import {
        so this budget is thinking time and nothing else — changing it can never
        change the length of a match. rules.js keeps its own PLAN_WINDOW for the
        rulebook's property tests; the engine reads `planWindow`. */
-    const PLAN_WINDOW_STEPS = [3, 5, 10, 20];
+    const PLAN_WINDOW_STEPS = [3, 5, 10, 15, 20];
     const PLAN_WINDOW_DEFAULT = 10;
     let planWindow = PLAN_WINDOW_DEFAULT;
     const PLAN_CPU_BEAT = 0.9;    // the CPU quietly "clicks Done" about here
@@ -5479,6 +5774,8 @@ import {
         }
         PLAN = newPlan();
         clearIntents();
+        hostDone = false;
+        guestDone = false;
         if (ui.done) ui.done.hidden = false;
         /* A dive lives for exactly one execution, so both keepers start clean —
            this is what keeps a queued dive from leaking into the next window. */
@@ -5520,26 +5817,13 @@ import {
            beginExecution() the moment the ball is away. */
         const c = PLAY && PLAY.carrier;
         if (c && !AIM.move) setIntent(c, { x: c.x, y: c.y });
-        if (team === 'you' && !silent) log('Queued: pass to ' + (to.label || 'space') + '.', '');
+        if (team === myTeam() && !silent) log('Queued: pass to ' + (to.label || 'space') + '.', '');
         return true;
     }
 
-    /** Stack a shot. The button, Space and S, and the double-tap all land here.
-        §12.d — the shot leaves along the angle that was DRAWN. The drag sets the
-        line and this fires on it: where that line crosses the byline is the
-        target, so a line drawn at the near post goes to the near post and a line
-        drawn across the face misses the far side. The target itself comes from
-        drawnShotRay(), which ALWAYS answers with a point ON the drawn line —
-        where it meets the byline, or its own end when it has no byline answer —
-        so this call can no longer invent a line of its own. Only a gesture with
-        no line at all (a bare button press, Space, S) falls back to the post the
-        keeper is furthest from. Dead centre used to be that default and it was
-        the worst answer available: keeperHome() parks the keeper on x = 50, so a
-        bare button press flew straight at him and the save-test geometry did the
-        rest (the test is the distance from the keeper's dive target to the ball's
-        flight path, and the flight path passed through him). */
+    /** Stack a shot. The button, Space and S, and the double-tap all land here. */
     function queueShot() {
-        if (!PLAN || PLAN.armed || !PLAY || PLAY.atk !== 'you') return false;
+        if (!PLAN || PLAN.armed || !PLAY || PLAY.atk !== myTeam()) return false;
         const c = PLAY.carrier;
         if (!c) return false;
         if (ball.mode !== 'held' || ball.holder !== c) return false;
@@ -5548,17 +5832,13 @@ import {
             return false;
         }
         const drawn = drawnShotRay();
-        const keeper = keeperOf('cpu');
+        const keeper = keeperOf(opponentTeam());
         const side = (keeper && keeper.x > PLAY.goal.x) ? -1 : 1;
-        /* §12.d — the strike carries the length of the line that is still held on
-           the grass, so SHOOT and the double-tap both fire a ball as hard as the
-           gesture that set the angle earned. The fallback is a shot with NO line
-           — a bare button press, Space, S — and a line that was never drawn has
-           no power to carry, so that one is struck at exactly SHOT_SPEED. */
-        PLAN.shot.you = drawn
+        const team = myTeam();
+        PLAN.shot[team] = drawn
             ? { x: drawn.x, y: drawn.y, power: AIM.pass ? AIM.pass.power : 0 }
             : { x: clamp(PLAY.goal.x + side * GOAL_HALF_WIDTH * 0.72, 2, 98), y: PLAY.goal.y, power: 0 };
-        PLAN.pass.you = null;
+        PLAN.pass[team] = null;
         setIntent(c, { x: c.x, y: c.y });
         log(drawn
             ? (isOnTarget(drawn.x, PLAY.goal.x, GOAL_HALF_WIDTH)
@@ -5570,7 +5850,7 @@ import {
 
     /** The CPU's half of the window: read the board once, then stack its moves. */
     function planForCpu() {
-        if (!PLAN || PLAN.cpuPlanned) return;
+        if (pvpActive || !PLAN || PLAN.cpuPlanned) return;
         PLAN.cpuPlanned = true;
         const rng = mulberry32(hashSeed(state.seed, state.half, Math.floor(state.halfT * 60) + 7));
 
@@ -5748,8 +6028,10 @@ import {
         PLAN.t -= dt;
         if (PLAN.t <= 0) {
             PLAN.t = 0;
-            if (!PLAN.cpuPlanned) planForCpu();
-            aiPlanForHuman();
+            if (!pvpActive) {
+                if (!PLAN.cpuPlanned) planForCpu();
+                aiPlanForHuman();
+            }
             beginExecution();
         }
     }
@@ -5757,6 +6039,20 @@ import {
     /** MOVES DONE — the human's half of the window is closed and the board runs. */
     function humanDone() {
         if (rotateHold || !PLAN || PLAN.armed) return;
+        if (pvpActive) {
+            if (pvpRole === 'guest') {
+                pvp.sendInput({ type: 'done' });
+                if (ui.done) ui.done.hidden = true;
+                return;
+            } else if (pvpRole === 'host') {
+                hostDone = true;
+                if (ui.done) ui.done.hidden = true;
+                if (guestDone || PLAN.t <= 0) {
+                    beginExecution();
+                }
+                return;
+            }
+        }
         /* the CPU has to be ready too, and then a silent human side gets its own
            automatic plan — done in that order, so the auto-plan can read where
            the CPU's ball is going before it reacts to it */
@@ -5954,6 +6250,14 @@ import {
        § 18. UPDATE + RENDER
        ========================================================================== */
     function update(dt) {
+        if (pvpActive && pvpRole === 'guest') {
+            allPlayers.forEach(p => { animatePlayer(p, dt); syncToMesh(p); });
+            ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
+            ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
+            updateCursor();
+            tutorTick(dt);
+            return;
+        }
         if (state.phase === 'restart') {
             state.phaseT += dt;
             /* walk into shape at a jog, and leave anyone the human has already
@@ -5999,7 +6303,10 @@ import {
             }
             if (PLAY) {
                 if (planning) planUpdate(dt);
-                else { cpuThink(dt); simPlayers(dt); }
+                else {
+                    if (!pvpActive) cpuThink(dt);
+                    simPlayers(dt);
+                }
             }
             stepBall(dt);
         } else if (state.phase === 'shootout') {
@@ -6030,8 +6337,8 @@ import {
     function canShootNow() {
         if (rotateHold || SO.active || state.paused) return false;
         if (state.phase !== 'play' || !PLAN || PLAN.armed) return false;
-        if (PLAN.shot.you) return false;
-        if (!topScreen() && PLAY && PLAY.atk === 'you' && PLAY.carrier) {
+        if (PLAN.shot[myTeam()]) return false;
+        if (!topScreen() && PLAY && PLAY.atk === myTeam() && PLAY.carrier) {
             return ball.mode === 'held' && ball.holder === PLAY.carrier
                 && dist(PLAY.carrier, PLAY.goal) <= SHOT_RANGE;
         }
@@ -6051,6 +6358,18 @@ import {
         human attacks, the same call the double-tap makes. Space and S do too. */
     function shootFromButton() {
         if (!canShootNow()) return;
+        if (pvpActive && pvpRole === 'guest') {
+            const drawn = drawnShotRay();
+            const keeper = keeperOf(opponentTeam());
+            const side = (keeper && keeper.x > PLAY.goal.x) ? -1 : 1;
+            const target = drawn
+                ? { x: drawn.x, y: drawn.y, power: AIM.pass ? AIM.pass.power : 0 }
+                : { x: clamp(PLAY.goal.x + side * GOAL_HALF_WIDTH * 0.72, 2, 98), y: PLAY.goal.y, power: 0 };
+            pvp.sendInput({ type: 'shot', target, power: target.power });
+            log('Queued: shot at goal.', '');
+            refreshShootButton();
+            return;
+        }
         queueShot();
         refreshShootButton();
     }
@@ -6363,7 +6682,608 @@ import {
         }
         updateHud();
         placeCamera();
+        if (pvpActive && pvpRole === 'host') {
+            broadcastPvpState(now);
+        }
         renderer.render(scene, camera);
+    }
+
+    /* ==========================================================================
+       § 18.c ONLINE 1v1 PvP NETWORKING & CONTROLS
+       ========================================================================== */
+    function broadcastPvpState(now) {
+        if (!pvp.isConnected) return;
+        if (now - lastPvpBroadcast < 28) return; // ~35 Hz
+        lastPvpBroadcast = now;
+
+        const payload = {
+            phase: state.phase,
+            paused: state.paused,
+            half: state.half,
+            halfT: state.halfT,
+            pendingHalf: state.pendingHalf,
+            humanScore: state.humanScore,
+            cpuScore: state.cpuScore,
+            firstHalfStoppage: state.firstHalfStoppage,
+            possession: state.possession,
+            planWindow: planWindow,
+            halfLength: halfLength,
+            ball: {
+                x: ball.x,
+                y: ball.y,
+                h: ball.h,
+                s: ball.s,
+                mode: ball.mode,
+                holderIdx: ball.holder ? allPlayers.indexOf(ball.holder) : -1,
+                cdx: ball.cdx,
+                cdy: ball.cdy,
+                vx: ball.vx,
+                vy: ball.vy
+            },
+            players: allPlayers.map(p => ({
+                x: p.x,
+                y: p.y,
+                yaw: p.yaw,
+                hasBall: p.hasBall,
+                duty: p.duty,
+                controlled: p.controlled,
+                dive: p.dive ? { x: p.dive.x, y: p.dive.y } : null,
+                held: p.held
+            })),
+            play: PLAY ? {
+                atk: PLAY.atk,
+                def: PLAY.def,
+                carrierIdx: PLAY.carrier ? allPlayers.indexOf(PLAY.carrier) : -1,
+                receiverIdx: PLAY.receiver ? allPlayers.indexOf(PLAY.receiver) : -1
+            } : null,
+            plan: PLAN ? {
+                armed: PLAN.armed,
+                t: PLAN.t,
+                pass: PLAN.pass,
+                shot: PLAN.shot
+            } : null,
+            shootout: SO.active ? {
+                active: SO.active,
+                phase: SO.phase,
+                turn: SO.turn,
+                t: SO.t,
+                scoreYou: SO.you,
+                scoreCpu: SO.cpu,
+                takenYou: SO.takenYou,
+                takenCpu: SO.takenCpu,
+                round: SO.round,
+                aim: SO.aim,
+                dive: SO.dive,
+                result: SO.result,
+                from: SO.from,
+                to: SO.to
+            } : null
+        };
+        pvp.sendState(payload);
+    }
+
+    function handleRemoteState(data) {
+        if (!data) return;
+        state.phase = data.phase;
+        state.paused = data.paused;
+        state.half = data.half;
+        state.halfT = data.halfT;
+        state.pendingHalf = data.pendingHalf;
+        state.humanScore = data.humanScore;
+        state.cpuScore = data.cpuScore;
+        state.firstHalfStoppage = data.firstHalfStoppage;
+        state.possession = data.possession;
+
+        // Sync host room match settings
+        if (data.planWindow && data.planWindow !== planWindow) {
+            setPlanWindow(data.planWindow);
+        }
+        if (data.halfLength && data.halfLength !== halfLength) {
+            setHalfLength(data.halfLength);
+        }
+
+        // Sync ball
+        if (data.ball) {
+            ball.x = data.ball.x;
+            ball.y = data.ball.y;
+            ball.h = data.ball.h;
+            ball.s = data.ball.s;
+            ball.mode = data.ball.mode;
+            ball.holder = data.ball.holderIdx >= 0 ? allPlayers[data.ball.holderIdx] : null;
+            ball.cdx = data.ball.cdx;
+            ball.cdy = data.ball.cdy;
+            ball.vx = data.ball.vx;
+            ball.vy = data.ball.vy;
+        }
+
+        // Sync players
+        if (data.players && data.players.length === allPlayers.length) {
+            data.players.forEach((sp, i) => {
+                const p = allPlayers[i];
+                p.x = sp.x;
+                p.y = sp.y;
+                p.yaw = sp.yaw;
+                p.hasBall = sp.hasBall;
+                p.duty = sp.duty;
+                p.controlled = sp.controlled;
+                p.held = sp.held;
+                if (sp.dive) {
+                    p.dive = { x: sp.dive.x, y: sp.dive.y };
+                } else {
+                    p.dive = null;
+                }
+                if (p.mesh) {
+                    syncToMesh(p);
+                }
+            });
+        }
+
+        // Sync PLAY
+        if (data.play) {
+            if (!PLAY) {
+                PLAY = {
+                    atk: data.play.atk,
+                    def: data.play.def,
+                    carrier: data.play.carrierIdx >= 0 ? allPlayers[data.play.carrierIdx] : null,
+                    receiver: data.play.receiverIdx >= 0 ? allPlayers[data.play.receiverIdx] : null,
+                    goal: goalFor(data.play.atk),
+                    own: ownGoal(data.play.atk),
+                    keeper: keeperOf(data.play.def),
+                    cpuThink: 999
+                };
+            } else {
+                PLAY.atk = data.play.atk;
+                PLAY.def = data.play.def;
+                PLAY.carrier = data.play.carrierIdx >= 0 ? allPlayers[data.play.carrierIdx] : null;
+                PLAY.receiver = data.play.receiverIdx >= 0 ? allPlayers[data.play.receiverIdx] : null;
+                PLAY.goal = goalFor(data.play.atk);
+                PLAY.own = ownGoal(data.play.atk);
+                PLAY.keeper = keeperOf(data.play.def);
+            }
+        }
+
+        // Sync PLAN
+        if (data.plan) {
+            const wasOpen = !!(PLAN && !PLAN.armed);
+            const isOpen = !data.plan.armed;
+            if (!PLAN) {
+                PLAN = newPlan();
+            }
+            PLAN.armed = data.plan.armed;
+            PLAN.t = data.plan.t;
+            if (isOpen && !wasOpen) {
+                clearIntents();
+                if (ui.done) ui.done.hidden = false;
+            } else if (!isOpen && wasOpen) {
+                if (ui.done) ui.done.hidden = true;
+                hideOverlays();
+            }
+            if (ui.planClock) {
+                const secs = Math.max(0, Math.ceil(PLAN.t - 1e-6));
+                setText(ui.planClock, String(secs));
+            }
+        } else {
+            if (PLAN && !PLAN.armed && ui.done) ui.done.hidden = true;
+            PLAN = null;
+        }
+
+        // Sync shootout
+        if (data.shootout) {
+            const wasActive = SO.active;
+            SO.active = data.shootout.active;
+            SO.phase = data.shootout.phase;
+            SO.turn = data.shootout.turn;
+            SO.t = data.shootout.t;
+            SO.you = data.shootout.scoreYou;
+            SO.cpu = data.shootout.scoreCpu;
+            SO.takenYou = data.shootout.takenYou;
+            SO.takenCpu = data.shootout.takenCpu;
+            SO.round = data.shootout.round;
+            SO.aim = data.shootout.aim;
+            SO.dive = data.shootout.dive;
+            SO.result = data.shootout.result;
+            SO.from = data.shootout.from;
+            SO.to = data.shootout.to;
+            if (!wasActive && SO.active) {
+                setPenaltyView(true);
+            }
+            if (ui.soTimer) {
+                const rem = Math.max(0, SO.t);
+                ui.soTimer.textContent = rem.toFixed(1) + 's';
+                ui.soTimer.classList.toggle('urgent', rem <= 1.0);
+                ui.soTimer.style.display = '';
+            }
+        } else if (SO.active) {
+            SO.active = false;
+            setPenaltyView(false);
+        }
+
+        // Update score & half UI
+        bus.emit('score');
+        bus.emit('half');
+        refreshRings();
+        refreshShootButton();
+    }
+
+    function handleRemoteInput(input) {
+        if (!input || !input.type) return;
+        if (input.type === 'intent') {
+            const p = allPlayers[input.idx];
+            if (p && p.team === 'cpu') {
+                setIntent(p, input.dest);
+            }
+        } else if (input.type === 'receiver') {
+            const p = allPlayers[input.idx];
+            if (p && p.team === 'cpu' && PLAY) {
+                PLAY.receiver = p;
+                p.duty = 'receiver';
+            }
+        } else if (input.type === 'pass') {
+            if (PLAN && !PLAN.armed) {
+                PLAN.pass.cpu = {
+                    x: input.to.x,
+                    y: input.to.y,
+                    power: input.stroke ? input.stroke.power : 0,
+                    air: input.stroke ? input.stroke.air === true : false
+                };
+                PLAN.shot.cpu = null;
+                if (input.receiverIdx !== undefined && input.receiverIdx >= 0) {
+                    const r = allPlayers[input.receiverIdx];
+                    if (r && PLAY) {
+                        PLAY.receiver = r;
+                        r.duty = 'receiver';
+                        setIntent(r, input.to);
+                    }
+                }
+            }
+        } else if (input.type === 'shot') {
+            if (PLAN && !PLAN.armed && PLAY && PLAY.atk === 'cpu') {
+                PLAN.shot.cpu = {
+                    x: input.target.x,
+                    y: input.target.y,
+                    power: input.power || 0
+                };
+                PLAN.pass.cpu = null;
+            }
+        } else if (input.type === 'dive') {
+            const k = keeperOf('cpu');
+            if (k) {
+                k.queuedDive = input.target;
+                k.held = true;
+            }
+        } else if (input.type === 'done') {
+            guestDone = true;
+            if (hostDone || (PLAN && PLAN.t <= 0)) {
+                beginExecution();
+            }
+        } else if (input.type === 'so-aim') {
+            if (SO.active && SO.phase === 'aim' && SO.turn === 'cpu') {
+                soSetAim(input.target);
+                soCommitAim();
+            }
+        } else if (input.type === 'so-dive') {
+            if (SO.active && SO.phase === 'dive' && SO.turn === 'you') {
+                soCommitDive(input.target);
+            }
+        }
+    }
+
+    function spawnFloatingEmoji(emoji, isSelf = true) {
+        const layer = document.getElementById('emoji-layer');
+        if (!layer) return;
+        const bubble = document.createElement('div');
+        bubble.className = 'floating-emoji';
+        bubble.textContent = emoji;
+        const leftPercent = isSelf ? (25 + Math.random() * 20) : (55 + Math.random() * 20);
+        bubble.style.left = leftPercent + '%';
+        bubble.style.bottom = '110px';
+        layer.appendChild(bubble);
+        bubble.addEventListener('animationend', () => bubble.remove());
+        setTimeout(() => { if (bubble.parentNode) bubble.remove(); }, 2500);
+    }
+
+    function startPvpGame(role) {
+        pvpActive = true;
+        pvpRole = role;
+        while (topScreen()) popScreen();
+
+        const badge = document.getElementById('hud-pvp-badge');
+        const roleText = document.getElementById('pvp-role-text');
+        const pingText = document.getElementById('pvp-ping-text');
+        const emojiDock = document.getElementById('emoji-dock');
+
+        if (badge) badge.hidden = false;
+        if (roleText) roleText.textContent = role === 'host' ? 'HOST' : 'GUEST';
+        if (pingText) pingText.textContent = '0ms';
+        if (emojiDock) emojiDock.hidden = false;
+
+        banner('ONLINE MATCH CONNECTED', CSS.goal);
+        log('Connected to PvP match as ' + role.toUpperCase() + '.', 'goal');
+
+        if (role === 'host') {
+            beginMatch();
+        } else {
+            state.phase = 'play';
+            state.matchMode = 'quick';
+            hideOverlays();
+            Sfx.unlock();
+            Sfx.whistle();
+        }
+    }
+
+    function endPvpGame() {
+        pvpActive = false;
+        pvpRole = null;
+        pvp.disconnect();
+
+        const badge = document.getElementById('hud-pvp-badge');
+        const emojiDock = document.getElementById('emoji-dock');
+        if (badge) badge.hidden = true;
+        if (emojiDock) emojiDock.hidden = true;
+    }
+
+    function setupPvpUI() {
+        // Tab switching
+        const tabCustom = document.getElementById('tab-btn-custom');
+        const tabOpen = document.getElementById('tab-btn-open');
+        const paneCustom = document.getElementById('pane-custom');
+        const paneOpen = document.getElementById('pane-open');
+
+        if (tabCustom && tabOpen && paneCustom && paneOpen) {
+            tabCustom.addEventListener('click', () => {
+                tabCustom.classList.add('active');
+                tabCustom.setAttribute('aria-selected', 'true');
+                tabOpen.classList.remove('active');
+                tabOpen.setAttribute('aria-selected', 'false');
+                paneCustom.hidden = false;
+                paneOpen.hidden = true;
+            });
+            tabOpen.addEventListener('click', () => {
+                tabOpen.classList.add('active');
+                tabOpen.setAttribute('aria-selected', 'true');
+                tabCustom.classList.remove('active');
+                tabCustom.setAttribute('aria-selected', 'false');
+                paneOpen.hidden = false;
+                paneCustom.hidden = true;
+            });
+        }
+
+        const setStatus = (msg, isConnected = false) => {
+            const statusMsg = document.getElementById('pvp-status-msg');
+            const statusDot = document.getElementById('pvp-status-dot');
+            if (statusMsg) statusMsg.textContent = msg;
+            if (statusDot) {
+                statusDot.classList.toggle('online', isConnected);
+            }
+        };
+
+        // Custom room handlers
+        const btnCreate = document.getElementById('btn-pvp-create');
+        const createIdle = document.getElementById('pvp-create-idle');
+        const createActive = document.getElementById('pvp-create-active');
+        const codeDisplay = document.getElementById('pvp-room-code-val');
+        const btnCancelHost = document.getElementById('btn-pvp-cancel-host');
+
+        if (btnCreate) {
+            btnCreate.addEventListener('click', async () => {
+                // Apply host custom room match settings
+                const timerSel = document.getElementById('pvp-setting-timer');
+                const lengthSel = document.getElementById('pvp-setting-length');
+                const passInput = document.getElementById('pvp-create-pass');
+                const passVal = passInput ? passInput.value.trim() : '';
+
+                if (timerSel) {
+                    const timerVal = parseInt(timerSel.value, 10);
+                    if (!isNaN(timerVal) && timerVal > 0) setPlanWindow(timerVal);
+                }
+                if (lengthSel) {
+                    const lengthVal = parseInt(lengthSel.value, 10);
+                    if (!isNaN(lengthVal) && lengthVal > 0) setHalfLength(lengthVal);
+                }
+                const summaryChip = document.getElementById('pvp-room-settings-summary');
+                if (summaryChip) {
+                    const totalMin = Math.round((halfLength * 2) / 60);
+                    summaryChip.textContent = `${planWindow}s Turns · ${totalMin}:00 Min Match${passVal ? ' · 🔒 Password' : ''}`;
+                }
+
+                btnCreate.disabled = true;
+                setStatus('Creating room...');
+                const code = await pvp.createCustomRoom(undefined, passVal);
+                if (code) {
+                    if (createIdle) createIdle.hidden = true;
+                    if (createActive) createActive.hidden = false;
+                    if (codeDisplay) codeDisplay.textContent = code;
+                    setStatus('Room created! Waiting for opponent to connect...');
+                } else {
+                    btnCreate.disabled = false;
+                    setStatus('Failed to create room. Please try again.');
+                }
+            });
+        }
+
+        if (btnCancelHost) {
+            btnCancelHost.addEventListener('click', () => {
+                pvp.disconnect();
+                if (createActive) createActive.hidden = true;
+                if (createIdle) createIdle.hidden = false;
+                if (btnCreate) btnCreate.disabled = false;
+                setStatus('Room cancelled. Ready');
+            });
+        }
+
+        const btnCopy = document.getElementById('btn-pvp-copy-code');
+        if (btnCopy) {
+            btnCopy.addEventListener('click', () => {
+                if (codeDisplay && codeDisplay.textContent) {
+                    navigator.clipboard.writeText(codeDisplay.textContent);
+                    btnCopy.textContent = 'Copied!';
+                    setTimeout(() => { btnCopy.textContent = 'Copy Code'; }, 2000);
+                }
+            });
+        }
+
+        const btnJoin = document.getElementById('btn-pvp-join');
+        const inputJoin = document.getElementById('pvp-join-input');
+        const inputPass = document.getElementById('pvp-join-pass');
+        if (btnJoin && inputJoin) {
+            btnJoin.addEventListener('click', async () => {
+                const code = (inputJoin.value || '').trim();
+                const passVal = inputPass ? (inputPass.value || '').trim() : '';
+                if (code.length < 4) {
+                    setStatus('Please enter a 4-digit code.');
+                    return;
+                }
+                btnJoin.disabled = true;
+                setStatus('Connecting to room ' + code + '...');
+                try {
+                    const ok = await pvp.joinCustomRoom(code, passVal);
+                    if (!ok) {
+                        btnJoin.disabled = false;
+                    }
+                } catch (err) {
+                    btnJoin.disabled = false;
+                    setStatus(err.message || ('Failed to join room ' + code));
+                }
+            });
+            inputJoin.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') btnJoin.click();
+            });
+            if (inputPass) {
+                inputPass.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') btnJoin.click();
+                });
+            }
+        }
+
+        // Open matchmaking handlers
+        const btnSearchOpen = document.getElementById('btn-pvp-search-open');
+        const openIdle = document.getElementById('pvp-open-idle');
+        const openSearching = document.getElementById('pvp-open-searching');
+        const searchMsg = document.getElementById('pvp-search-msg');
+        const btnCancelSearch = document.getElementById('btn-pvp-cancel-search');
+        const openNotFound = document.getElementById('pvp-open-not-found');
+        const btnHostOpen = document.getElementById('btn-pvp-host-open');
+
+        if (btnSearchOpen) {
+            btnSearchOpen.addEventListener('click', async () => {
+                btnSearchOpen.disabled = true;
+                if (openIdle) openIdle.hidden = true;
+                if (openNotFound) openNotFound.hidden = true;
+                if (openSearching) openSearching.hidden = false;
+                if (searchMsg) searchMsg.textContent = 'Scanning public lobbies...';
+                setStatus('Searching for online players...');
+
+                const match = await pvp.findOpenMatch((statusMsgText) => {
+                    if (searchMsg) searchMsg.textContent = statusMsgText;
+                });
+
+                if (match) {
+                    setStatus('Opponent found! Connecting...', true);
+                } else {
+                    btnSearchOpen.disabled = false;
+                    if (openSearching) openSearching.hidden = true;
+                    if (openNotFound) openNotFound.hidden = false;
+                    setStatus('No open match found. You can host one below!');
+                }
+            });
+        }
+
+        if (btnCancelSearch) {
+            btnCancelSearch.addEventListener('click', () => {
+                pvp.disconnect();
+                if (openSearching) openSearching.hidden = true;
+                if (openIdle) openIdle.hidden = false;
+                if (btnSearchOpen) btnSearchOpen.disabled = false;
+                setStatus('Search cancelled. Ready');
+            });
+        }
+
+        if (btnHostOpen) {
+            btnHostOpen.addEventListener('click', async () => {
+                btnHostOpen.disabled = true;
+                if (openNotFound) openNotFound.hidden = true;
+                if (openSearching) openSearching.hidden = false;
+                if (searchMsg) searchMsg.textContent = 'Hosting public match... Waiting for opponent to join.';
+                setStatus('Hosting public match...');
+                const ok = await pvp.hostOpenMatch();
+                if (!ok) {
+                    btnHostOpen.disabled = false;
+                    if (openSearching) openSearching.hidden = true;
+                    if (openIdle) openIdle.hidden = false;
+                    setStatus('All public slots occupied. Try a private room.');
+                }
+            });
+        }
+
+        // Close / Back button returns to main menu
+        const btnClose = document.getElementById('btn-pvp-close');
+        if (btnClose) {
+            btnClose.addEventListener('click', () => {
+                pvp.disconnect();
+                while (topScreen()) popScreen();
+                state.phase = 'idle';
+                pushScreen('menu', { focus: '#btn-start' });
+            });
+        }
+
+        // Quick emoji reactions
+        const emojiButtons = document.querySelectorAll('.btn-emoji');
+        emojiButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const emoji = btn.getAttribute('data-emoji');
+                if (!emoji) return;
+                spawnFloatingEmoji(emoji, true);
+                if (pvpActive) {
+                    pvp.sendEmoji(emoji);
+                }
+            });
+        });
+
+        // PeerJS Network event listeners
+        pvp.on('connected', () => {
+            setStatus('Connected!', true);
+            startPvpGame(pvp.role);
+        });
+
+        pvp.on('state', stateData => {
+            if (pvpActive && pvpRole === 'guest') {
+                handleRemoteState(stateData);
+            }
+        });
+
+        pvp.on('input', inputData => {
+            if (pvpActive && pvpRole === 'host') {
+                handleRemoteInput(inputData);
+            }
+        });
+
+        pvp.on('emoji', emoji => {
+            spawnFloatingEmoji(emoji, false);
+        });
+
+        pvp.on('ping', latency => {
+            const elPing = document.getElementById('pvp-ping-text');
+            const elBadge = document.getElementById('pvp-ping-badge');
+            if (elPing) elPing.textContent = latency + 'ms';
+            if (elBadge) {
+                elBadge.hidden = false;
+                elBadge.textContent = latency + ' ms';
+            }
+        });
+
+        pvp.on('disconnected', () => {
+            if (pvpActive) {
+                banner('OPPONENT DISCONNECTED', CSS.bad);
+                log('Opponent disconnected from PvP match.', 'bad');
+                endPvpGame();
+                pushScreen('menu', { focus: '#btn-start' });
+            }
+            setStatus('Disconnected', false);
+        });
+
+        pvp.on('error', err => {
+            setStatus('Notice: ' + (err.message || err));
+        });
     }
 
     /* ==========================================================================
@@ -6425,7 +7345,15 @@ import {
     }
 
     el('btn-start').addEventListener('click', () => { popScreen(); beginMatch(); });
-    el('btn-penalty').addEventListener('click', () => { popScreen(); beginShootout(); });
+    const penaltyBtn = el('btn-penalty');
+    if (penaltyBtn) {
+        penaltyBtn.addEventListener('click', () => {
+            beginShootout();
+        });
+    }
+    const modePvpBtn = el('btn-mode-pvp');
+    if (modePvpBtn) modePvpBtn.addEventListener('click', () => pushScreen('pvp', { focus: '#btn-pvp-create' }));
+    setupPvpUI();
     el('btn-tutorial').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
     el('btn-tut-close').addEventListener('click', () => popScreen());
     /* Every row of the sheet does its one thing and then gets out of the way —

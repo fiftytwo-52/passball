@@ -981,13 +981,38 @@ body {
     white-space: nowrap;
 }
 
-#so-turn {
-    padding: 6px 12px;
-    border-radius: var(--r-pill-category);
-    background: var(--glass);
-    border: 1px solid var(--glass-line-soft);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+.pens-turn-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+}
+
+.so-countdown {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: #ffc300;
+    background: rgba(0, 0, 0, 0.45);
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 195, 0, 0.45);
+    min-width: 38px;
+    text-align: center;
+    line-height: 1.2;
+    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.so-countdown.urgent {
+    color: #ff2d87;
+    border-color: rgba(255, 45, 135, 0.75);
+    background: rgba(255, 45, 135, 0.25);
+    animation: so-timer-pulse 0.4s infinite alternate ease-in-out;
+}
+
+@keyframes so-timer-pulse {
+    from { transform: scale(1); }
+    to { transform: scale(1.08); }
 }
 
 /* ============================================================================
@@ -2031,25 +2056,50 @@ body {
     transform: translateY(1px);
 }
 
-/* The shootout is the other way in, so it is an outline rather than a second
-   amber slab competing with the first. */
+/* Penalty Shootout button — prominent, eye-catching action button */
 #screen-menu .kickoff-alt {
-    min-height: 36px;
-    padding: 8px 14px;
-    border: 1px solid var(--turf-line);
-    border-radius: 12px;
-    background: rgba(0, 0, 0, 0.22);
-    font-size: 13px;
-    font-weight: 700;
+    min-height: 48px;
+    padding: 12px 20px;
+    border: 1.5px solid rgba(80, 227, 194, 0.65);
+    border-radius: 14px;
+    background: linear-gradient(135deg, rgba(16, 42, 34, 0.9) 0%, rgba(13, 60, 52, 0.8) 100%);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 16px rgba(80, 227, 194, 0.16);
+    font-size: 14px;
+    font-weight: 800;
     letter-spacing: 0.04em;
-    color: var(--sage);
-    transition: color 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
+    text-transform: uppercase;
+    color: #E6FFF6;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    backdrop-filter: blur(8px);
+}
+
+#screen-menu .kickoff-alt svg {
+    width: 19px;
+    height: 19px;
+    color: #50E3C2;
+    transition: transform 0.25s ease;
 }
 
 #screen-menu .kickoff-alt:hover {
-    border-color: var(--sage-dim);
-    background: rgba(0, 0, 0, 0.34);
-    color: var(--chalk);
+    border-color: #50E3C2;
+    background: linear-gradient(135deg, rgba(22, 60, 48, 0.95) 0%, rgba(18, 84, 72, 0.9) 100%);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), 0 0 24px rgba(80, 227, 194, 0.35);
+    color: #FFFFFF;
+    transform: translateY(-2px);
+}
+
+#screen-menu .kickoff-alt:hover svg {
+    transform: rotate(45deg) scale(1.12);
+}
+
+#screen-menu .kickoff-alt:active {
+    transform: translateY(1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 /* --- focus + the self-test well ---------------------------------------- */
@@ -2199,19 +2249,17 @@ body {
 
     #screen-menu .kickoff,
     #screen-menu .kickoff-alt {
-        width: 200px;
-    }
-
-    #screen-menu .kickoff {
+        width: 220px;
         min-height: 48px;
-        padding: 14px 0;
         border-radius: 14px;
     }
 
+    #screen-menu .kickoff {
+        padding: 14px 0;
+    }
+
     #screen-menu .kickoff-alt {
-        min-height: 44px;
-        padding: 12px 0;
-        border-radius: 12px;
+        padding: 12px 16px;
     }
 
     /* The self-test well is the only read-out; it takes a row of its own. */
@@ -3227,4 +3275,647 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
     .menu-bg-video { display: none; }
+}
+
+/* ==========================================================================
+   ONLINE PVP & EMOJI REACTIONS
+   ========================================================================== */
+
+/* Mode switch button */
+.mode-btn {
+    border: none;
+    font: inherit;
+    cursor: pointer;
+    background: transparent;
+    transition: all 0.18s ease;
+}
+
+.mode-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.badge-live {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: #fff;
+    background: #10b981;
+    border-radius: 999px;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+    animation: live-pulse 2s infinite;
+}
+
+@keyframes live-pulse {
+    0%, 100% { opacity: 0.85; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.06); }
+}
+
+/* Kickoff PvP CTA Button */
+.kickoff-pvp {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    padding: 13px 20px;
+    font-family: var(--f-display, sans-serif);
+    font-size: clamp(1rem, 2.5vmin, 1.15rem);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #0b1d13;
+    background: linear-gradient(135deg, #50e3c2 0%, #38ef7d 100%);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: var(--r-md);
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(56, 239, 125, 0.32);
+    transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.kickoff-pvp:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(56, 239, 125, 0.45);
+}
+
+.kickoff-pvp:active {
+    transform: translateY(1px);
+}
+
+.kickoff-pvp svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* PvP Modal Backdrop & Card */
+#screen-pvp {
+    background: rgba(8, 14, 10, 0.88);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: clamp(12px, 2.5vmin, 24px);
+    display: grid;
+    place-items: center;
+}
+
+.card-pvp {
+    position: relative;
+    width: min(440px, 94vw);
+    max-height: 88vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: #141a16;
+    color: #e5e7eb;
+    border: 1px solid rgba(80, 227, 194, 0.28);
+    border-radius: 12px;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.7), 0 0 24px rgba(80, 227, 194, 0.08);
+    padding: clamp(12px, 2.5vmin, 16px);
+}
+
+.card-pvp .pvp-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.pvp-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#pvp-title {
+    font-size: 1.12rem;
+    font-weight: 700;
+    margin: 0;
+    color: #f3f4f6;
+}
+
+.pvp-badge-live {
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #0b1d13;
+    background: #50e3c2;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+#btn-pvp-close {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color: #e5e7eb;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    padding: 0;
+}
+
+#btn-pvp-close:hover {
+    background: rgba(239, 68, 68, 0.22);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #fca5a5;
+    transform: scale(1.06);
+}
+
+/* Tabs */
+.pvp-tabs {
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+.pvp-tab {
+    flex: 1;
+    padding: 5px 8px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #9ca3af;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.pvp-tab:hover {
+    color: #fff;
+}
+
+.pvp-tab.active {
+    color: #0b1d13;
+    background: #50e3c2;
+    box-shadow: 0 2px 8px rgba(80, 227, 194, 0.35);
+}
+
+/* Panes & Sections */
+.pvp-section {
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+}
+
+.pvp-section-title {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #f3f4f6;
+    margin-bottom: 6px;
+}
+
+.pvp-desc {
+    font-size: 0.76rem;
+    color: #9ca3af;
+    margin: 0 0 8px 0;
+    line-height: 1.35;
+}
+
+.pvp-room-settings {
+    background: rgba(0, 0, 0, 0.32);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 8px;
+    padding: 6px 8px;
+    margin-bottom: 6px;
+}
+
+.pvp-settings-title {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #50e3c2;
+    margin-bottom: 6px;
+}
+
+.pvp-settings-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.pvp-setting-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.pvp-setting-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #9ca3af;
+}
+
+.pvp-setting-label svg {
+    width: 13px;
+    height: 13px;
+    color: #50e3c2;
+}
+
+.pvp-label-hint {
+    font-weight: 400;
+    color: #6b7280;
+    font-size: 0.65rem;
+    margin-left: 2px;
+}
+
+/* Custom Select in PvP modal */
+.card-pvp .select-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.card-pvp .setting-select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    width: 100%;
+    min-height: 28px;
+    padding: 3px 22px 3px 7px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    background: #0f1511;
+    font-family: inherit;
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: #f3f4f6;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card-pvp .setting-select:hover {
+    border-color: rgba(80, 227, 194, 0.45);
+}
+
+.card-pvp .setting-select:focus {
+    border-color: #50e3c2;
+    box-shadow: 0 0 0 2px rgba(80, 227, 194, 0.25);
+}
+
+.card-pvp .setting-select option {
+    background-color: #121f17;
+    color: #f3f4f6;
+    font-size: 0.8rem;
+    padding: 6px 8px;
+}
+
+.card-pvp .select-chevron {
+    position: absolute;
+    right: 6px;
+    pointer-events: none;
+    width: 10px;
+    height: 10px;
+    stroke: #50e3c2;
+}
+
+.pvp-pass-input {
+    min-height: 28px;
+    font-family: inherit;
+    font-size: 0.76rem;
+    font-weight: 500;
+    letter-spacing: normal;
+    text-align: left;
+    padding: 4px 7px;
+    background: #0f1511;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    color: #fff;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pvp-pass-input:focus {
+    border-color: #50e3c2;
+    box-shadow: 0 0 0 2px rgba(80, 227, 194, 0.25);
+}
+
+.pvp-summary-chip {
+    display: inline-block;
+    padding: 3px 8px;
+    margin-top: 6px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #50e3c2;
+    background: rgba(80, 227, 194, 0.12);
+    border-radius: 5px;
+    border: 1px solid rgba(80, 227, 194, 0.25);
+}
+
+.btn-block {
+    width: 100%;
+}
+
+.pvp-divider {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    margin: 6px 0;
+}
+
+.pvp-divider::before,
+.pvp-divider::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.pvp-divider span {
+    padding: 0 8px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #6b7280;
+}
+
+/* Room code display */
+.room-code-display {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px;
+    background: #0f1411;
+    border: 1px solid rgba(80, 227, 194, 0.35);
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+.room-code-label {
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: #9ca3af;
+    margin-bottom: 2px;
+}
+
+.room-code-num {
+    font-family: var(--f-mono, monospace);
+    font-size: 1.8rem;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    color: #50e3c2;
+    text-shadow: 0 0 10px rgba(80, 227, 194, 0.4);
+}
+
+.pvp-share-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.pvp-share-row button {
+    flex: 1;
+}
+
+.pvp-wait-box,
+.pvp-search-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: rgba(80, 227, 194, 0.06);
+    border: 1px dashed rgba(80, 227, 194, 0.35);
+    border-radius: 6px;
+    font-size: 0.78rem;
+    color: #d1d5db;
+}
+
+.pvp-not-found-box {
+    text-align: center;
+    padding: 10px;
+    background: rgba(239, 68, 68, 0.06);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: 6px;
+}
+
+.pvp-not-found-box p {
+    font-size: 0.8rem;
+    color: #fca5a5;
+    margin: 0 0 8px 0;
+}
+
+/* Join Input Form */
+.pvp-join-form {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.pvp-join-form #pvp-join-input {
+    flex: 1 1 95px;
+    min-height: 30px;
+    padding: 3px 6px;
+    font-size: 0.92rem;
+    border-radius: 6px;
+}
+
+.pvp-join-form #pvp-join-pass {
+    flex: 1.3 1 120px;
+    min-height: 30px;
+    padding: 3px 6px;
+    font-size: 0.76rem;
+    border-radius: 6px;
+}
+
+.pvp-join-form #btn-pvp-join {
+    flex: 0 0 auto;
+    min-width: 64px;
+    min-height: 30px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    border-radius: 6px;
+}
+
+.pvp-input {
+    flex: 1;
+    padding: 6px 10px;
+    font-family: var(--f-mono, monospace);
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: center;
+    color: #fff;
+    background: #0f1411;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 6px;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+
+.pvp-input:focus {
+    border-color: #50e3c2;
+    box-shadow: 0 0 0 2px rgba(80, 227, 194, 0.25);
+}
+
+/* Spinner */
+.pvp-spinner {
+    width: 15px;
+    height: 15px;
+    border: 2px solid rgba(80, 227, 194, 0.2);
+    border-top-color: #50e3c2;
+    border-radius: 50%;
+    animation: pvp-spin 0.8s linear infinite;
+}
+
+@keyframes pvp-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Status Bar */
+.pvp-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.74rem;
+    color: #9ca3af;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #6b7280;
+}
+
+.status-dot.active {
+    background: #10b981;
+    box-shadow: 0 0 6px #10b981;
+}
+
+.status-dot.error {
+    background: #ef4444;
+}
+
+.pvp-ping-badge {
+    margin-left: auto;
+    font-family: var(--f-mono, monospace);
+    font-size: 0.72rem;
+    padding: 2px 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    color: #50e3c2;
+}
+
+/* HUD PvP indicator */
+.hud-pvp-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #34d399;
+}
+
+.pvp-live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #34d399;
+    box-shadow: 0 0 6px #34d399;
+    animation: live-pulse 1.5s infinite;
+}
+
+/* In-game Emoji Quick Reaction Dock */
+.emoji-dock {
+    position: absolute;
+    bottom: 74px;
+    right: 14px;
+    z-index: 25;
+    display: flex;
+    gap: 4px;
+    padding: 4px 6px;
+    background: rgba(15, 20, 17, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    pointer-events: auto;
+}
+
+.btn-emoji {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.12s ease, background-color 0.12s ease;
+}
+
+.btn-emoji:hover {
+    transform: scale(1.22);
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.btn-emoji:active {
+    transform: scale(0.92);
+}
+
+/* Floating emoji reaction bubbles */
+.emoji-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 28;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.floating-emoji {
+    position: absolute;
+    font-size: 2.4rem;
+    filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5));
+    animation: emoji-float-up 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes emoji-float-up {
+    0% {
+        opacity: 0;
+        transform: translateY(10px) scale(0.5);
+    }
+    15% {
+        opacity: 1;
+        transform: translateY(-10px) scale(1.2);
+    }
+    30% {
+        transform: translateY(-25px) scale(1.0);
+    }
+    75% {
+        opacity: 1;
+        transform: translateY(-70px) scale(1.0);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-120px) scale(0.85);
+    }
 }
