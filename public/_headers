@@ -12,7 +12,7 @@
   # Everything is first-party: Three.js is bundled from node_modules by Vite,
   # so there is no CDN in the script path. Google Fonts is the only external
   # origin (the Geist stylesheet, and the font files it points at).
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.peerjs.com wss://*.peerjs.com https://0.peerjs.com wss://0.peerjs.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'
 
 # The document is the entry point — never let an edge or browser cache it
 # aggressively, so a redeploy is picked up immediately.

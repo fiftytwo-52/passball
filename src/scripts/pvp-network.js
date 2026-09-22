@@ -8,7 +8,20 @@ export const EMOJIS = ['⚽', '🔥', '👏', '😱', '😂', '🧤'];
 
 const ROOM_PREFIX = 'passball-v1-room-';
 const OPEN_SLOT_PREFIX = 'passball-v1-open-';
-const OPEN_SLOTS_COUNT = 8;
+const OPEN_SLOTS_COUNT = 4;
+
+const PEER_CONFIG = {
+    debug: 1,
+    config: {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:global.stun.twilio.com:3478' }
+        ]
+    }
+};
 
 class PvpNetwork {
     constructor() {
@@ -116,16 +129,25 @@ class PvpNetwork {
         this.conn = conn;
         this.role = isHost ? 'host' : 'guest';
 
-        conn.on('open', () => {
+        const sendGuestAuth = () => {
             if (!isHost) {
-                // Guest sends credentials to host immediately upon channel open
-                this.send({
+                this.rawSend({
                     type: 'AUTH',
                     password: this.guestPassword || ''
                 });
                 this.emit('status', 'Verifying room access...');
             }
-        });
+        };
+
+        // If the data channel is already open (e.g. probed in findOpenMatch),
+        // send AUTH immediately rather than waiting for a second 'open' event.
+        if (conn.open) {
+            sendGuestAuth();
+        } else {
+            conn.on('open', () => {
+                sendGuestAuth();
+            });
+        }
 
         conn.on('data', (data) => {
             if (!data) return;
@@ -208,7 +230,7 @@ class PvpNetwork {
         const peerId = ROOM_PREFIX + code;
 
         this.emit('status', `Creating room ${code}...`);
-        this.peer = new Peer(peerId, { debug: 0 });
+        this.peer = new Peer(peerId, PEER_CONFIG);
 
         return new Promise((resolve, reject) => {
             this.peer.on('open', (id) => {
@@ -241,7 +263,7 @@ class PvpNetwork {
         const targetId = ROOM_PREFIX + this.roomCode;
 
         this.emit('status', `Connecting to room ${this.roomCode}...`);
-        this.peer = new Peer(undefined, { debug: 0 });
+        this.peer = new Peer(undefined, PEER_CONFIG);
 
         return new Promise((resolve, reject) => {
             let settled = false;
@@ -290,99 +312,133 @@ class PvpNetwork {
         });
     }
 
-    /** Host an open room in a public matchmaking slot */
-    async hostOpenRoom() {
+    /**
+     * Unified Online Matchmaking:
+     * 1. Checks open slots for a waiting host.
+     * 2. If a host is found, joins immediately as guest.
+     * 3. If no host is found, automatically hosts open lobby and waits for an opponent.
+     */
+    async findOpenMatch(onProgress) {
         this.cleanup();
-        this.emit('onStatus', 'Searching for available open lobby slot...');
+        this.emit('status', 'Scanning for waiting players...');
 
-        // Try binding to one of the open slots
         for (let i = 1; i <= OPEN_SLOTS_COUNT; i++) {
-            const slotId = OPEN_SLOT_PREFIX + i;
-            const bound = await new Promise((res) => {
-                const testPeer = new Peer(slotId, { debug: 0 });
-                testPeer.on('open', () => {
-                    this.peer = testPeer;
-                    this.roomCode = `OPEN-${i}`;
-                    res(true);
-                });
-                testPeer.on('error', () => {
-                    try { testPeer.destroy(); } catch (e) {}
-                    res(false);
-                });
-            });
-
-            if (bound) {
-                this.emit('onStatus', `Open room active (Lobby #${i}). Waiting for players...`);
-                this.peer.on('connection', (conn) => {
-                    this.emit('onStatus', 'Player connected! Starting match...');
-                    this.setupConnection(conn, true);
-                });
-                return `Lobby #${i}`;
-            }
-        }
-
-        throw new Error('All public lobby slots are currently full. Please create a custom room!');
-    }
-
-    /** Search for an existing open room in public matchmaking slots */
-    async searchOpenRoom(onProgress) {
-        this.cleanup();
-        this.emit('onStatus', 'Scanning for open rooms...');
-
-        // Probe slots 1..OPEN_SLOTS_COUNT
-        for (let i = 1; i <= OPEN_SLOTS_COUNT; i++) {
-            if (onProgress) onProgress(i, OPEN_SLOTS_COUNT);
+            if (onProgress) onProgress(`Checking open lobby #${i}...`);
             const slotId = OPEN_SLOT_PREFIX + i;
 
-            const found = await new Promise((res) => {
-                const probePeer = new Peer(undefined, { debug: 0 });
+            const foundHost = await new Promise((resolve) => {
+                const probePeer = new Peer(undefined, PEER_CONFIG);
+                let settled = false;
+
                 const timer = setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
                     try { probePeer.destroy(); } catch (e) {}
-                    res(false);
-                }, 1400);
+                    resolve(false);
+                }, 1800);
 
                 probePeer.on('open', () => {
                     const conn = probePeer.connect(slotId, { reliable: true });
+
                     conn.on('open', () => {
+                        if (settled) return;
+                        settled = true;
                         clearTimeout(timer);
                         this.peer = probePeer;
                         this.roomCode = `OPEN-${i}`;
                         this.setupConnection(conn, false);
-                        res(true);
+                        resolve(true);
+                    });
+
+                    conn.on('error', () => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timer);
+                        try { probePeer.destroy(); } catch (e) {}
+                        resolve(false);
                     });
                 });
 
                 probePeer.on('error', () => {
+                    if (settled) return;
+                    settled = true;
                     clearTimeout(timer);
                     try { probePeer.destroy(); } catch (e) {}
-                    res(false);
+                    resolve(false);
                 });
             });
 
-            if (found) {
-                this.emit('onStatus', `Matched with open room #${i}!`);
+            if (foundHost) {
+                this.emit('status', `Connected to player in Lobby #${i}!`);
                 return `Lobby #${i}`;
             }
         }
 
-        return null; // Not found
+        // Step 2: No active host found. Automatically host on slot 1 and wait for opponent!
+        if (onProgress) onProgress('Waiting for an opponent in lobby...');
+        this.emit('status', 'Lobby created. Waiting for opponent to join...');
+
+        return new Promise((resolve, reject) => {
+            const slotId = OPEN_SLOT_PREFIX + '1';
+            const hostPeer = new Peer(slotId, PEER_CONFIG);
+            this.peer = hostPeer;
+            this.roomCode = 'OPEN-1';
+
+            hostPeer.on('open', () => {
+                if (onProgress) onProgress('Lobby ready. Waiting for opponent to join...');
+                this.emit('status', 'Lobby ready. Waiting for opponent to join...');
+
+                hostPeer.on('connection', (conn) => {
+                    this.emit('status', 'Opponent joining...');
+                    this.setupConnection(conn, true);
+                    // Resolve only after AUTH handshake completes (connected event),
+                    // not on the PeerJS signaling connection event.
+                    const onConn = () => {
+                        this.off('connected', onConn);
+                        resolve('Lobby #1');
+                    };
+                    this.on('connected', onConn);
+                });
+            });
+
+            hostPeer.on('error', (err) => {
+                if (err.type === 'unavailable-id') {
+                    // Slot 1 was just claimed by another host, retry to connect to them!
+                    resolve(this.findOpenMatch(onProgress));
+                } else {
+                    this.emit('error', err.message || 'Matchmaking error');
+                    reject(err);
+                }
+            });
+        });
     }
 
-    findOpenMatch(onProgress) {
-        return this.searchOpenRoom(onProgress);
+    searchOpenRoom(onProgress) {
+        return this.findOpenMatch(onProgress);
     }
 
     hostOpenMatch() {
-        return this.hostOpenRoom();
+        return this.findOpenMatch();
     }
 
-    /** Send data packet over WebRTC */
+    /** Send data packet over WebRTC (only works after AUTH handshake) */
     send(data) {
         if (this.connected && this.conn && this.conn.open) {
             try {
                 this.conn.send(data);
             } catch (e) {
                 console.warn('Network send error', e);
+            }
+        }
+    }
+
+    /** Send data packet unconditionally (for AUTH handshake before connected) */
+    rawSend(data) {
+        if (this.conn && this.conn.open) {
+            try {
+                this.conn.send(data);
+            } catch (e) {
+                console.warn('Network rawSend error', e);
             }
         }
     }

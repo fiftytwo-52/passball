@@ -418,14 +418,14 @@ import '../styles/global.css';
                          marks PvP SOON rather than offering a switch that would do
                          nothing when pressed. -->
                     <div class="mode-switch">
-                        <div class="mode active" id="btn-mode-ai" aria-current="true">
+                        <button type="button" class="mode active" id="btn-mode-ai" aria-current="true" title="Vs computer match">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
                                 aria-hidden="true" focusable="false">
                                 <rect x="4" y="4" width="16" height="12" rx="1.5" />
                                 <path d="M9 20h6M12 16v4" />
                             </svg>
                             Vs computer
-                        </div>
+                        </button>
                         <button type="button" class="mode mode-btn" id="btn-mode-pvp" title="Play online vs player">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
                                 aria-hidden="true" focusable="false">
@@ -448,10 +448,10 @@ import '../styles/global.css';
                             </label>
                             <div class="select-wrapper">
                                 <select class="setting-select" id="difficulty-start" aria-label="Difficulty">
-                                    <option value="0.35">Low</option>
-                                    <option value="0.75" selected>Mid</option>
-                                    <option value="1.25">Hard</option>
-                                    <option value="1.85">Extreme</option>
+                                    <option value="0.35">LOW (Amateur)</option>
+                                    <option value="0.75" selected>MID (Semi-Pro)</option>
+                                    <option value="1.25">HARD (Pro)</option>
+                                    <option value="1.85">EXTREME (World Class)</option>
                                 </select>
                                 <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                                     <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
@@ -462,17 +462,17 @@ import '../styles/global.css';
                         <div class="qchip">
                             <label class="qchip-label" for="plan-window-start">
                                 <svg class="qchip-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
-                                    <circle cx="8" cy="8" r="6" />
-                                    <path d="M8 4.5v3.5l2.5 1.5" />
+                                    <circle cx="8" cy="8" r="6.5" />
+                                    <polyline points="8 4.5 8 8 10.5 10" />
                                 </svg>
-                                Timer
+                                Turn Timer
                             </label>
                             <div class="select-wrapper">
                                 <select class="setting-select" id="plan-window-start" aria-label="Move timer seconds">
-                                    <option value="3">3s</option>
-                                    <option value="5">5s</option>
-                                    <option value="10" selected>10s</option>
-                                    <option value="20">20s</option>
+                                    <option value="3">3s (Speed)</option>
+                                    <option value="5">5s (Rapid)</option>
+                                    <option value="10" selected>10s (Standard)</option>
+                                    <option value="20">20s (Relaxed)</option>
                                 </select>
                                 <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                                     <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
@@ -481,19 +481,20 @@ import '../styles/global.css';
                         </div>
 
                         <div class="qchip">
-                            <label class="qchip-label" for="half-length-start">
+                            <label class="qchip-label" for="match-length-start">
                                 <svg class="qchip-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
                                     <rect x="2.5" y="3.5" width="11" height="9" rx="1.5" />
                                     <line x1="8" y1="3.5" x2="8" y2="12.5" />
                                     <circle cx="8" cy="8" r="1.8" />
                                 </svg>
-                                Length
+                                Match Length
                             </label>
                             <div class="select-wrapper">
-                                <select class="setting-select" id="half-length-start" aria-label="Half length">
-                                    <option value="60">1:00 min</option>
-                                    <option value="120" selected>2:00 min</option>
-                                    <option value="180">3:00 min</option>
+                                <select class="setting-select" id="match-length-start" aria-label="Half length seconds">
+                                    <option value="30">1:00 min (Quick)</option>
+                                    <option value="60">2:00 min (Short)</option>
+                                    <option value="120" selected>4:00 min (Standard)</option>
+                                    <option value="180">6:00 min (Full)</option>
                                 </select>
                                 <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                                     <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
@@ -524,14 +525,22 @@ import '../styles/global.css';
                 </section>
 
                 <div class="cta-stack">
-                    <button type="button" class="btn kickoff" id="btn-start">
+                    <button type="button" class="btn kickoff" id="btn-start" title="Play 6-a-side match vs Computer">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"
                             aria-hidden="true" focusable="false">
                             <circle cx="12" cy="12" r="10" />
                             <path d="M12 7l4 3-1.5 4.5h-5L8 10z" />
                             <path d="M12 2v5M2.5 9l4 1.5M4 18l4-3M20 18l-4-3M21.5 9l-4 1.5" />
                         </svg>
-                        Kick off
+                        Vs Computer
+                    </button>
+                    <button type="button" class="btn btn-pvp-cta" id="btn-main-pvp" title="Play online vs another player">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
+                            <circle cx="8" cy="8" r="3" />
+                            <circle cx="16" cy="8" r="3" />
+                            <path d="M3 20c0-3 2.5-5 5-5s5 2 5 5M11 20c0-3 2.5-5 5-5s5 2 5 5" />
+                        </svg>
+                        Online 1v1 PvP
                     </button>
                     <button type="button" class="btn kickoff-alt" id="btn-penalty" title="Direct penalty shootout mode">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">

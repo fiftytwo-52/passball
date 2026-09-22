@@ -7353,6 +7353,8 @@ import { pvp, EMOJIS } from './pvp-network.js';
     }
     const modePvpBtn = el('btn-mode-pvp');
     if (modePvpBtn) modePvpBtn.addEventListener('click', () => pushScreen('pvp', { focus: '#btn-pvp-create' }));
+    const mainPvpBtn = el('btn-main-pvp');
+    if (mainPvpBtn) mainPvpBtn.addEventListener('click', () => pushScreen('pvp', { focus: '#btn-pvp-create' }));
     setupPvpUI();
     el('btn-tutorial').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
     el('btn-tut-close').addEventListener('click', () => popScreen());
