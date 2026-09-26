@@ -1,0 +1,108 @@
+---
+import '../styles/tokens.css';
+import '../styles/info.css';
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <title>Privacy Policy — Guess &amp; Pass</title>
+    <meta name="description" content="How Guess & Pass handles your data: no accounts, no tracking, peer-to-peer multiplayer." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23171717'/%3E%3Ccircle cx='16' cy='16' r='6.5' fill='none' stroke='%2350e3c2' stroke-width='2.5'/%3E%3C/svg%3E" />
+</head>
+<body class="info-page">
+    <nav class="info-nav">
+        <a class="info-brand" href="/">
+            <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#171717"/><circle cx="16" cy="16" r="6.5" fill="none" stroke="#50e3c2" stroke-width="2.5"/></svg>
+            Guess &amp; Pass
+        </a>
+        <div class="info-links">
+            <a href="/tutorial">Tutorial</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+            <a href="/privacy" class="active">Privacy</a>
+            <a href="/" class="play">▶ Play</a>
+        </div>
+    </nav>
+
+    <header class="info-hero">
+        <span class="info-eyebrow">Privacy policy</span>
+        <h1>Your data stays yours.</h1>
+        <p class="lead">Guess &amp; Pass is built to need as little of your information as possible. Here's exactly what happens, in plain language.</p>
+    </header>
+
+    <main class="info-wrap">
+        <p class="policy-updated reveal">Last updated: 27 September 2026</p>
+
+        <section class="policy-block reveal">
+            <h3>1. No accounts, no tracking</h3>
+            <p>There is no sign-up, no login, and no analytics beacon watching you play. We don't set tracking cookies, we don't fingerprint your device, and we don't sell anything — there is nothing to sell. The game runs entirely in your browser.</p>
+        </section>
+
+        <section class="policy-block reveal">
+            <h3>2. How online multiplayer works</h3>
+            <p>Online modes (PVP and Rondo) are peer-to-peer over WebRTC. That means:</p>
+            <ul>
+                <li><strong>Your game data goes directly to the other player(s)</strong>, not through our servers. Passes, positions, scores and emoji reactions travel browser-to-browser.</li>
+                <li><strong>A matchmaking helper</strong> (PeerJS's public cloud service) briefly helps the browsers find each other, the same way a phone book helps you dial. It sees connection metadata (IP addresses, temporary peer IDs) needed to establish the call, under its own privacy policy.</li>
+                <li><strong>Quick Match handles</strong> like "SwiftFox" are generated from the lobby seat — they're not tied to you and change between sessions.</li>
+                <li><strong>Rondo room codes</strong> are random 4-letter codes that exist only while the room is open.</li>
+            </ul>
+        </section>
+
+        <section class="policy-block reveal">
+            <h3>3. What stays on your device</h3>
+            <ul>
+                <li><strong>Preferences</strong> such as mute settings and match options are stored in your browser's local storage, on your device only.</li>
+                <li><strong>Nothing is uploaded.</strong> We have no database of players, no leaderboards stored server-side, and no way to identify you across visits.</li>
+            </ul>
+        </section>
+
+        <section class="policy-block reveal">
+            <h3>4. Contacting us</h3>
+            <p>If you email us, we receive whatever you put in the email — your address and your message. We use it only to reply, and we don't add you to any list (there is no list).</p>
+        </section>
+
+        <section class="policy-block reveal">
+            <h3>5. Children</h3>
+            <p>Guess &amp; Pass is a simple football game suitable for all ages. Because there are no accounts, chats, or data collection, there is no personal information for a child to hand over in the first place. Multiplayer opponents see only a generated handle and gameplay data during the match.</p>
+        </section>
+
+        <section class="policy-block reveal">
+            <h3>6. Changes to this policy</h3>
+            <p>If this policy changes, the new version will be posted here with an updated date. The short version of our philosophy won't change: collect nothing, store nothing, share nothing.</p>
+        </section>
+
+        <section class="policy-block reveal">
+            <h3>7. Questions</h3>
+            <p>Anything unclear? <a href="/contact" style="font-weight:700;color:var(--c-link-deep)">Contact us</a> and we'll answer honestly.</p>
+        </section>
+
+        <div class="info-cta reveal">
+            <h2>Play, privately.</h2>
+            <p>No account. No tracking. Just football.</p>
+            <a href="/">Play now</a>
+        </div>
+    </main>
+
+    <footer class="info-footer">
+        <nav>
+            <a href="/tutorial">Tutorial</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+            <a href="/privacy">Privacy</a>
+        </nav>
+        <span>© 2026 Guess &amp; Pass. Made for football brains.</span>
+    </footer>
+
+    <script>
+        const io = new IntersectionObserver((entries) => {
+            entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); } });
+        }, { threshold: 0.12 });
+        document.querySelectorAll('.reveal').forEach(elm => io.observe(elm));
+    </script>
+</body>
+</html>

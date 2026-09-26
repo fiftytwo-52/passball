@@ -1,0 +1,111 @@
+---
+import '../styles/tokens.css';
+import '../styles/info.css';
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <title>About — Guess &amp; Pass</title>
+    <meta name="description" content="What Guess & Pass is: real-time 6-a-side football where both managers plan at once, then watch it play out. No dice, just geometry." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23171717'/%3E%3Ccircle cx='16' cy='16' r='6.5' fill='none' stroke='%2350e3c2' stroke-width='2.5'/%3E%3C/svg%3E" />
+</head>
+<body class="info-page">
+    <nav class="info-nav">
+        <a class="info-brand" href="/">
+            <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#171717"/><circle cx="16" cy="16" r="6.5" fill="none" stroke="#50e3c2" stroke-width="2.5"/></svg>
+            Guess &amp; Pass
+        </a>
+        <div class="info-links">
+            <a href="/tutorial">Tutorial</a>
+            <a href="/about" class="active">About</a>
+            <a href="/contact">Contact</a>
+            <a href="/privacy">Privacy</a>
+            <a href="/" class="play">▶ Play</a>
+        </div>
+    </nav>
+
+    <header class="info-hero">
+        <span class="info-eyebrow">About the game</span>
+        <h1>Football for people<br />who love the planning.</h1>
+        <p class="lead">Guess &amp; Pass is a real-time 6-a-side football game where the thinking <em>is</em> the gameplay. Two two-minute halves, continuous play, and a decision window that freezes the pitch so both sides can plot — then everything happens at once.</p>
+    </header>
+
+    <main class="info-wrap">
+        <section class="info-section">
+            <h2 class="reveal">What makes it different</h2>
+            <p class="sub reveal">Most football games test your thumbs. This one tests your reading of the game.</p>
+            <ul class="feat-list">
+                <li class="reveal"><span class="tick">✓</span><span><strong>Simultaneous planning.</strong> When the ball is won, the match pauses and both managers stack moves in secret. Passes, runs, shots and dives all resolve together — like rock-paper-scissors with a football.</span></li>
+                <li class="reveal"><span class="tick">✓</span><span><strong>Geometry, not dice.</strong> Nothing is resolved by random numbers. A pass succeeds if your player is the nearest body when the ball lands. A shot beats the keeper if it's outside his reach. The ball is faster than the players — that race is the entire sport.</span></li>
+                <li class="reveal"><span class="tick">✓</span><span><strong>Two-minute halves.</strong> A full match takes about four minutes. Perfect for a coffee break, a commute, or a best-of-five with a friend.</span></li>
+                <li class="reveal"><span class="tick">✓</span><span><strong>Penalty shootouts.</strong> Level at full time? Draw your aim line, then draw the dive line. Mind games included.</span></li>
+            </ul>
+        </section>
+
+        <section class="info-section">
+            <h2 class="reveal">Three ways to play</h2>
+            <p class="sub reveal">One game, three arenas. No accounts, no downloads — it runs in your browser.</p>
+            <div class="mode-cards">
+                <article class="mode-card reveal">
+                    <span class="mode-emoji">🤖</span>
+                    <h3>Vs Computer</h3>
+                    <p>Three difficulties. The AI reads the same geometry you do — on hard, it reads it fast. Great for learning the timing of the decision window.</p>
+                </article>
+                <article class="mode-card reveal">
+                    <span class="mode-emoji">🌐</span>
+                    <h3>PVP Online</h3>
+                    <p>Quick Match lists you automatically the moment you open the tab — challenge anyone waiting, or get challenged. Prefer private? Create a custom room with a 4-letter code and password, and share it with a friend. Real-time over WebRTC, with emoji reactions mid-match.</p>
+                </article>
+                <article class="mode-card reveal">
+                    <span class="mode-emoji">⭕</span>
+                    <h3>Rondo LIVE</h3>
+                    <p>4–7 player keep-away. The circle keeps possession while one player in the middle predicts each pass. Guess the receiver right and the passer takes your place in the middle. Three-minute matches, live standings, full-time table.</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="info-section">
+            <h2 class="reveal">How online play works</h2>
+            <p class="sub reveal">There's no game server and no login. Here's the honest version:</p>
+            <ul class="feat-list">
+                <li class="reveal"><span class="tick">✓</span><span><strong>Peer-to-peer.</strong> Your browser connects directly to your opponent's browser over WebRTC. The game data never passes through our hands — we just help the two browsers find each other.</span></li>
+                <li class="reveal"><span class="tick">✓</span><span><strong>No accounts.</strong> In Quick Match you're listed under a fun generated handle (like SwiftFox or NeonWolf). Nothing to sign up for, nothing to remember.</span></li>
+                <li class="reveal"><span class="tick">✓</span><span><strong>Your perspective, always.</strong> Online, you always see your own team at the bottom of the pitch in blue, attacking upward — whatever side of the connection you're on.</span></li>
+            </ul>
+        </section>
+
+        <section class="info-section">
+            <h2 class="reveal">The rules in one breath</h2>
+            <p class="sub reveal">6-a-side · two 2-minute halves · you defend the bottom goal · drag to pass and to run · SHOOT inside 30 units · keeper dives where you drag him · nearest player to a landing ball wins it · level at full time means penalties.</p>
+            <p class="reveal" style="margin-top:18px"><a href="/tutorial" style="font-weight:700;color:var(--c-link-deep)">Read the full tutorial →</a></p>
+        </section>
+
+        <div class="info-cta reveal">
+            <h2>Four minutes. One winner.</h2>
+            <p>See if your football brain is as good as you think it is.</p>
+            <a href="/">Play now</a>
+        </div>
+    </main>
+
+    <footer class="info-footer">
+        <nav>
+            <a href="/tutorial">Tutorial</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+            <a href="/privacy">Privacy</a>
+        </nav>
+        <span>© 2026 Guess &amp; Pass. Made for football brains.</span>
+    </footer>
+
+    <script>
+        const io = new IntersectionObserver((entries) => {
+            entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); } });
+        }, { threshold: 0.12 });
+        document.querySelectorAll('.reveal').forEach(elm => io.observe(elm));
+    </script>
+</body>
+</html>

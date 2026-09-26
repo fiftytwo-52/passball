@@ -48,11 +48,11 @@
 
 :root {
     /* Geist accent marks, mirrored from the engine's CSS palette so the 3D
-       players, the canvas marks and the DOM chrome all agree. The two kits are
-       near-opposite hues at full saturation so they stay separable at a glance —
-       and for red-green colour vision deficiency — instead of relying on a
-       difference in lightness that a small figure on dark turf destroys. */
-    --x-you: #2bf7c0;
+       players, the canvas marks and the DOM chrome all agree. Your team is a
+       vivid blue, the opponent hot magenta — far apart on the hue wheel so the
+       kits stay separable at a glance instead of relying on a difference in
+       lightness that a small figure on dark turf destroys. */
+    --x-you: #1f6bff;
     --x-cpu: #ff2d87;
     --x-aim: #ffc300;
 
@@ -382,6 +382,7 @@ body {
 #hud-top[hidden],
 #hud-bottom[hidden],
 #hud-pens[hidden],
+#hud-rondo[hidden],
 #role-strip[hidden] {
     display: none;
 }
@@ -1848,7 +1849,7 @@ body {
     flex: 0 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     padding: 0 calc(var(--sa-r) + 16px) calc(var(--sa-b) + 10px) calc(var(--sa-l) + 16px);
 }
 
@@ -2040,24 +2041,28 @@ body {
     transform: translateY(1px);
 }
 
-/* --- the kick-off CTA --------------------------------------------------- */
+/* --- the kick-off CTA ---------------------------------------------------
+   Three modes now (Vs Computer / Penalty / Rondo): a single-column grid on
+   narrow screens, three equal tracks on wide. Every button is full-bleed in
+   its track so the stack reads as one clean column. */
 #screen-menu .cta-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
 }
 
 #screen-menu .kickoff,
-#screen-menu .kickoff-alt {
+#screen-menu .kickoff-alt,
+#screen-menu .kickoff-rondo {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
     width: 100%;
+    min-height: 48px;
 }
 
 #screen-menu .kickoff {
-    min-height: 42px;
     padding: 10px 14px 8px;
     border: 0;
     border-radius: 14px;
@@ -2132,6 +2137,55 @@ body {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
+/* Rondo button — the online keep-away mode. Same structural language as the
+   Penalty button (outlined glow, 48px, 14px radius, 800 uppercase), but keyed
+   to the team blue instead of teal so the two alt modes don't read as one. */
+#screen-menu .kickoff-rondo {
+    padding: 12px 20px;
+    border: 1.5px solid rgba(31, 107, 255, 0.65);
+    border-radius: 14px;
+    background: linear-gradient(135deg, rgba(16, 32, 64, 0.9) 0%, rgba(13, 38, 84, 0.8) 100%);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 16px rgba(31, 107, 255, 0.16);
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #E6EFFF;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+#screen-menu .kickoff-rondo svg {
+    flex: none;
+    width: 19px;
+    height: 19px;
+    color: var(--x-you);
+    transition: transform 0.25s ease;
+}
+
+#screen-menu .kickoff-rondo .badge-live {
+    flex: none;
+}
+
+#screen-menu .kickoff-rondo:hover {
+    border-color: var(--x-you);
+    background: linear-gradient(135deg, rgba(22, 44, 88, 0.95) 0%, rgba(18, 52, 112, 0.9) 100%);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), 0 0 24px rgba(31, 107, 255, 0.35);
+    color: #FFFFFF;
+    transform: translateY(-2px);
+}
+
+#screen-menu .kickoff-rondo:hover svg {
+    transform: rotate(45deg) scale(1.12);
+}
+
+#screen-menu .kickoff-rondo:active {
+    transform: translateY(1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
 /* --- focus + the self-test well ---------------------------------------- */
 #screen-menu :focus-visible {
     outline: 2px solid var(--chalk);
@@ -2162,6 +2216,12 @@ body {
    Nothing here changes a component — it only relaxes the three zones onto one
    line each, which is the same move the phone layout makes in reverse. */
 @media (min-width: 860px) {
+    /* Wide frame: the row layouts below (hero, settings strip, three CTAs)
+       need room the 560px phone frame doesn't have. */
+    .menu-frame {
+        max-width: 1020px;
+    }
+
     #screen-menu .navbar {
         padding: calc(var(--sa-t) + 26px) 40px 0;
     }
@@ -2271,15 +2331,19 @@ body {
         padding-bottom: 0;
     }
 
+    /* Bottom: the settings strip takes its row; the three kick-offs take the
+       next as three equal tracks. */
     #screen-menu .cta-stack {
-        flex: 0 0 auto;
-        flex-direction: row;
+        flex: 1 1 100%;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 12px;
     }
 
     #screen-menu .kickoff,
-    #screen-menu .kickoff-alt {
-        width: 220px;
+    #screen-menu .kickoff-alt,
+    #screen-menu .kickoff-rondo {
+        width: 100%;
         min-height: 48px;
         border-radius: 14px;
     }
@@ -2309,7 +2373,16 @@ body {
 @media (prefers-reduced-motion: reduce) {
 
     #screen-menu .kickoff:hover,
-    #screen-menu .kickoff:active {
+    #screen-menu .kickoff:active,
+    #screen-menu .kickoff-alt:hover,
+    #screen-menu .kickoff-alt:active,
+    #screen-menu .kickoff-rondo:hover,
+    #screen-menu .kickoff-rondo:active {
+        transform: none;
+    }
+
+    #screen-menu .kickoff-alt:hover svg,
+    #screen-menu .kickoff-rondo:hover svg {
         transform: none;
     }
 }
@@ -4132,4 +4205,262 @@ body {
         opacity: 0;
         transform: translateY(-120px) scale(0.85);
     }
+}
+/* ==========================================================================
+   RONDO — online keep-away for 4–7 players
+   The lobby reuses `.card-pvp` (same sheet, same tabs, same sections); the
+   classes below are the rondo-only extras. The in-game strip follows the
+   `#hud-pens` pattern, and the full-time sheet is a fixed overlay. Accent is
+   the team blue (the rondo menu button's colour); the "middle" role reads in
+   magenta so it never confuses with a kit.
+   ========================================================================== */
+
+/* --- lobby: blurb -------------------------------------------------------- */
+.rondo-blurb {
+    margin: 0 0 10px;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: #9ca3af;
+}
+
+/* --- lobby: join row ------------------------------------------------------
+   Code input + Join button on one line; the input takes the slack. */
+.pvp-join-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.pvp-join-row .pvp-input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.pvp-join-row .btn {
+    flex: none;
+}
+
+/* A 4-character room code wants wider tracking than the generic input. */
+.pvp-code-input {
+    font-size: 1.15rem;
+    letter-spacing: 0.32em;
+    text-indent: 0.32em; /* re-centre text that letter-spacing pushes left */
+    text-transform: uppercase;
+    text-align: center;
+}
+
+/* --- lobby: roster ------------------------------------------------------- */
+.pvp-count {
+    font-family: var(--f-mono, monospace);
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #6b7280;
+}
+
+.rondo-player-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.rondo-player-list:empty {
+    display: none;
+}
+
+.rondo-player-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 9px;
+    background: rgba(0, 0, 0, 0.32);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 6px;
+}
+
+/* The local player reads in blue, like the rondo menu button. */
+.rondo-player-row.me {
+    border-color: rgba(31, 107, 255, 0.55);
+    background: rgba(31, 107, 255, 0.10);
+}
+
+.rondo-player-dot {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #6b7280; /* replaced inline per seat by the roster renderer */
+}
+
+.rondo-player-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #f3f4f6;
+}
+
+.rondo-hint {
+    margin: 0;
+    font-size: 0.74rem;
+    line-height: 1.4;
+    color: #6b7280;
+}
+
+/* --- in-game strip ---------------------------------------------------------
+   Same pattern as `#hud-pens`: centred, wrapping, glass panels. */
+#hud-rondo {
+    position: absolute;
+    z-index: 3;
+    /* Same clearance as the sheet: the rondo strip is another resident of
+       this band, and both read the one variable so they can never disagree. */
+    top: calc(var(--hud-pad) + var(--sa-t) + var(--hud-bar-h) + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 7px;
+    max-width: min(calc(100% - 2 * var(--hud-pad)), 700px);
+}
+
+.panel-rondo {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 5px 11px;
+    border-radius: var(--r-md);
+    background: var(--glass);
+    border: 1px solid var(--glass-line-soft);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.panel-rondo .hud-label {
+    margin-right: 1px;
+}
+
+.rondo-clock {
+    font-family: var(--f-mono);
+    font-size: clamp(0.9rem, 2.4vmin, 1.1rem);
+    font-weight: 600;
+    color: var(--on-glass);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+/* Under 30 seconds the clock burns red. */
+.rondo-clock.low {
+    color: #ff5d5d;
+}
+
+.rondo-name {
+    font-size: clamp(0.78rem, 2vmin, 0.95rem);
+    font-weight: 700;
+    color: var(--on-glass);
+    white-space: nowrap;
+    line-height: 1;
+}
+
+/* Whoever is in the middle reads magenta — a role, never a kit. */
+.rondo-name.rondo-middle {
+    color: #ff2d87;
+}
+
+.rondo-turn-group {
+    border-color: rgba(31, 107, 255, 0.35);
+}
+
+#rondo-turn {
+    font-size: clamp(0.78rem, 2vmin, 0.95rem);
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--on-glass);
+    white-space: nowrap;
+    line-height: 1;
+}
+
+/* --- full-time overlay ------------------------------------------------------
+   Fixed dim backdrop; the card centres itself like the PvP sheets. */
+.rondo-over {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(4, 10, 7, 0.72);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.rondo-over[hidden] {
+    display: none;
+}
+
+.rondo-over-card {
+    width: min(440px, 94vw);
+    max-height: 88vh;
+    overflow-y: auto;
+    background: #141a16;
+    color: #e5e7eb;
+    border: 1px solid rgba(31, 107, 255, 0.35);
+    border-radius: 12px;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.7), 0 0 24px rgba(31, 107, 255, 0.10);
+    padding: clamp(14px, 3vmin, 20px);
+}
+
+.rondo-over-card h2 {
+    margin: 0 0 10px;
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: #f3f4f6;
+}
+
+.rondo-winner {
+    margin: 0 0 12px;
+    font-size: 1.05rem;
+    font-weight: 800;
+    line-height: 1.35;
+    color: #f3f4f6;
+}
+
+.rondo-standing-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 7px 10px;
+    margin-bottom: 4px;
+    background: rgba(0, 0, 0, 0.32);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: #d1d5db;
+}
+
+.rondo-standing-row:last-of-type {
+    margin-bottom: 0;
+}
+
+.rondo-standing-row.me {
+    border-color: rgba(31, 107, 255, 0.55);
+    background: rgba(31, 107, 255, 0.10);
+    color: #f3f4f6;
+}
+
+.rondo-over-card .btn-block {
+    margin-top: 12px;
+}
+
+.rondo-over-card .rondo-hint {
+    margin-top: 10px;
 }

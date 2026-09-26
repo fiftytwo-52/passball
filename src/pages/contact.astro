@@ -1,0 +1,114 @@
+---
+import '../styles/tokens.css';
+import '../styles/info.css';
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <title>Contact — Guess &amp; Pass</title>
+    <meta name="description" content="Get in touch about Guess & Pass — feedback, bug reports, feature ideas, or just to say hello." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23171717'/%3E%3Ccircle cx='16' cy='16' r='6.5' fill='none' stroke='%2350e3c2' stroke-width='2.5'/%3E%3C/svg%3E" />
+</head>
+<body class="info-page">
+    <nav class="info-nav">
+        <a class="info-brand" href="/">
+            <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#171717"/><circle cx="16" cy="16" r="6.5" fill="none" stroke="#50e3c2" stroke-width="2.5"/></svg>
+            Guess &amp; Pass
+        </a>
+        <div class="info-links">
+            <a href="/tutorial">Tutorial</a>
+            <a href="/about">About</a>
+            <a href="/contact" class="active">Contact</a>
+            <a href="/privacy">Privacy</a>
+            <a href="/" class="play">▶ Play</a>
+        </div>
+    </nav>
+
+    <header class="info-hero">
+        <span class="info-eyebrow">Say hello</span>
+        <h1>Found a bug? Have an idea?<br />Tell us.</h1>
+        <p class="lead">We read everything. Bug reports with steps to reproduce get fixed fastest; feature ideas with a "why" attached get taken most seriously.</p>
+    </header>
+
+    <main class="info-wrap">
+        <div class="contact-grid">
+            <section class="contact-card reveal">
+                <h3>Send a message</h3>
+                <p>Fill this in and your email app will open with everything pre-written — just hit send.</p>
+                <form id="contact-form">
+                    <div class="field">
+                        <label for="cf-name">Your name</label>
+                        <input id="cf-name" name="name" type="text" placeholder="Alex Striker" autocomplete="name" />
+                    </div>
+                    <div class="field">
+                        <label for="cf-topic">What's this about?</label>
+                        <select id="cf-topic" name="topic">
+                            <option>Bug report</option>
+                            <option>Feature idea</option>
+                            <option>Online / multiplayer issue</option>
+                            <option>Feedback</option>
+                            <option>Something else</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="cf-msg">Message</label>
+                        <textarea id="cf-msg" name="message" placeholder="What happened, and what did you expect to happen?" required></textarea>
+                    </div>
+                    <button type="submit" class="btn-send">✉️ Compose email</button>
+                </form>
+            </section>
+
+            <section class="contact-card reveal">
+                <h3>Prefer direct?</h3>
+                <p>Skip the form and write to us straight away. We usually reply within a couple of days.</p>
+                <a class="mail-direct" href="mailto:ganeshkhatiwada071@gmail.com">📧 ganeshkhatiwada071@gmail.com</a>
+                <div style="margin-top:26px">
+                    <h3 style="font-size:16px">Before you write</h3>
+                    <ul class="feat-list" style="margin-top:12px">
+                        <li><span class="tick">1</span><span><strong>Bug?</strong> Tell us your device, browser, and what you tapped just before it broke. A screenshot helps enormously.</span></li>
+                        <li><span class="tick">2</span><span><strong>Online issue?</strong> Mention the mode (Quick Match, Custom Room, Rondo) and roughly when it happened.</span></li>
+                        <li><span class="tick">3</span><span><strong>Idea?</strong> One paragraph on the idea, one on why it would make the game better.</span></li>
+                    </ul>
+                </div>
+            </section>
+        </div>
+
+        <div class="info-cta reveal">
+            <h2>Or just play another match.</h2>
+            <p>Sometimes the best feedback is a rematch.</p>
+            <a href="/">Play now</a>
+        </div>
+    </main>
+
+    <footer class="info-footer">
+        <nav>
+            <a href="/tutorial">Tutorial</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+            <a href="/privacy">Privacy</a>
+        </nav>
+        <span>© 2026 Guess &amp; Pass. Made for football brains.</span>
+    </footer>
+
+    <script>
+        document.getElementById('contact-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const name = document.getElementById('cf-name').value.trim();
+            const topic = document.getElementById('cf-topic').value;
+            const msg = document.getElementById('cf-msg').value.trim();
+            const subject = encodeURIComponent('[Guess & Pass] ' + topic + (name ? ' — ' + name : ''));
+            const body = encodeURIComponent((name ? 'Name: ' + name + '\n\n' : '') + msg);
+            window.location.href = 'mailto:ganeshkhatiwada071@gmail.com?subject=' + subject + '&body=' + body;
+        });
+
+        const io = new IntersectionObserver((entries) => {
+            entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); } });
+        }, { threshold: 0.12 });
+        document.querySelectorAll('.reveal').forEach(elm => io.observe(elm));
+    </script>
+</body>
+</html>

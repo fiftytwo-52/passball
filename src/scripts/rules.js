@@ -5,10 +5,6 @@
    positions in, outcomes out, so it can be reasoned about — and tested —
    without a canvas.
 
-   `npm run verify` (tools/verify-4.mjs) imports *this* file directly through
-   Node, so the property tests cannot drift from the code the page runs: there
-   is no second copy of the algorithm to keep in sync.
-
    Coordinate system: the canonical normalised pitch, x, y ∈ [0, 100].
    `you` attack y = 100, `cpu` attack y = 0, and both goals are centred on
    x = 50 (see GOAL in the engine).

@@ -1,0 +1,175 @@
+---
+import '../styles/tokens.css';
+import '../styles/info.css';
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <title>Tutorial — Guess &amp; Pass</title>
+    <meta name="description" content="Learn to play Guess & Pass: stack your moves in the decision window, then watch them play out in real time." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23171717'/%3E%3Ccircle cx='16' cy='16' r='6.5' fill='none' stroke='%2350e3c2' stroke-width='2.5'/%3E%3C/svg%3E" />
+</head>
+<body class="info-page">
+    <nav class="info-nav">
+        <a class="info-brand" href="/">
+            <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#171717"/><circle cx="16" cy="16" r="6.5" fill="none" stroke="#50e3c2" stroke-width="2.5"/></svg>
+            Guess &amp; Pass
+        </a>
+        <div class="info-links">
+            <a href="/tutorial" class="active">Tutorial</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+            <a href="/privacy">Privacy</a>
+            <a href="/" class="play">▶ Play</a>
+        </div>
+    </nav>
+
+    <header class="info-hero">
+        <span class="info-eyebrow">How to play</span>
+        <h1>Stack your moves,<br />then watch them play out.</h1>
+        <p class="lead">Guess &amp; Pass is real-time 6-a-side football with a twist: the moment either side wins the ball, the match freezes and both managers plan at once. Then everything resolves together — no turns, no dice, just geometry.</p>
+    </header>
+
+    <main class="info-wrap">
+        <section class="info-section">
+            <h2 class="reveal">The core loop</h2>
+            <p class="sub reveal">Every phase of play follows the same rhythm. Learn it once and you know the whole game.</p>
+            <div class="tut-steps">
+                <article class="tut-step reveal">
+                    <span class="step-num">01</span>
+                    <div class="step-icon">🧲</div>
+                    <h3>Win the ball</h3>
+                    <p><strong>You defend the BOTTOM goal and attack the TOP one.</strong> Six a side — your keeper and five outfielders all start in your own half, so you always play away from yourself.</p>
+                </article>
+                <article class="tut-step reveal">
+                    <span class="step-num">02</span>
+                    <div class="step-icon">⏸️</div>
+                    <h3>The decision window</h3>
+                    <p>The moment either side wins the ball, the match pauses and the ring in the centre circle starts draining. <strong>Nothing moves until it empties.</strong> Stack as many moves as you like — they all resolve together.</p>
+                </article>
+                <article class="tut-step reveal">
+                    <span class="step-num">03</span>
+                    <div class="step-icon">↗️</div>
+                    <h3>Pass</h3>
+                    <p><em>Drag from the ball-carrier onto a team-mate</em> to pass to them, or <em>into empty space</em> to play it there. Anyone can receive, keeper included. The ball is led into a team-mate's run, so a pass to a moving player meets them on the way.</p>
+                </article>
+                <article class="tut-step reveal">
+                    <span class="step-num">04</span>
+                    <div class="step-icon">🏃</div>
+                    <h3>Send the runners</h3>
+                    <p><em>Drag any of your players</em> to drop a ring where they should be when the ball is played. Stack as many runners as you have players.</p>
+                </article>
+                <article class="tut-step reveal">
+                    <span class="step-num">05</span>
+                    <div class="step-icon">🥅</div>
+                    <h3>Shoot</h3>
+                    <p>Inside 30 units of goal, press <strong>SHOOT</strong> (or <strong>Space</strong>, or double-tap the goal mouth) to stack a shot. The keeper commits to a side, so <strong>aim across him</strong> — the far post is open. Outside that range the button does nothing.</p>
+                </article>
+                <article class="tut-step reveal">
+                    <span class="step-num">06</span>
+                    <div class="step-icon">🧤</div>
+                    <h3>Save</h3>
+                    <p>Defending, <em>drag your keeper to the dive point</em> to stack the save. Leave it and the keeper dives on their own read.</p>
+                </article>
+                <article class="tut-step reveal">
+                    <span class="step-num">07</span>
+                    <div class="step-icon">✅</div>
+                    <h3>Close the window</h3>
+                    <p>Press <strong>MOVES DONE</strong> (or <strong>Enter</strong>). The CPU has to be ready too: if it has finished and you have not, the board <em>stays frozen</em>. Give no instruction at all and your side plays a random pass.</p>
+                </article>
+                <article class="tut-step reveal">
+                    <span class="step-num">08</span>
+                    <div class="step-icon">⚡</div>
+                    <h3>The race</h3>
+                    <p>A pass only belongs to you if <em>the nearest player to the ball is yours</em> when it lands. Send the wrong man and it spills loose — the closest body from either side goes for it. Whoever wins it opens the next window.</p>
+                </article>
+                <article class="tut-step reveal">
+                    <span class="step-num">09</span>
+                    <div class="step-icon">🎯</div>
+                    <h3>Penalties</h3>
+                    <p>Level at full time? Press <strong>GO TO PENALTIES</strong>. Draw the aim line, then draw the dive line: within the keeper's reach it is saved, otherwise it is a goal.</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="info-section">
+            <div class="pitch-demo reveal">
+                <h3>See it: the race is the game</h3>
+                <p>The ball is faster than any player. A pass is a bet that your runner reaches the landing spot first — that dashed line is the whole sport.</p>
+                <svg class="pitch-svg" viewBox="0 0 320 180" role="img" aria-label="Animated diagram of a pass travelling to a runner">
+                    <rect x="4" y="4" width="312" height="172" rx="10" fill="#2c8a46" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
+                    <line x1="160" y1="4" x2="160" y2="176" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
+                    <circle cx="160" cy="90" r="24" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
+                    <circle class="pulse-ring" cx="70" cy="120" r="12" fill="none" stroke="#ffc300" stroke-width="3"/>
+                    <circle cx="70" cy="120" r="7" fill="#1f6bff"/>
+                    <line class="pass-line" x1="70" y1="120" x2="182" y2="126" stroke="#ffffff" stroke-width="2.5"/>
+                    <circle cx="182" cy="126" r="7" fill="#1f6bff" opacity="0.85"/>
+                    <circle cx="215" cy="84" r="7" fill="#ff2d87"/>
+                    <circle class="ball" cx="70" cy="120" r="4.5" fill="#ffffff"/>
+                </svg>
+            </div>
+        </section>
+
+        <section class="info-section">
+            <h2 class="reveal">Keyboard shortcuts</h2>
+            <p class="sub reveal">Everything works with touch or mouse — but the keyboard is faster.</p>
+            <div class="key-row reveal">
+                <span class="key-chip"><kbd>Space</kbd> Shoot</span>
+                <span class="key-chip"><kbd>Enter</kbd> Moves done</span>
+                <span class="key-chip"><kbd>Esc</kbd> Pause</span>
+                <span class="key-chip"><kbd>M</kbd> Mute</span>
+                <span class="key-chip"><kbd>R</kbd> Restart match</span>
+            </div>
+        </section>
+
+        <section class="info-section">
+            <h2 class="reveal">Online modes</h2>
+            <p class="sub reveal">Take the same game online — no accounts, no downloads.</p>
+            <div class="mode-cards">
+                <article class="mode-card reveal">
+                    <span class="mode-emoji">🌐</span>
+                    <h3>PVP — Quick Match</h3>
+                    <p>Open the tab and you're listed automatically. Challenge anyone waiting, or wait to be challenged. Real-time 1v1 over WebRTC.</p>
+                </article>
+                <article class="mode-card reveal">
+                    <span class="mode-emoji">🔑</span>
+                    <h3>PVP — Custom Room</h3>
+                    <p>Create a private room with a 4-letter code (and optional password) and share it with a friend.</p>
+                </article>
+                <article class="mode-card reveal">
+                    <span class="mode-emoji">⭕</span>
+                    <h3>Rondo LIVE</h3>
+                    <p>4–7 player keep-away: the circle keeps possession while one player in the middle predicts the pass. Guess right and you're out of the middle.</p>
+                </article>
+            </div>
+        </section>
+
+        <div class="info-cta reveal">
+            <h2>Got it? Kick off.</h2>
+            <p>Two two-minute halves. The ball is faster than you — plan like it.</p>
+            <a href="/">Play now</a>
+        </div>
+    </main>
+
+    <footer class="info-footer">
+        <nav>
+            <a href="/tutorial">Tutorial</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+            <a href="/privacy">Privacy</a>
+        </nav>
+        <span>© 2026 Guess &amp; Pass. Made for football brains.</span>
+    </footer>
+
+    <script>
+        const io = new IntersectionObserver((entries) => {
+            entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); } });
+        }, { threshold: 0.12 });
+        document.querySelectorAll('.reveal').forEach(elm => io.observe(elm));
+    </script>
+</body>
+</html>

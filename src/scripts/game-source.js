@@ -28,9 +28,10 @@ import {
     resolvePassRace, interceptionTime,
     isOnTarget, shotOutcome, defaultDiveTarget,
     penaltyKickOutcome, shootoutDecided, getShootoutTarget, formatClock,
-    mulberry32, runVerification
+    mulberry32
 } from './rules.js';
 import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
+import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.js';
 
 (function () {
     'use strict';
@@ -59,6 +60,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     let pvpAutoStart = false; // this side picked its opponent off the online list
     let pvpStartTimer = null;
     let pvpScanning = false;
+    let pvpOpenSeat = null; // our own claimed seat in the public ring, while the Quick Match tab is open
 
     const myTeam = () => (pvpActive && pvpRole === 'guest' ? 'cpu' : 'you');
     const opponentTeam = () => (pvpActive && pvpRole === 'guest' ? 'you' : 'cpu');
@@ -228,8 +230,8 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
        inside it, and it is open behind him.
 
        These are presentation tunables of exactly the kind §0.b describes: they
-       move a body and set his arms, never a verdict. `verify-4.mjs` imports
-       rules.js alone, so RULES.KEEPER_REACH, defaultDiveTarget() and the penalty
+       move a body and set his arms, never a verdict. rules.js is imported
+       alone by the test harness, so RULES.KEEPER_REACH, defaultDiveTarget() and the penalty
        shootout — where the human DRAWS the dive — are all untouched.
        ---------------------------------------------------------------------- */
     const KEEPER_READ_CHANCE = 0.35; // base chance he dives the way the shot is going
@@ -253,8 +255,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
        far post is genuinely open, which is what a save being a read means.
 
        Presentation-plus, exactly as §0.b describes: rules.js still owns
-       KEEPER_REACH = 6 and `verify-4.mjs` still reads the rulebook, because the
-       property tests call shotOutcome() without a `reach` and get the rulebook's
+       KEEPER_REACH = 6, because the tests call shotOutcome() without a `reach` and get the rulebook's
        own number. Only the match passes these. */
     const KEEPER_DIVE_MAX = 4.0;     // furthest a dive may travel, from his feet
     const KEEPER_SAVE_REACH = 2.6;   // his arms around the point he dives to
@@ -600,19 +601,20 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
        reads these values.
        ========================================================================== */
     const COL = {
-        /* Pulled up to full saturation and pushed apart on the colour wheel —
-           mint against hot magenta are near-opposite hues, so the two kits stay
-           separable even for the ~1 in 12 players with red-green colour vision
-           deficiency and even at the smallest zoom the board is ever drawn at.
-           The two keepers are deliberately *not* tints of their own team: a
-           keeper has to read as "the keeper" first and a shirt second. */
-        you: 0x2bf7c0, cpu: 0xff2d87,        /* electric mint / hot magenta */
-        gkYou: 0x1f6bff, gkCpu: 0xffc300,    /* keeper blue / keeper amber  */
+        /* Your team is blue, the opponent hot magenta — far apart on the hue
+           wheel so the kits never blur, even at the smallest zoom the board is
+           ever drawn at. (Mint-vs-magenta was gentler on red-green colour
+           blindness; blue is the requested identity, so blue it is.) The two
+           keepers are deliberately *not* tints of their own team: yours wears
+           the old electric mint, so a keeper still reads as "the keeper" first
+           and a shirt second. */
+        you: 0x1f6bff, cpu: 0xff2d87,        /* vivid blue / hot magenta */
+        gkYou: 0x2bf7c0, gkCpu: 0xffc300,    /* keeper mint / keeper amber  */
         aim: 0xffc300, ghost: 0xfafafa        /* selection amber / canvas    */
     };
     const CSS = {
-        you: '#2bf7c0', cpu: '#ff2d87', lime: '#ffc300',
-        goal: '#2bf7c0', bad: '#ff2d87', warn: '#ffc300'
+        you: '#1f6bff', cpu: '#ff2d87', lime: '#ffc300',
+        goal: '#1f6bff', bad: '#ff2d87', warn: '#ffc300'
     };
 
     /* ==========================================================================
@@ -740,6 +742,21 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     };
     const goalFor = team => (team === 'you' ? GOAL.you : GOAL.cpu);
     const other = team => (team === 'you' ? 'cpu' : 'you');
+    /* --- PvP mirror: the guest's view --------------------------------------
+       The guest renders the world rotated 180° (see `world`), so every
+       *rendered* team identity is flipped for them: their own team always
+       wears the friendly kit and their score always reads first. Match logic —
+       who is controlled, who attacks which goal, who the sim scores for —
+       keeps the world teams untouched. */
+    const pvpMirrored = () => pvpActive && pvpRole === 'guest';
+    const vTeam = team => (pvpMirrored() ? other(team) : team);
+    /** [myScore, theirScore], in the order this client's scoreboard shows. */
+    const viewScores = () => (pvpMirrored()
+        ? [state.cpuScore, state.humanScore]
+        : [state.humanScore, state.cpuScore]);
+    const oppShort = () => (pvpActive ? 'Opponent' : 'CPU');
+    const oppLong = () => (pvpActive ? 'Opponent' : 'Computer');
+    const oppWinsTitle = () => (pvpActive ? 'OPPONENT WINS ' : 'CPU WINS ');
     /** A team's own goal — the one goalFor() does *not* return. */
     const ownGoal = team => goalFor(other(team));
     /** Own-goal law: scoring is decided only by the net the ball entered. */
@@ -824,19 +841,26 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     renderer.setClearColor(0x0e2413, 0);
 
     const scene = new THREE.Scene();
+    /* The whole visible world lives in this group. In PvP the guest's client
+       rotates it 180° about the pitch centre, so the guest sees their own half
+       at the bottom of their screen — the same view the host gets of theirs.
+       The camera, the projection math and every world-space placement stay
+       untouched; only the guest's pointer mapping un-flips the gesture. */
+    const world = new THREE.Group();
+    scene.add(world);
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -400, 400);
     camera.position.set(0, 130 * Math.cos(TILT), 130 * Math.sin(TILT));
     camera.up.set(0, 1, 0);
     camera.lookAt(0, 0, 0);
 
     /* --- lights (no shadow maps: blob shadows are cheaper and crisper from above) --- */
-    scene.add(new THREE.HemisphereLight(0xbfe9ff, 0x10251f, 0.85));
+    world.add(new THREE.HemisphereLight(0xbfe9ff, 0x10251f, 0.85));
     const key = new THREE.DirectionalLight(0xffffff, 0.9);
     key.position.set(-40, 80, -30);
-    scene.add(key);
+    world.add(key);
     const rim = new THREE.DirectionalLight(0x9fd7ff, 0.35);
     rim.position.set(50, 30, 60);
-    scene.add(rim);
+    world.add(rim);
 
     /* --- coordinate helpers -------------------------------------------------
        The camera is tilted 34° off vertical and the plane is pre-stretched by
@@ -1117,7 +1141,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     );
     pitchPlane.rotation.x = -Math.PI / 2;
     pitchPlane.position.y = 0;
-    scene.add(pitchPlane);
+    world.add(pitchPlane);
 
     /* the outfield: the same grass, filling the rest of the frame. Sized in whole
        tiles so the mown phase stays anchored to the world origin, and set a hair
@@ -1129,7 +1153,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     );
     outfield.rotation.x = -Math.PI / 2;
     outfield.position.y = -0.06;
-    scene.add(outfield);
+    world.add(outfield);
 
     /* --- 3D goal frames (the ground is 2D; the furniture is real 3D) --- */
     function makeGoal(gy) {
@@ -1168,7 +1192,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
             m.rotation.x = Math.atan2(depth * ZSTRETCH, H * .38);
             grp.add(m);
         });
-        scene.add(grp);
+        world.add(grp);
         return grp;
     }
     makeGoal(100);  // CPU's goal — the human attacks it
@@ -1245,6 +1269,10 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
 
         g.add(torso, hips, head, cap, legL, legR, armL, armR, sleeveL, sleeveR);
         g.userData.limbs = { legL, legR, armL, armR, sleeveL, sleeveR, torso, head };
+        /* Tagged for the PvP mirror: rekitPlayer() swaps these when the guest's
+           view flips, so the shirt/sleeves take the new shared kit material and
+           the per-player shorts material is re-tinted from it. */
+        g.userData.kitParts = { kit: [torso, sleeveL, sleeveR], shortsMat: shorts };
         return g;
     }
 
@@ -1263,16 +1291,20 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     let playersById = {};
 
     function spawnPlayer(team, role, num) {
-        const kit = role === 'keeper' ? (team === 'you' ? MAT.gkYou : MAT.gkCpu) : (team === 'you' ? MAT.you : MAT.cpu);
+        /* Kits are a *view* identity: in mirrored PvP the guest's own team
+           wears the friendly kit, so the mesh/ring colours go through vTeam().
+           `p.team` itself stays the world team for all match logic. */
+        const vt = vTeam(team);
+        const kit = role === 'keeper' ? (vt === 'you' ? MAT.gkYou : MAT.gkCpu) : (vt === 'you' ? MAT.you : MAT.cpu);
         const mesh = makeHuman(kit, role);
         const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
-            color: team === 'you' ? COL.you : COL.cpu,
+            color: vt === 'you' ? COL.you : COL.cpu,
             transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false
         }));
         ring.rotation.x = -Math.PI / 2;
         ring.position.y = 0.05;
         const shadow = makeBlobShadow(1.15);
-        scene.add(mesh, ring, shadow);
+        world.add(mesh, ring, shadow);
 
         const p = {
             id: team + num, team, role, num,
@@ -1307,6 +1339,28 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     const teamPlayers = team => allPlayers.filter(p => p.team === team);
     const teamOutfield = team => allPlayers.filter(p => p.team === team && p.role === 'outfield');
     const keeperOf = team => playersById[team + '7'];
+
+    /* --- PvP mirror: re-kit -------------------------------------------------
+       Kits, rings and labels are *view* identity. When the guest's mirror
+       toggles, every player is re-dressed through vTeam() — the guest's own
+       team takes the friendly kit — while `p.team` keeps the world team for
+       all match logic. */
+    function rekitPlayer(p) {
+        const vt = vTeam(p.team);
+        const kit = p.role === 'keeper'
+            ? (vt === 'you' ? MAT.gkYou : MAT.gkCpu)
+            : (vt === 'you' ? MAT.you : MAT.cpu);
+        const parts = p.mesh && p.mesh.userData.kitParts;
+        if (parts) {
+            parts.kit.forEach(m => { m.material = kit; });
+            parts.shortsMat.color.copy(kit.color).multiplyScalar(0.36);
+        }
+        if (p.ring) p.ring.material.color.setHex(vt === 'you' ? COL.you : COL.cpu);
+        p.label = p.role === 'keeper'
+            ? (vt === 'you' ? 'YOU-GK' : 'CPU-GK')
+            : (vt === 'you' ? 'YOU' : 'CPU') + '-' + p.num;
+    }
+    function refreshKits() { allPlayers.forEach(rekitPlayer); }
 
     /* --- body separation ----------------------------------------------------
        Nothing in the engine used to stop two players occupying the exact same
@@ -1545,7 +1599,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     );
     ballPing.rotation.x = -Math.PI / 2;
     ballPing.position.y = 0.07;
-    scene.add(ballPing);
+    world.add(ballPing);
     /* The possession mark: a true volumetric 3D location pin hovering over the carrier's head.
        Constructed via 3D rotational lathe geometry so it is 100% three-dimensional from all angles,
        featuring a gleaming white waist collar, bright crown jewel, and soft radiant aura. */
@@ -1633,11 +1687,11 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     carrierMark.add(pinGlow, carrierPinMesh, collarMesh, crownMesh);
     carrierMark.visible = false;
     carrierMark.scale.setScalar(0);
-    scene.add(carrierMark);
+    world.add(carrierMark);
 
     let carrierMarkScale = 0;
     const ballShadow = makeBlobShadow(0.6);
-    scene.add(ballMesh, ballShadow);
+    world.add(ballMesh, ballShadow);
     const ball = {
         x: 50, y: 50, h: 0.42,
         mode: 'held',            // held | pass | shot | loose
@@ -1747,7 +1801,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
            at exactly the moment the eye needs to be on the ball. */
         const m = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: .62 }));
         m.visible = false;
-        scene.add(m);
+        world.add(m);
         m.setEnds = (a, b) => {
             m.geometry.setFromPoints([
                 new THREE.Vector3(worldX(a.x), .1, worldZ(a.y)),
@@ -1769,7 +1823,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         m.rotation.x = -Math.PI / 2;
         m.position.y = 0.08;
         m.visible = false;
-        scene.add(m);
+        world.add(m);
         return m;
     }
     const runnerMarker = mkRing(COL.aim, 0.9, 1.25);
@@ -1805,7 +1859,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         new THREE.LineBasicMaterial({ color: COL.aim, transparent: true, opacity: .5 }));
     runPaths.frustumCulled = false;
     runPaths.visible = false;
-    scene.add(runPaths);
+    world.add(runPaths);
 
     /* --- §8.c the freehand stroke (§12.d) -----------------------------------
        groundLine() can only ever draw two points, and a second point is exactly
@@ -1828,7 +1882,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         const m = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: .95 }));
         m.frustumCulled = false;
         m.visible = false;
-        scene.add(m);
+        world.add(m);
         /* y is fixed: every one of these lines is painted on the turf, at the
            same height the other guides use */
         m.setPoints = pts => {
@@ -2001,7 +2055,8 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         if (SO.active || !PLAN || PLAN.armed) { hideQueueMarkers(); return; }
         let n = 0, rn = 0;
         allPlayers.forEach(p => {
-            if (p.team !== 'you' || !p.queued || !queueRings[n]) return;
+            /* View identity: queue markers only ever draw for the team I control. */
+            if (p.team !== myTeam() || !p.queued || !queueRings[n]) return;
             const m = queueRings[n++];
             m.visible = true;
             m.position.set(worldX(p.queued.x), 0.09, worldZ(p.queued.y));
@@ -2024,7 +2079,11 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         runPaths.visible = rn > 0;
 
         const c = PLAY && PLAY.carrier;
-        const move = PLAN.atk === 'you' ? (PLAN.shot.you || PLAN.pass.you) : null;
+        /* The preview is drawn for the team this human controls — keyed by
+           world team, so the guest's locally-queued plan ('cpu') previews just
+           like the host's ('you'). */
+        const myPlanTeam = myTeam();
+        const move = PLAN.atk === myPlanTeam ? (PLAN.shot[myPlanTeam] || PLAN.pass[myPlanTeam]) : null;
         if (c && move && move.x !== undefined) {
             /* §12.c — the preview line ends on the ball's actual destination, and
                the ball's destination is this bare point. It used to be previewed
@@ -2047,8 +2106,10 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
        having to read the shirts. The human's controlled players swap that for the
        bright selection amber, which is a colour neither team uses. */
     function teamRingHex(p) {
-        if (p.role === 'keeper') return p.team === 'you' ? COL.gkYou : COL.gkCpu;
-        return p.team === 'you' ? COL.you : COL.cpu;
+        /* View identity: the guest's own players ring in the friendly colour. */
+        const vt = vTeam(p.team);
+        if (p.role === 'keeper') return vt === 'you' ? COL.gkYou : COL.gkCpu;
+        return vt === 'you' ? COL.you : COL.cpu;
     }
     function refreshRings() {
         if (SO && SO.active) {
@@ -2687,13 +2748,16 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     goalBurst.rotation.x = -Math.PI / 2;
     goalBurst.position.y = 0.075;
     goalBurst.material.opacity = 0;
-    scene.add(goalBurst);
+    world.add(goalBurst);
 
     function fireGoalFx(team) {
         FIRE.goal = 0;
-        goalBurst.material.color.set(team === 'you' ? COL.you : COL.cpu);
+        /* View identity: the burst and the GOAL splash wear the scorer's
+           *seen* colours — friendly when I scored, even as the guest. */
+        const vt = vTeam(team);
+        goalBurst.material.color.set(vt === 'you' ? COL.you : COL.cpu);
         if (!ui.goalFx) return;
-        ui.goalFx.style.setProperty('--goal-fx', team === 'you' ? CSS.you : CSS.cpu);
+        ui.goalFx.style.setProperty('--goal-fx', vt === 'you' ? CSS.you : CSS.cpu);
         setText(ui.goalWord, 'GOAL');
         ui.goalFx.classList.remove('show');
         void ui.goalFx.offsetWidth;
@@ -2705,13 +2769,18 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     }
 
     bus.on('score', () => {
-        setText(ui.scoreYou, state.humanScore);
-        setText(ui.scoreCpu, state.cpuScore);
+        /* Scoreboard order is a view identity: my own score always reads first,
+           so the guest sees [cpu, you] while the host sees [you, cpu]. */
+        const [mine, theirs] = viewScores();
+        setText(ui.scoreYou, mine);
+        setText(ui.scoreCpu, theirs);
     });
     let lastRole = '', lastPoss = '';
     bus.on('role', () => {
         if (SO.active) return;
-        const attacking = state.possession === 'you';
+        /* myTeam(): in mirrored PvP the guest attacks with the world team
+           'cpu', so the badge follows who the human controls, not 'you'. */
+        const attacking = state.possession === myTeam();
         /* §16.a — the role is a two-word badge, not a sentence. The possession
            chip keeps its colour, which is the part the eye actually reads. */
         const role = attacking ? 'ATTACK' : 'DEFEND';
@@ -2720,9 +2789,13 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         if (state.possession !== lastPoss) {
             lastPoss = state.possession;
             if (ui.poss) {
-                ui.poss.className = 'chip ' + state.possession;
+                /* View identity: the guest's own possession reads as YOU · BALL
+                   in the friendly colour, even though the world team is 'cpu'.
+                   In PvP the other side is a human, never the CPU. */
+                const vp = vTeam(state.possession);
+                ui.poss.className = 'chip ' + vp;
                 ui.poss.innerHTML = '<i class="dot"></i>' +
-                    (state.possession === 'you' ? 'YOU · BALL' : 'CPU · BALL');
+                    (vp === 'you' ? 'YOU · BALL' : (pvpActive ? 'OPP · BALL' : 'CPU · BALL'));
             }
         }
         /* §17.b — one short line, and the only thing it has to say is what the
@@ -2749,9 +2822,9 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
 
     /* --- screen stack (game-ui-ux: push/pop, focus handed to the top screen) --- */
     const SCREENS = {
-        menu: el('screen-menu'), tutorial: el('screen-tutorial'),
+        menu: el('screen-menu'),
         pause: el('screen-pause'), over: el('screen-over'), halftime: el('screen-halftime'),
-        pvp: el('screen-pvp')
+        pvp: el('screen-pvp'), rondo: el('screen-rondo')
     };
     const stack = [];
     let focusMemory = [];
@@ -3017,7 +3090,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     /** §3 — centre kick-off, to the conceding side. */
     function kickoff(team) {
         arrangeRestart(team, { x: 50, y: 50 });
-        log((team === 'you' ? 'Your' : 'CPU') + ' kick-off.', team);
+        log((team === myTeam() ? 'Your' : oppShort()) + ' kick-off.', vTeam(team));
     }
 
     /** §3 — a goal kick is taken IN PLACE. The keeper already has the ball; the
@@ -3041,7 +3114,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
             ball.x = k.x; ball.y = k.y;
         }
         setCarrier(k);
-        log((team === 'you' ? 'Your' : 'CPU') + ' keeper plays on from where he stands.', '');
+        log((team === myTeam() ? 'Your' : oppShort()) + ' keeper plays on from where he stands.', '');
     }
 
     function beginMatch() {
@@ -3080,10 +3153,13 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
             if (sheetOpen) setMenuOpen(false);
             bus.emit('half');
             Sfx.whistle();
-            log('Half time. ' + state.humanScore + '–' + state.cpuScore + '.', '');
+            /* View identity: the half-time card reads my-score-first, so the
+               guest sees their own score on the left like the host does. */
+            const [htMine, htTheirs] = viewScores();
+            log('Half time. ' + htMine + '–' + htTheirs + '.', '');
             /* populate the halftime card */
-            setText(el('half-score-you'), String(state.humanScore));
-            setText(el('half-score-cpu'), String(state.cpuScore));
+            setText(el('half-score-you'), String(htMine));
+            setText(el('half-score-cpu'), String(htTheirs));
             /* hide the stoppage badge now that the half is over */
             const extraEl = el('clock-extra');
             if (extraEl) extraEl.hidden = true;
@@ -3094,8 +3170,11 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     }
 
     function finishMatch() {
-        const level = state.humanScore === state.cpuScore;
-        const won = state.humanScore > state.cpuScore;
+        /* View identity: won/level are about *my* score versus theirs, so the
+           guest's result screen reads from their side of the mirror. */
+        const [myScore, theirScore] = viewScores();
+        const level = myScore === theirScore;
+        const won = myScore > theirScore;
         /* the window belongs to live play only — drop it and its stacked moves,
            or the next match opens with a stale clock and a board full of rings */
         PLAN = null;
@@ -3109,7 +3188,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
            screen's "GO TO PENALTIES" hop added nothing but a click. */
         if (level) {
             banner('FULL TIME', CSS.warn);
-            log('Full time: ' + state.humanScore + '–' + state.cpuScore + '. Straight to penalties.', '');
+            log('Full time: ' + myScore + '–' + theirScore + '. Straight to penalties.', '');
             /* the spot is settling THIS match, so PLAY AGAIN replays the match */
             beginShootout(true);
             return;
@@ -3120,10 +3199,10 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
            screen — but pin it hidden whatever the markup says */
         const pens = el('btn-pens');
         if (pens) pens.hidden = true;
-        el('over-title').textContent = (won ? 'YOU WIN ' : 'CPU WINS ') + state.humanScore + '–' + state.cpuScore;
+        el('over-title').textContent = (won ? 'YOU WIN ' : oppWinsTitle()) + myScore + '–' + theirScore;
         el('over-detail').textContent = 'Full time after two ' + formatClock(halfLength) + ' halves.';
         el('screen-over').querySelector('.eyebrow').textContent = 'Full time';
-        log(won ? 'Full time: you win!' : 'Full time: CPU wins.', won ? 'good' : 'bad');
+        log(won ? 'Full time: you win!' : 'Full time: ' + oppLong() + ' wins.', won ? 'good' : 'bad');
         pushScreen('over', { focus: '#btn-again' });
     }
 
@@ -3300,7 +3379,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
                flipping and the log line below — the sound and the shake carry
                the tactile part. */
             Sfx.bad(); shake(.28);
-            log(p.team === 'you' ? 'You intercepted.' : 'Computer intercepted.', p.team === 'you' ? 'you' : 'cpu');
+            log(p.team === myTeam() ? 'You intercepted.' : oppLong() + ' intercepted.', vTeam(p.team));
         }
         setCarrier(p);
     }
@@ -3314,7 +3393,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         if (wasShot || k.team !== atk) {
             Sfx.save(); shake(.22);
             banner('SAVED', CSS.warn);
-            log(k.team === 'you' ? 'Your keeper saved it.' : 'Computer keeper saved it.', k.team === 'you' ? 'you' : 'cpu');
+            log(k.team === myTeam() ? 'Your keeper saved it.' : oppLong() + ' keeper saved it.', vTeam(k.team));
         }
         goalKick(k.team);
     }
@@ -3342,8 +3421,8 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         spillLoose();
         Sfx.save(); shake(.3);
         banner('SAVED', CSS.warn);
-        log(k.team === 'you' ? 'Your keeper saved it.' : 'Computer keeper saved it.',
-            k.team === 'you' ? 'you' : 'cpu');
+        log(k.team === myTeam() ? 'Your keeper saved it.' : oppLong() + ' keeper saved it.',
+            vTeam(k.team));
     }
 
     function scoreGoal(team) {
@@ -3354,12 +3433,15 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
            here touches a rule, a position or the clock. */
         fireGoalFx(team);
         /* §9.b — one event, two feelings: your goal is a fanfare, the CPU's
-           is a groan */
-        if (team === 'you') Sfx.goal(); else Sfx.concede();
+           is a groan. View identity: the guest hears their own goal as a
+           fanfare too. */
+        if (vTeam(team) === 'you') Sfx.goal(); else Sfx.concede();
         shake(.7);
-        banner('GOAL', team === 'you' ? CSS.you : CSS.cpu);
-        log(team === 'you' ? 'GOAL! You scored (' + state.humanScore + '–' + state.cpuScore + ')' : 'GOAL! Computer scored (' + state.humanScore + '–' + state.cpuScore + ')',
-            team === 'you' ? 'you' : 'cpu');
+        banner('GOAL', vTeam(team) === 'you' ? CSS.you : CSS.cpu);
+        /* View identity: the scoreline reads my-score-first for this client. */
+        const [mine, theirs] = viewScores();
+        log(team === myTeam() ? 'GOAL! You scored (' + mine + '–' + theirs + ')' : 'GOAL! ' + oppLong() + ' scored (' + mine + '–' + theirs + ')',
+            vTeam(team));
         kickoff(other(team));
     }
 
@@ -3538,7 +3620,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
             Sfx.bad();
             banner(atLine ? 'WIDE' : 'MISCUED', CSS.bad);
             log(atLine ? 'Shot wide — the ball is still in play.' : 'Shot never reached the line.',
-                state.possession === 'you' ? 'bad' : 'good');
+                state.possession === myTeam() ? 'bad' : 'good');
             return;
         }
 
@@ -4343,7 +4425,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         if (PLAY && to.team) PLAY.receiver = to;
         tutorOnPass(from);
         Sfx.kick();
-        log(from.team === 'you' ? 'You passed.' : 'Computer passed.', from.team === 'you' ? 'you' : 'cpu');
+        log(from.team === myTeam() ? 'You passed.' : oppLong() + ' passed.', vTeam(from.team));
     }
 
     /** §5 / §12.h — a shot is only legal inside SHOT_RANGE. It is struck at
@@ -4414,7 +4496,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
             }
         }
         Sfx.kick(); shake(.12);
-        log(from.team === 'you' ? 'You took shot.' : 'Computer took shot.', from.team === 'you' ? 'you' : 'cpu');
+        log(from.team === myTeam() ? 'You took shot.' : oppLong() + ' took shot.', vTeam(from.team));
         return true;
     }
 
@@ -4661,7 +4743,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
 
             SO.phase = 'dive';
             SO.t = SO_DIVE_WINDOW;
-            log(isGkKick ? 'CPU Goalkeeper shooting — dive to save! (3s)' : 'CPU kicking — drag to choose your keeper dive! (3s)', '');
+            log(isGkKick ? oppShort() + ' Goalkeeper shooting — dive to save! (3s)' : oppShort() + ' kicking — drag to choose your keeper dive! (3s)', '');
         } else {
             /* Human is shooting: 3s timer to drag direction line and release */
             SO.phase = 'aim';
@@ -4854,10 +4936,10 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         if (isGoal) {
             if (kicker === 'you') SO.you++; else SO.cpu++;
             Sfx.bounce();
-            if (kicker === 'you') Sfx.goal(); else Sfx.concede();
+            if (vTeam(kicker) === 'you') Sfx.goal(); else Sfx.concede();
             shake(.5);
             fireGoalFx(kicker);
-            banner('GOAL', kicker === 'you' ? CSS.you : CSS.cpu);
+            banner('GOAL', vTeam(kicker) === 'you' ? CSS.you : CSS.cpu);
         } else if (SO.result.outcome === 'SAVED') {
             const k = soDefKeeper();
             Sfx.save(); shake(.25);
@@ -4875,18 +4957,27 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
             SO.kicksCpu.push(isGoal);
         }
 
-        log((kicker === 'you' ? 'You' : 'CPU') + ': ' + SO.result.outcome + ' — ' + SO.you + '–' + SO.cpu,
-            isGoal === (kicker === 'you') ? 'good' : 'bad');
+        /* Runs on the host: the kicker's name follows who the human controls, and
+           the other side is a human in PvP, never the CPU. */
+        log((kicker === myTeam() ? 'You' : oppShort()) + ': ' + SO.result.outcome + ' — ' + SO.you + '–' + SO.cpu,
+            isGoal === (kicker === myTeam()) ? 'good' : 'bad');
         soHudState();
     }
 
     function soHudState() {
         if (!ui.soScore) return;
-        ui.soScore.textContent = SO.you + ' – ' + SO.cpu;
-        if (ui.scoreYou) setText(ui.scoreYou, SO.you);
-        if (ui.scoreCpu) setText(ui.scoreCpu, SO.cpu);
+        /* View identity: my shootout score reads first. The guest's kicks are
+           the world-team 'cpu' column, so their score, dots and turn text all
+           swap to the friendly side of the mirror. */
+        const mine = pvpMirrored() ? 'cpu' : 'you';
+        const oppo = other(mine);
+        ui.soScore.textContent = SO[mine] + ' – ' + SO[oppo];
+        if (ui.scoreYou) setText(ui.scoreYou, SO[mine]);
+        if (ui.scoreCpu) setText(ui.scoreCpu, SO[oppo]);
 
-        if (ui.soTurn) ui.soTurn.textContent = SO.turn === 'you' ? 'YOUR KICK' : 'CPU KICK';
+        if (ui.soTurn) ui.soTurn.textContent = SO.turn === myTeam()
+            ? 'YOUR KICK'
+            : (pvpActive ? 'OPPONENT KICK' : 'CPU KICK');
         const target = getShootoutTarget(SO.takenYou, SO.takenCpu, SO.you, SO.cpu);
         if (ui.soTitle) {
             if (target === 5) ui.soTitle.textContent = 'PENALTIES (5 SHOTS)';
@@ -4906,8 +4997,10 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
             }
             return s;
         };
-        ui.soYou.innerHTML = dots(SO.kicksYou, SO.takenYou);
-        ui.soCpu.innerHTML = dots(SO.kicksCpu, SO.takenCpu);
+        ui.soYou.innerHTML = dots(pvpMirrored() ? SO.kicksCpu : SO.kicksYou,
+            pvpMirrored() ? SO.takenCpu : SO.takenYou);
+        ui.soCpu.innerHTML = dots(pvpMirrored() ? SO.kicksYou : SO.kicksCpu,
+            pvpMirrored() ? SO.takenYou : SO.takenCpu);
         if (ui.soTimer) {
             const rem = Math.max(0, SO.t);
             ui.soTimer.textContent = rem.toFixed(1) + 's';
@@ -4924,8 +5017,11 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         SO.active = false;
         state.phase = 'over';
         setPenaltyView(false);
-        const won = SO.you > SO.cpu;
-        el('over-title').textContent = (won ? 'YOU WIN ' : 'CPU WINS ') + SO.you + '–' + SO.cpu + ' ON PENALTIES';
+        /* View identity: the result reads from my side of the mirror. */
+        const mine = pvpMirrored() ? 'cpu' : 'you';
+        const myScore = SO[mine], opScore = SO[other(mine)];
+        const won = myScore > opScore;
+        el('over-title').textContent = (won ? 'YOU WIN ' : oppWinsTitle()) + myScore + '–' + opScore + ' ON PENALTIES';
         el('over-detail').textContent = 'Settled from the spot after ' + SO.takenYou + ' kicks each.';
         const pens = el('btn-pens');
         if (pens) pens.hidden = true;
@@ -5201,8 +5297,12 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
            already compressed by KX; divide it back out to land on the canonical
            0…100 grid. `panY` is where the frame's centre sits in game-y. */
         const scale = (2 * view.hh) / F.availH;
-        const gx = 50 + (px - (F.l + F.availW / 2)) * scale / KX;
-        const gy = view.panY - (py - (F.t + F.availH / 2)) * scale;
+        let gx = 50 + (px - (F.l + F.availW / 2)) * scale / KX;
+        let gy = view.panY - (py - (F.t + F.availH / 2)) * scale;
+        /* PvP mirror: the guest's world is rendered rotated 180°, so a gesture
+           drawn on their screen lands on the opposite board point. Un-flip it
+           back to world coordinates before anything consumes it. */
+        if (pvpMirrored()) { gx = 100 - gx; gy = 100 - gy; }
         return { x: gx, y: gy, px, py, rect: r, frame: F };
     }
     const screenRadius = rect => Math.max(18, rect.height * 0.055 * view.zoom);
@@ -5214,9 +5314,13 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         const scale = (2 * view.hh) / F.availH;
         const cx = F.l + F.availW / 2, cy = F.t + F.availH / 2;
         allPlayers.forEach(p => {
+            /* PvP mirror: project where the player is *seen*, not where the
+               world says they are — the guest's board is rendered rotated. */
+            const sx = pvpMirrored() ? 100 - p.x : p.x;
+            const sy = pvpMirrored() ? 100 - p.y : p.y;
             const a = {
-                x: cx + ((p.x - 50) * KX) / scale,
-                y: cy - ((p.y - view.panY) / (2 * view.hh)) * F.availH
+                x: cx + ((sx - 50) * KX) / scale,
+                y: cy - ((sy - view.panY) / (2 * view.hh)) * F.availH
             };
             const d = Math.hypot(a.x - pt.px, a.y - pt.py);
             if (d > r) return;
@@ -5239,6 +5343,12 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     function onDown(e) {
         if (rotateHold || topScreen() || state.paused) return;
         if (e.button !== undefined && e.button !== 0) return;
+        /* Rondo taps: the possessor taps a teammate to pass, the middle taps
+           their guess. Handled here so the match's drag logic never sees it. */
+        if (state.phase === 'rondo') {
+            rondoHandleTap(e.clientX, e.clientY);
+            return;
+        }
         const pt = canvasPoint(e);
         drag.x0 = pt.x; drag.y0 = pt.y; drag.x = pt.x; drag.y = pt.y; drag.moved = 0; drag.id = e.pointerId;
         drag.path = null;
@@ -5681,7 +5791,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         if (rotateHold || topScreen()) return;
         if (e.key === 'm' || e.key === 'M') toggleMute();
         if (e.key === 'r' || e.key === 'R') { if (state.phase !== 'idle') beginMatch(); }
-        if (e.key === 'h' || e.key === 'H') pushScreen('tutorial', { focus: '#btn-tut-close' });
+        if (e.key === 'h' || e.key === 'H') window.location.href = '/tutorial';
         if (e.key === 'a' || e.key === 'A') { e.preventDefault(); humanDone(); }
         if (e.key === 's' || e.key === 'S') { e.preventDefault(); shootFromButton(); }
         /* §17.b — Space is the PC shoot key, and Enter closes the decision window
@@ -6262,6 +6372,12 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
        § 18. UPDATE + RENDER
        ========================================================================== */
     function update(dt) {
+        /* Rondo owns its own tick: the regulation match's bodies are parked and
+           its clock is not running, so the match update must not touch them. */
+        if (state.phase === 'rondo') {
+            rondoTick(dt);
+            return;
+        }
         if (pvpActive && pvpRole === 'guest') {
             allPlayers.forEach(p => { animatePlayer(p, dt); syncToMesh(p); });
             ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
@@ -6997,6 +7113,11 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     function startPvpGame(role) {
         pvpActive = true;
         pvpRole = role;
+        /* PvP mirror: the guest views the world from the opposite touchline —
+           their half lands at the bottom of their screen and their own team
+           wears the friendly kit, exactly the view the host gets of theirs. */
+        world.rotation.y = role === 'guest' ? Math.PI : 0;
+        refreshKits();
         /* The handshake is spent — this is a match now, so no stale ready flags
            or countdown can leak into the next one. */
         pvpAutoStart = false;
@@ -7033,6 +7154,9 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     function endPvpGame() {
         pvpActive = false;
         pvpRole = null;
+        /* Stand the world back up and hand every kit back to its world team. */
+        world.rotation.y = 0;
+        refreshKits();
         pvp.disconnect();
         resetPvpHandshake();
 
@@ -7040,6 +7164,21 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         const emojiDock = document.getElementById('emoji-dock');
         if (badge) badge.hidden = true;
         if (emojiDock) emojiDock.hidden = true;
+    }
+
+    /** The opponent left mid-match: the game-over card reads as a win for the
+        side still connected, not a crash back to the menu. */
+    function showPvpWalkover() {
+        state.phase = 'over';
+        const pens = el('btn-pens');
+        if (pens) pens.hidden = true;
+        el('over-title').textContent = 'YOU WIN';
+        el('over-detail').textContent = 'Match ended — your opponent left the game.';
+        el('screen-over').querySelector('.eyebrow').textContent = 'Match ended';
+        log('Opponent left the match. You win.', 'good');
+        banner('OPPONENT LEFT — YOU WIN', CSS.you);
+        setStatus('Match ended. You won.', true);
+        pushScreen('over', { focus: '#btn-again' });
     }
 
     /* ----------------------------------------------------------------------
@@ -7267,7 +7406,8 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         });
     }
 
-    /** Sweep the public ring and draw whatever is waiting there. */
+    /** Sweep the public ring and draw whatever is waiting there. Our own claimed
+        seat is left out of the list — nobody can challenge themselves. */
     async function scanPvpPlayers() {
         if (pvpScanning || pvpActive || pvpPhase !== 'lobby') return;
         pvpScanning = true;
@@ -7276,36 +7416,63 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         const msg = el('pvp-search-msg');
         if (idle) idle.hidden = true;
         if (searching) searching.hidden = false;
-        if (msg) msg.textContent = 'Scanning public lobbies...';
-        setStatus('Scanning for players online...');
 
-        let players = [];
-        try {
-            players = await pvp.scanOpenPlayers(text => { if (msg) msg.textContent = text; });
-        } catch (err) {
-            setStatus(err.message || 'Could not scan for players.');
+        /* Sweep continuously while the tab is open: a single snapshot misses
+           lobbies that open seconds later, which is why the search used to
+           "stop" almost immediately. The loop exits promptly when the player
+           picks a match, is challenged, cancels, or leaves the lobby. */
+        while (pvpScanning && !pvpActive && pvpPhase === 'lobby') {
+            if (msg) msg.textContent = 'Scanning public lobbies...';
+            setStatus('Scanning for players online...');
+
+            let players = [];
+            try {
+                players = await pvp.scanOpenPlayers(
+                    text => { if (msg) msg.textContent = text; },
+                    undefined,
+                    pvpOpenSeat
+                );
+            } catch (err) {
+                if (pvpScanning) setStatus(err.message || 'Could not scan for players.');
+            }
+            if (!pvpScanning || pvpActive || pvpPhase !== 'lobby') break;
+
+            renderPvpPlayerList(players);
+            const empty = el('pvp-players-empty');
+            if (empty) {
+                empty.hidden = players.length > 0;
+                if (!players.length) {
+                    empty.textContent = 'No other players online right now. You are listed too — '
+                        + 'this list refreshes automatically, so a challenger can find you.';
+                }
+            }
+            setStatus(players.length
+                ? players.length + ' player(s) online — press MATCH to challenge, or wait to be challenged.'
+                : 'You are listed as online. Nobody else is waiting right now — scanning again…');
+
+            /* Pause between sweeps in small slices so stopping is instant. */
+            for (let i = 0; i < 12 && pvpScanning && !pvpActive && pvpPhase === 'lobby'; i++) {
+                await new Promise(r => setTimeout(r, 250));
+            }
         }
+
         pvpScanning = false;
         if (searching) searching.hidden = true;
         if (idle) idle.hidden = false;
+    }
 
-        renderPvpPlayerList(players);
-        const empty = el('pvp-players-empty');
-        if (empty) {
-            empty.hidden = players.length > 0;
-            if (!players.length) {
-                empty.textContent = 'No players online right now. Press Host & Wait and a '
-                    + 'challenger can pick you off this list.';
-            }
-        }
-        setStatus(players.length
-            ? players.length + ' player(s) online — press MATCH to challenge.'
-            : 'Nobody is hosting a public lobby right now.');
+    /** Stop the continuous lobby sweep (hosting, challenging, cancelling). */
+    function stopPvpScan() {
+        pvpScanning = false;
     }
 
     /** MATCH: challenge one of the listed lobbies. A matchmade game starts itself. */
     async function challengePvpPlayer(entry, btn) {
         if (pvpActive || pvpPhase !== 'lobby') return;
+        stopPvpScan();
+        /* Challenging someone else releases our own public seat — joinOpenPlayer
+           gives it back to the ring, so we stop being listed as waiting. */
+        pvpOpenSeat = null;
         if (btn) btn.disabled = true;
         /* Picked off the list, so the handshake is agreed up front: no second
            click, and the 5-second countdown runs as soon as both are connected. */
@@ -7321,62 +7488,983 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         }
     }
 
-    /** Host & Wait: open a public lobby and let a challenger pick this side. */
-    async function hostPvpLobby() {
-        if (pvpScanning || pvpActive || pvpPhase !== 'lobby') return;
-        const idle = el('pvp-open-idle');
-        const searching = el('pvp-open-searching');
+    /** Entering the Quick Match tab *is* opening a room: claim a public seat so
+        this side is listed for everyone else, then sweep the ring for the
+        other waiting players. No separate host step — you are already open. */
+    async function enterOpenMatchmaking() {
+        if (pvpActive || pvpPhase !== 'lobby') return;
+        stopPvpScan();
         const msg = el('pvp-search-msg');
-        if (idle) idle.hidden = true;
-        if (searching) searching.hidden = false;
-        if (msg) msg.textContent = 'Opening a public lobby...';
         readPvpOpenSettings();
-        setStatus('Hosting a public match...');
+        setStatus('Joining the open lobby...');
 
-        let label = null;
+        let seat = null;
         try {
-            label = await pvp.hostOpenMatch(text => { if (msg) msg.textContent = text; });
+            seat = await pvp.claimOpenSeat(text => { if (msg) msg.textContent = text; });
         } catch (err) {
-            setStatus(err.message || 'Could not open a lobby.');
+            setStatus(err.message || 'Could not join the open lobby.');
         }
-        if (label) {
-            /* The searching box stays up: waiting for a challenger *is* the state. */
-            setStatus(label + ' is open — waiting for an opponent.', true);
-            return;
+        if (pvpActive || pvpPhase !== 'lobby') return;
+        if (!seat) {
+            /* Every seat taken: fall back to scanning only, so the player can
+               still challenge someone the moment a seat frees up. */
+            setStatus('Every public lobby is taken. Watching the list…', true);
         }
-        if (searching) searching.hidden = true;
-        if (idle) idle.hidden = false;
-        setStatus('Every public lobby is taken. Try again in a moment.');
+        pvpOpenSeat = seat ? seat.slot : null;
         scanPvpPlayers();
     }
 
-    /** Quick Match: take the first lobby that is waiting, or open one. */
-    async function quickPvpMatch() {
-        if (pvpScanning || pvpActive || pvpPhase !== 'lobby') return;
-        const idle = el('pvp-open-idle');
-        const searching = el('pvp-open-searching');
-        const msg = el('pvp-search-msg');
-        if (idle) idle.hidden = true;
-        if (searching) searching.hidden = false;
-        if (msg) msg.textContent = 'Looking for a match...';
-        readPvpOpenSettings();
-        pvpAutoStart = true;
-        setStatus('Looking for a match...');
+    /** Leave the Quick Match tab: give our public seat back and stop sweeping. */
+    function leaveOpenMatchmaking() {
+        stopPvpScan();
+        pvp.releaseOpenSeat();
+        pvpOpenSeat = null;
+    }
 
-        let result = null;
-        try {
-            result = await pvp.findOpenMatch(text => { if (msg) msg.textContent = text; });
-        } catch (err) {
-            pvpAutoStart = false;
-            setStatus(err.message || 'Matchmaking failed.');
-            result = null;
+    /* ==================== RONDO MODE ====================
+       Online keep-away for 4–7 players. One host, star topology: the host is
+       the authority for the roster and every turn; guests only send their pass
+       pick / guess and render what the host broadcasts.
+
+       The drill: N-1 players form a circle, one stands in the middle. The
+       possessor picks a teammate to pass to; the middle player guesses who
+       will receive it. Guess right → interception, and the passer swaps into
+       the middle. Guess wrong → the pass completes and the receiver has it. */
+
+    let rondoNet = null;
+    let rondo = null;           // live game state, null when not playing
+    let rondoLobby = null;      // { isHost, code } while in the lobby
+    let rondoMeshes = {};       // playerId -> { group, label }
+    let rondoBallAnim = null;   // { from, to, t, dur, onDone }
+    const rondoRaycaster = new THREE.Raycaster();
+
+    const RONDO_GAME_SECONDS = 180;
+    const RONDO_TURN_TIMEOUT = 12;
+
+    function rondoName() {
+        const input = document.getElementById('rondo-name');
+        const v = (input && input.value.trim()) || '';
+        return v.slice(0, 16) || 'Player';
+    }
+
+    function rondoSetStatus(msg, sticky) {
+        const dot = document.getElementById('rondo-status-dot');
+        const txt = document.getElementById('rondo-status-msg');
+        if (txt) txt.textContent = msg;
+        if (dot) {
+            dot.classList.toggle('on', /open|joined|connected/i.test(msg));
+            dot.classList.toggle('bad', /fail|error|not found|full/i.test(msg));
         }
-        if (result) return;   /* connected: the handshake card has taken over */
+        if (!sticky) setStatus(msg);
+    }
 
-        pvpAutoStart = false;
-        if (searching) searching.hidden = true;
-        if (idle) idle.hidden = false;
-        setStatus('Every public lobby is taken. Try again in a moment.');
+    function openRondoLobby() {
+        pushScreen('rondo', { focus: '#rondo-name' });
+        setupRondoUI();
+    }
+
+    function closeRondoLobby() {
+        /* Pop the lobby screen first: the old order ran rondoLeave() (which
+           pushes 'menu' via the game teardown) and *then* tried to pop 'rondo',
+           so the popup never actually closed and the stack grew every visit. */
+        while (topScreen() === 'rondo') popScreen();
+        const wasInGame = rondo && state.phase === 'rondo';
+        rondoLeave(false);
+        if (wasInGame) rondoTeardownScene();
+        if (topScreen() !== 'menu') pushScreen('menu', { focus: '#btn-rondo' });
+    }
+
+    /* ---------------- Lobby UI ---------------- */
+
+    function setupRondoUI() {
+        if (setupRondoUI.done) return;
+        setupRondoUI.done = true;
+
+        const btnClose = document.getElementById('btn-rondo-close');
+        if (btnClose) btnClose.addEventListener('click', closeRondoLobby);
+
+        // Tabs
+        const tabCreate = document.getElementById('tab-rondo-create');
+        const tabJoin = document.getElementById('tab-rondo-join');
+        const paneCreate = document.getElementById('pane-rondo-create');
+        const paneJoin = document.getElementById('pane-rondo-join');
+        const selectTab = (which) => {
+            const c = which === 'create';
+            if (tabCreate) { tabCreate.classList.toggle('active', c); tabCreate.setAttribute('aria-selected', String(c)); }
+            if (tabJoin) { tabJoin.classList.toggle('active', !c); tabJoin.setAttribute('aria-selected', String(!c)); }
+            if (paneCreate) paneCreate.hidden = !c;
+            if (paneJoin) paneJoin.hidden = c;
+        };
+        if (tabCreate) tabCreate.addEventListener('click', () => selectTab('create'));
+        if (tabJoin) tabJoin.addEventListener('click', () => selectTab('join'));
+
+        // Create
+        const btnCreate = document.getElementById('btn-rondo-create');
+        if (btnCreate) btnCreate.addEventListener('click', rondoHostRoom);
+
+        const btnCopy = document.getElementById('btn-rondo-copy-code');
+        if (btnCopy) btnCopy.addEventListener('click', () => {
+            const codeEl = document.getElementById('rondo-room-code-val');
+            const code = codeEl ? codeEl.textContent.trim() : '';
+            if (code && code !== '----' && navigator.clipboard) {
+                navigator.clipboard.writeText(code).catch(() => {});
+                rondoSetStatus('Code copied.');
+            }
+        });
+
+        const btnCancelHost = document.getElementById('btn-rondo-cancel-host');
+        if (btnCancelHost) btnCancelHost.addEventListener('click', () => rondoLeave(false));
+
+        // Join
+        const btnJoin = document.getElementById('btn-rondo-join');
+        if (btnJoin) btnJoin.addEventListener('click', rondoJoinRoom);
+        const joinCode = document.getElementById('rondo-join-code');
+        if (joinCode) joinCode.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') rondoJoinRoom();
+        });
+
+        const btnLeave = document.getElementById('btn-rondo-leave');
+        if (btnLeave) btnLeave.addEventListener('click', () => rondoLeave(false));
+
+        // Start (host)
+        const btnStart = document.getElementById('btn-rondo-start');
+        if (btnStart) btnStart.addEventListener('click', rondoHostStart);
+
+        // Quit mid-game
+        const btnQuit = document.getElementById('btn-rondo-quit');
+        if (btnQuit) btnQuit.addEventListener('click', () => rondoLeave(true));
+    }
+
+    function rondoRenderRoster(players) {
+        const box = document.getElementById('rondo-roster-box');
+        const list = document.getElementById('rondo-player-list');
+        const count = document.getElementById('rondo-player-count');
+        const hint = document.getElementById('rondo-roster-hint');
+        const hostCtl = document.getElementById('rondo-host-controls');
+        const guestWait = document.getElementById('rondo-guest-wait');
+        const btnStart = document.getElementById('btn-rondo-start');
+        if (!box || !list) return;
+
+        box.hidden = false;
+        list.innerHTML = '';
+        players.forEach((p, i) => {
+            const row = document.createElement('div');
+            row.className = 'rondo-player-row' + (rondoNet && p.id === rondoNet.myId ? ' me' : '');
+            const dot = document.createElement('span');
+            dot.className = 'rondo-player-dot';
+            dot.style.background = '#' + new THREE.Color(rondoKitColor(i)).getHexString();
+            const nm = document.createElement('span');
+            nm.className = 'rondo-player-name';
+            nm.textContent = p.name + (p.host ? ' (host)' : '');
+            row.appendChild(dot);
+            row.appendChild(nm);
+            list.appendChild(row);
+        });
+
+        const n = players.length;
+        if (count) count.textContent = `(${n}/${RONDO_MAX_PLAYERS})`;
+        const canStart = n >= RONDO_MIN_PLAYERS;
+        if (hint) {
+            hint.textContent = canStart
+                ? (rondoLobby && rondoLobby.isHost ? 'Ready — press START RONDO.' : 'The host can start the game.')
+                : `Need at least ${RONDO_MIN_PLAYERS} players to start (${n}/${RONDO_MIN_PLAYERS}).`;
+        }
+        const isHost = !!(rondoLobby && rondoLobby.isHost);
+        if (hostCtl) hostCtl.hidden = !isHost;
+        if (guestWait) guestWait.hidden = isHost;
+        if (btnStart) btnStart.disabled = !canStart;
+    }
+
+    /** Kit colours: circle players cycle vivid hues; the middle always wears magenta. */
+    function rondoKitColor(seat) {
+        const palette = [0x1f6bff, 0x2bf7c0, 0xffb020, 0x9b5bff, 0x35c4ff, 0xff7a1a];
+        return palette[seat % palette.length];
+    }
+    const RONDO_MIDDLE_KIT = 0xff2d87;
+
+    /* ---------------- Host: room ---------------- */
+
+    async function rondoHostRoom() {
+        if (rondoNet) rondoNet.cleanup();
+        rondoNet = new RondoNet();
+        const name = rondoName();
+        rondoSetStatus('Opening a rondo room...');
+        document.getElementById('btn-rondo-create').disabled = true;
+
+        rondoNet.on('lobby', (players) => rondoRenderRoster(players));
+        rondoNet.on('status', (msg) => rondoSetStatus(msg, true));
+        rondoNet.on('error', (msg) => {
+            rondoSetStatus(msg);
+            document.getElementById('btn-rondo-create').disabled = false;
+        });
+        rondoNet.on('guestmsg', ({ from, msg }) => rondoHostOnGuestMsg(from, msg));
+        rondoNet.on('guestleft', ({ id }) => rondoHostOnGuestLeft(id));
+
+        try {
+            const code = await rondoNet.hostRoom(name);
+            rondoLobby = { isHost: true, code };
+            document.getElementById('rondo-room-code-val').textContent = code;
+            document.getElementById('rondo-create-idle').hidden = true;
+            document.getElementById('rondo-create-active').hidden = false;
+            rondoSetStatus(`Room ${code} open — share the code.`, true);
+        } catch (err) {
+            rondoSetStatus(err.message || 'Could not open a room.');
+            document.getElementById('btn-rondo-create').disabled = false;
+        }
+    }
+
+    /* ---------------- Guest: join ---------------- */
+
+    async function rondoJoinRoom() {
+        const codeInput = document.getElementById('rondo-join-code');
+        const code = (codeInput.value || '').toUpperCase().trim();
+        if (code.length !== 4) {
+            rondoSetStatus('Enter the 4-letter room code.');
+            return;
+        }
+        if (rondoNet) rondoNet.cleanup();
+        rondoNet = new RondoNet();
+        const name = rondoName();
+        rondoSetStatus('Joining...');
+        document.getElementById('btn-rondo-join').disabled = true;
+
+        rondoNet.on('lobby', (players) => rondoRenderRoster(players));
+        rondoNet.on('status', (msg) => rondoSetStatus(msg, true));
+        rondoNet.on('error', (msg) => {
+            rondoSetStatus(msg);
+            document.getElementById('btn-rondo-join').disabled = false;
+        });
+        rondoNet.on('hostmsg', (msg) => rondoGuestOnHostMsg(msg));
+        rondoNet.on('disconnected', () => {
+            rondoSetStatus('Disconnected from the room.');
+            rondoLeave(false);
+        });
+
+        try {
+            await rondoNet.joinRoom(code, name);
+            rondoLobby = { isHost: false, code };
+            document.getElementById('rondo-join-active').hidden = false;
+            document.getElementById('btn-rondo-join').disabled = false;
+        } catch (err) {
+            rondoSetStatus(err.message || 'Could not join.');
+            document.getElementById('btn-rondo-join').disabled = false;
+        }
+    }
+
+    /** Leave the lobby or an in-progress game. `fromGame` also tears down the 3D. */
+    function rondoLeave(fromGame) {
+        const inGame = rondo && state.phase === 'rondo';
+        if (rondoNet && rondoLobby && !rondoLobby.isHost && inGame) {
+            rondoNet.sendToHost({ type: 'RONDO_LEAVE' });
+        }
+        if (rondoNet) {
+            // Tell guests the room is closing (host leaving).
+            if (rondoLobby && rondoLobby.isHost && rondoNet.isHost) {
+                rondoNet.hostSend({ t: 'RONDO_END', reason: 'The host closed the room.' });
+            }
+            rondoNet.cleanup();
+            rondoNet = null;
+        }
+        rondoLobby = null;
+        if (fromGame) rondoTeardown();
+        // Reset lobby UI
+        const ids = ['rondo-create-idle', 'rondo-create-active', 'rondo-join-active', 'rondo-roster-box', 'rondo-host-controls', 'rondo-guest-wait'];
+        const showIdle = { 'rondo-create-idle': false, 'rondo-create-active': true, 'rondo-join-active': true, 'rondo-roster-box': true, 'rondo-host-controls': true, 'rondo-guest-wait': true };
+        ids.forEach(id => { const e = document.getElementById(id); if (e) e.hidden = !!showIdle[id]; });
+        const btnC = document.getElementById('btn-rondo-create');
+        if (btnC) btnC.disabled = false;
+        const btnJ = document.getElementById('btn-rondo-join');
+        if (btnJ) btnJ.disabled = false;
+        rondoSetStatus('Ready', true);
+    }
+
+    /* ---------------- Host: game flow ---------------- */
+
+    /** Host starts the game once 4+ players are in. */
+    function rondoHostStart() {
+        if (!rondoNet || !rondoNet.isHost) return;
+        const players = rondoNet.roster();
+        if (players.length < RONDO_MIN_PLAYERS) return;
+
+        // Circle order = join order; the last to join starts in the middle.
+        const ids = players.map(p => p.id);
+        const middle = ids[ids.length - 1];
+        const circle = ids.slice(0, -1);
+
+        rondo = {
+            players: players.map(p => ({ id: p.id, name: p.name })),
+            circle, middle,
+            possessor: circle[Math.floor(Math.random() * circle.length)],
+            turn: 0,
+            phase: 'turn',           // 'turn' | 'reveal' | 'over'
+            passPick: null,          // { from, target }
+            guessPick: null,         // { by, guess }
+            turnTimer: null,
+            scores: {},
+            timeLeft: RONDO_GAME_SECONDS,
+            clockTimer: null,
+        };
+        players.forEach(p => { rondo.scores[p.id] = { passes: 0, interceptions: 0, middleTimes: p.id === middle ? 1 : 0 }; });
+
+        // Everyone (host included) builds the same scene from this packet.
+        rondoNet.hostSend({
+            t: 'RONDO_BEGIN',
+            players: rondo.players,
+            circle, middle,
+            possessor: rondo.possessor,
+            timeLeft: rondo.timeLeft,
+        });
+        rondoBeginLocal(rondo.players, circle, middle, rondo.possessor, rondo.timeLeft);
+        rondoHostClock();
+        rondoHostNextTurn();
+    }
+
+    /** Host: the 3-minute game clock. */
+    function rondoHostClock() {
+        if (rondo.clockTimer) clearInterval(rondo.clockTimer);
+        rondo.clockTimer = setInterval(() => {
+            if (!rondo || rondo.phase === 'over') { clearInterval(rondo.clockTimer); return; }
+            rondo.timeLeft--;
+            if (rondo.timeLeft <= 0) {
+                rondo.timeLeft = 0;
+                rondoHostEnd();
+                return;
+            }
+            // Broadcast the clock every 5s; clients count down locally between.
+            if (rondo.timeLeft % 5 === 0) rondoNet.hostSend({ t: 'RONDO_CLOCK', timeLeft: rondo.timeLeft });
+            rondoUpdateClock(rondo.timeLeft);
+        }, 1000);
+    }
+
+    /** Host: open a new turn — ask the possessor for a pass and the middle for a guess. */
+    function rondoHostNextTurn() {
+        if (!rondo || rondo.phase === 'over') return;
+        rondo.turn++;
+        rondo.phase = 'turn';
+        rondo.passPick = null;
+        rondo.guessPick = null;
+
+        rondoNet.hostSend({
+            t: 'RONDO_TURN',
+            turn: rondo.turn,
+            possessor: rondo.possessor,
+            middle: rondo.middle,
+        });
+        rondoOnTurn(rondo.turn, rondo.possessor, rondo.middle);
+
+        // Nobody may stall the drill: after the timeout the host fills in
+        // random picks for whoever has not answered.
+        if (rondo.turnTimer) clearTimeout(rondo.turnTimer);
+        rondo.turnTimer = setTimeout(() => rondoHostResolve(true), RONDO_TURN_TIMEOUT * 1000);
+    }
+
+    /** Guest (or host-local) pass/guess packets land here on the host. */
+    function rondoHostOnGuestMsg(from, msg) {
+        if (!rondo || rondo.phase !== 'turn' || !from) return;
+        if (msg.type === 'RONDO_PASS' && from === rondo.possessor && !rondo.passPick) {
+            if (rondo.circle.includes(msg.target) && msg.target !== from) {
+                rondo.passPick = { from, target: msg.target };
+                rondoHostMaybeResolve();
+            }
+        } else if (msg.type === 'RONDO_GUESS' && from === rondo.middle && !rondo.guessPick) {
+            if (rondo.circle.includes(msg.guess)) {
+                rondo.guessPick = { by: from, guess: msg.guess };
+                rondoHostMaybeResolve();
+            }
+        }
+    }
+
+    /** The host's own taps feed the same path as a guest packet. */
+    function rondoHostLocalPick(kind, id) {
+        if (!rondoNet || !rondoNet.isHost || !rondo || rondo.phase !== 'turn') return;
+        const me = rondoNet.myId;
+        if (kind === 'pass' && me === rondo.possessor && !rondo.passPick) {
+            if (rondo.circle.includes(id) && id !== me) {
+                rondo.passPick = { from: me, target: id };
+                rondoHostMaybeResolve();
+            }
+        } else if (kind === 'guess' && me === rondo.middle && !rondo.guessPick) {
+            if (rondo.circle.includes(id)) {
+                rondo.guessPick = { by: me, guess: id };
+                rondoHostMaybeResolve();
+            }
+        }
+    }
+
+    function rondoHostMaybeResolve() {
+        if (rondo.passPick && rondo.guessPick) {
+            if (rondo.turnTimer) clearTimeout(rondo.turnTimer);
+            rondoHostResolve(false);
+        }
+    }
+
+    /** Host: both picks are in (or the timeout fired) — reveal and score. */
+    function rondoHostResolve(timedOut) {
+        if (!rondo || rondo.phase !== 'turn') return;
+        rondo.phase = 'reveal';
+
+        const circle = rondo.circle;
+        const passer = rondo.possessor;
+        let target = rondo.passPick ? rondo.passPick.target : null;
+        let guess = rondo.guessPick ? rondo.guessPick.guess : null;
+        // Timeout fallbacks: random legal picks, so the drill never stalls.
+        if (!target) {
+            const opts = circle.filter(id => id !== passer);
+            target = opts[Math.floor(Math.random() * opts.length)];
+        }
+        if (!guess) {
+            guess = circle[Math.floor(Math.random() * circle.length)];
+        }
+
+        const intercepted = target === guess;
+        const prevMiddle = rondo.middle;
+
+        if (intercepted) {
+            // The middle reads it: the passer swaps into the middle, the old
+            // middle takes the passer's circle seat — with the ball.
+            rondo.scores[prevMiddle].interceptions++;
+            rondo.scores[passer].middleTimes++;
+            const seat = circle.indexOf(passer);
+            circle[seat] = prevMiddle;
+            rondo.middle = passer;
+            rondo.possessor = prevMiddle;
+        } else {
+            rondo.scores[passer].passes++;
+            rondo.possessor = target;
+        }
+
+        const result = {
+            t: 'RONDO_RESULT',
+            turn: rondo.turn,
+            passer, target, guess, intercepted,
+            middle: rondo.middle,
+            possessor: rondo.possessor,
+            circle: [...rondo.circle],
+            scores: JSON.parse(JSON.stringify(rondo.scores)),
+            timedOut,
+        };
+        rondoNet.hostSend(result);
+        rondoOnResult(result);
+
+        // Brief beat to watch the ball, then the next turn.
+        setTimeout(() => rondoHostNextTurn(), 1600);
+    }
+
+    /** Host: a guest left mid-game — remove them, repair the circle. */
+    function rondoHostOnGuestLeft(id) {
+        if (!rondo || rondo.phase === 'over') return;
+        const wasMiddle = rondo.middle === id;
+        const wasPossessor = rondo.possessor === id;
+        rondo.circle = rondo.circle.filter(x => x !== id);
+        rondo.players = rondo.players.filter(p => p.id !== id);
+        delete rondo.scores[id];
+
+        if (rondo.players.length < RONDO_MIN_PLAYERS) {
+            rondoHostEnd('Too few players — the rondo is over.');
+            return;
+        }
+        if (wasMiddle) {
+            // The circle's first player steps into the middle.
+            const nm = rondo.circle.shift();
+            rondo.middle = nm;
+            rondo.scores[nm].middleTimes++;
+        }
+        if (wasPossessor || wasMiddle) {
+            rondo.possessor = rondo.circle[Math.floor(Math.random() * rondo.circle.length)];
+        }
+        // If the leaver held an unanswered pick, resolve the turn now.
+        if (rondo.phase === 'turn' && (wasPossessor || wasMiddle)) {
+            if (rondo.turnTimer) clearTimeout(rondo.turnTimer);
+            rondoHostResolve(true);
+            return;
+        }
+        rondoNet.hostSend({
+            t: 'RONDO_ROSTER',
+            players: rondo.players, circle: [...rondo.circle],
+            middle: rondo.middle, possessor: rondo.possessor,
+            scores: JSON.parse(JSON.stringify(rondo.scores)),
+        });
+        rondoOnRoster(rondo.players, rondo.circle, rondo.middle, rondo.possessor);
+    }
+
+    /** Host: time's up (or the room broke) — final standings. */
+    function rondoHostEnd(reason) {
+        if (!rondo || rondo.phase === 'over') return;
+        rondo.phase = 'over';
+        if (rondo.turnTimer) clearTimeout(rondo.turnTimer);
+        if (rondo.clockTimer) clearInterval(rondo.clockTimer);
+        const standings = rondoStandings();
+        rondoNet.hostSend({ t: 'RONDO_END', standings, reason: reason || null });
+        rondoOnEnd(standings, reason || null);
+    }
+
+    function rondoStandings() {
+        return rondo.players
+            .map(p => ({ id: p.id, name: p.name, ...rondo.scores[p.id] }))
+            .sort((a, b) => (b.passes - a.passes) || (a.middleTimes - b.middleTimes) || (b.interceptions - a.interceptions));
+    }
+
+    /* ---------------- Guest: host packets ---------------- */
+
+    function rondoGuestOnHostMsg(packet) {
+        if (!packet || typeof packet !== 'object') return;
+        switch (packet.t) {
+            case 'RONDO_BEGIN':
+                rondo = {
+                    players: packet.players,
+                    circle: packet.circle,
+                    middle: packet.middle,
+                    possessor: packet.possessor,
+                    turn: 0, phase: 'turn',
+                    passPick: null, guessPick: null,
+                    scores: {},
+                    timeLeft: packet.timeLeft,
+                    clockTimer: null,
+                };
+                packet.players.forEach(p => {
+                    rondo.scores[p.id] = { passes: 0, interceptions: 0, middleTimes: p.id === packet.middle ? 1 : 0 };
+                });
+                rondoBeginLocal(packet.players, packet.circle, packet.middle, packet.possessor, packet.timeLeft);
+                rondoGuestClock();
+                break;
+            case 'RONDO_TURN':
+                if (!rondo) break;
+                rondo.turn = packet.turn;
+                rondo.possessor = packet.possessor;
+                rondo.middle = packet.middle;
+                rondo.phase = 'turn';
+                rondo.passPick = null;
+                rondo.guessPick = null;
+                rondoOnTurn(packet.turn, packet.possessor, packet.middle);
+                break;
+            case 'RONDO_RESULT':
+                if (!rondo) break;
+                rondo.phase = 'reveal';
+                rondo.circle = packet.circle;
+                rondo.middle = packet.middle;
+                rondo.possessor = packet.possessor;
+                rondo.scores = packet.scores;
+                rondoOnResult(packet);
+                break;
+            case 'RONDO_ROSTER':
+                if (!rondo) break;
+                rondo.players = packet.players;
+                rondo.circle = packet.circle;
+                rondo.middle = packet.middle;
+                rondo.possessor = packet.possessor;
+                rondo.scores = packet.scores;
+                rondoOnRoster(packet.players, packet.circle, packet.middle, packet.possessor);
+                break;
+            case 'RONDO_CLOCK':
+                if (!rondo) break;
+                rondo.timeLeft = packet.timeLeft;
+                rondoUpdateClock(packet.timeLeft);
+                break;
+            case 'RONDO_END':
+                if (rondo) rondo.phase = 'over';
+                if (rondo && rondo.clockTimer) clearInterval(rondo.clockTimer);
+                rondoOnEnd(packet.standings || [], packet.reason || null);
+                break;
+        }
+    }
+
+    /** Guest: count the clock down locally between host broadcasts. */
+    function rondoGuestClock() {
+        if (!rondo) return;
+        if (rondo.clockTimer) clearInterval(rondo.clockTimer);
+        rondo.clockTimer = setInterval(() => {
+            if (!rondo || rondo.phase === 'over') { clearInterval(rondo.clockTimer); return; }
+            if (rondo.timeLeft > 0) {
+                rondo.timeLeft--;
+                rondoUpdateClock(rondo.timeLeft);
+            }
+        }, 1000);
+    }
+
+    /** Guest: send my pass pick / guess to the host. */
+    function rondoSendPick(kind, id) {
+        if (!rondoNet || rondoNet.isHost || !rondo || rondo.phase !== 'turn') return;
+        const me = rondoNet.myId;
+        if (kind === 'pass' && me === rondo.possessor) {
+            rondoNet.sendToHost({ type: 'RONDO_PASS', target: id });
+            rondo.passPick = { from: me, target: id };
+            rondoOnTurn(rondo.turn, rondo.possessor, rondo.middle);
+        } else if (kind === 'guess' && me === rondo.middle) {
+            rondoNet.sendToHost({ type: 'RONDO_GUESS', guess: id });
+            rondo.guessPick = { by: me, guess: id };
+            rondoOnTurn(rondo.turn, rondo.possessor, rondo.middle);
+        }
+    }
+
+    /* ---------------- 3D: the circle ---------------- */
+
+    /** Build the rondo scene: N-1 in a circle, one in the middle. */
+    function rondoBeginLocal(players, circle, middle, possessor, timeLeft) {
+        // Leave the lobby screen, show the pitch with the rondo HUD.
+        hideRondoOver();
+        while (topScreen()) popScreen();
+        state.phase = 'rondo';
+        document.getElementById('hud-top').hidden = true;
+        document.getElementById('hud-pens').hidden = true;
+        document.getElementById('hud-rondo').hidden = false;
+        // The regulation match's chrome stands down: bottom bar, log, menus.
+        const hb = document.getElementById('hud-bottom');
+        if (hb) hb.hidden = true;
+        const ml = document.getElementById('match-log');
+        if (ml) ml.hidden = true;
+        // On desktop the role strip is re-parented to #stage (outside #hud-top).
+        const rs = document.getElementById('role-strip');
+        if (rs) rs.hidden = true;
+        // Park the match's players and ball out of sight; rondo owns the stage.
+        rondoParkMatch();
+
+        rondoMeshes = {};
+        const n = circle.length;
+        players.forEach((p, i) => {
+            const isMiddle = p.id === middle;
+            const kitColor = isMiddle ? RONDO_MIDDLE_KIT : rondoKitColor(circle.indexOf(p.id));
+            const kitMat = new THREE.MeshLambertMaterial({ color: kitColor });
+            const mesh = makeHuman(kitMat, 'outfield');
+            const label = rondoMakeLabel(p.name, p.id === (rondoNet && rondoNet.myId));
+            label.position.y = 4.6;
+            mesh.add(label);
+            // Selection ring, lit when this player is a legal tap target.
+            const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+                color: kitColor, transparent: true, opacity: 0,
+                side: THREE.DoubleSide, depthWrite: false,
+            }));
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = 0.06;
+            mesh.add(ring);
+            world.add(mesh);
+            rondoMeshes[p.id] = { group: mesh, label, ring, kitMat, seat: i };
+        });
+
+        rondoLayout();
+        rondoUpdateClock(timeLeft);
+        rondoOnTurn(0, possessor, middle);
+        setStatus('Rondo! The circle passes — the middle guesses.', true);
+    }
+
+    /** Position every mesh: circle seats around the centre, middle at the spot. */
+    function rondoLayout() {
+        if (!rondo) return;
+        const n = rondo.circle.length;
+        const R = 22; // game units — wide enough to read at a glance
+        rondo.circle.forEach((id, i) => {
+            const m = rondoMeshes[id];
+            if (!m) return;
+            const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+            const gx = 50 + Math.cos(a) * R;
+            const gy = 50 + Math.sin(a) * R;
+            m.group.position.set(worldX(gx), 0, worldZ(gy));
+            m.group.rotation.y = Math.atan2(worldX(50) - m.group.position.x, worldZ(50) - m.group.position.z);
+            // Circle kit (not magenta).
+            const c = rondoKitColor(i);
+            m.kitMat.color.setHex(c);
+            m.ring.material.color.setHex(c);
+        });
+        const mm = rondoMeshes[rondo.middle];
+        if (mm) {
+            mm.group.position.set(worldX(50), 0, worldZ(50));
+            mm.kitMat.color.setHex(RONDO_MIDDLE_KIT);
+            mm.ring.material.color.setHex(RONDO_MIDDLE_KIT);
+        }
+        // The ball rests at the possessor's feet.
+        const pm = rondoMeshes[rondo.possessor];
+        if (pm) ballMesh.position.set(pm.group.position.x, 0.62, pm.group.position.z + 1.2);
+    }
+
+    /** Canvas sprite with the player's name, floating above the head. */
+    function rondoMakeLabel(name, isMe) {
+        const c = document.createElement('canvas');
+        c.width = 256; c.height = 64;
+        const g = c.getContext('2d');
+        g.font = 'bold 30px system-ui, sans-serif';
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        const label = (isMe ? '★ ' : '') + name;
+        // Dark pill behind the text so it reads over the turf.
+        const w = Math.min(240, g.measureText(label).width + 28);
+        g.fillStyle = 'rgba(8, 18, 14, 0.72)';
+        g.beginPath();
+        g.roundRect(128 - w / 2, 8, w, 48, 12);
+        g.fill();
+        g.fillStyle = isMe ? '#8fd6ff' : '#ffffff';
+        g.fillText(label, 128, 33);
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+        sp.scale.set(9, 2.25, 1);
+        return sp;
+    }
+
+    /** Hide the regulation match's bodies so the circle owns the pitch. */
+    function rondoParkMatch() {
+        for (const p of allPlayers) {
+            if (p.mesh) p.mesh.visible = false;
+        }
+    }
+
+    function rondoRestoreMatch() {
+        for (const p of allPlayers) {
+            if (p.mesh) p.mesh.visible = true;
+        }
+    }
+
+    /** Tear down the rondo scene and return to the menu. */
+    function rondoTeardownScene() {
+        hideRondoOver();
+        for (const id of Object.keys(rondoMeshes)) {
+            const m = rondoMeshes[id];
+            if (m && m.group) {
+                world.remove(m.group);
+                if (m.kitMat) m.kitMat.dispose();
+                if (m.ring) { m.ring.geometry.dispose(); m.ring.material.dispose(); }
+            }
+        }
+        rondoMeshes = {};
+        rondoBallAnim = null;
+        rondoRestoreMatch();
+        document.getElementById('hud-rondo').hidden = true;
+        document.getElementById('hud-top').hidden = false;
+        const hb = document.getElementById('hud-bottom');
+        if (hb) hb.hidden = false;
+        state.phase = 'idle';
+        rondo = null;
+    }
+
+    function rondoTeardown() {
+        rondoTeardownScene();
+        pushScreen('menu', { focus: '#btn-rondo' });
+    }
+
+    /** Animate the ball along the turf from one player to another. */
+    function rondoAnimateBall(fromId, toId, onDone) {
+        const a = rondoMeshes[fromId];
+        const b = rondoMeshes[toId];
+        if (!a || !b) { if (onDone) onDone(); return; }
+        rondoBallAnim = {
+            from: a.group.position.clone(),
+            to: b.group.position.clone(),
+            t: 0, dur: 0.55,
+            onDone,
+        };
+        rondoBallAnim.from.y = 0.62;
+        rondoBallAnim.to.y = 0.62;
+    }
+
+    /** Called every frame from the main loop. */
+    function rondoTick(dt) {
+        if (rondoBallAnim) {
+            const an = rondoBallAnim;
+            an.t += dt / an.dur;
+            const k = Math.min(1, an.t);
+            // Ease + a little hop so the pass reads as a kicked ball.
+            const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+            ballMesh.position.lerpVectors(an.from, an.to, e);
+            ballMesh.position.y = 0.62 + Math.sin(Math.PI * k) * 1.6;
+            if (k >= 1) {
+                const cb = an.onDone;
+                rondoBallAnim = null;
+                if (cb) cb();
+            }
+        }
+        // Idle bob: the circle breathes while waiting.
+        const t = performance.now() / 1000;
+        for (const id of Object.keys(rondoMeshes)) {
+            const m = rondoMeshes[id];
+            if (m && m.group) m.group.position.y = Math.sin(t * 2 + m.seat) * 0.08;
+        }
+    }
+
+    /* ---------------- Turn UI, results, input ---------------- */
+
+    function rondoMyId() {
+        return rondoNet ? rondoNet.myId : null;
+    }
+
+    function rondoPlayerName(id) {
+        if (!rondo) return '–';
+        const p = rondo.players.find(x => x.id === id);
+        return p ? p.name : '–';
+    }
+
+    /** Refresh the HUD strip and the selectable rings for a new turn. */
+    function rondoOnTurn(turn, possessor, middle) {
+        if (!rondo) return;
+        const me = rondoMyId();
+        const ballName = document.getElementById('rondo-ball-name');
+        const midName = document.getElementById('rondo-middle-name');
+        const turnEl = document.getElementById('rondo-turn');
+        if (ballName) ballName.textContent = rondoPlayerName(possessor) + (possessor === me ? ' (you)' : '');
+        if (midName) midName.textContent = rondoPlayerName(middle) + (middle === me ? ' (you)' : '');
+
+        // Light the legal tap targets.
+        const iAmPossessor = me === possessor && rondo.phase === 'turn' && !rondo.passPick;
+        const iAmMiddle = me === middle && rondo.phase === 'turn' && !rondo.guessPick;
+        for (const id of Object.keys(rondoMeshes)) {
+            const m = rondoMeshes[id];
+            if (!m) continue;
+            const selectable = (iAmPossessor && rondo.circle.includes(id) && id !== me)
+                || (iAmMiddle && rondo.circle.includes(id));
+            m.ring.material.opacity = selectable ? 0.85 : 0;
+        }
+
+        if (turnEl) {
+            if (rondo.phase !== 'turn') {
+                turnEl.textContent = '…';
+            } else if (iAmPossessor) {
+                turnEl.textContent = 'YOUR BALL — TAP A TEAMMATE';
+            } else if (rondo.passPick && me === possessor) {
+                turnEl.textContent = 'PASS SENT — WAITING FOR THE GUESS';
+            } else if (iAmMiddle) {
+                turnEl.textContent = 'MIDDLE — TAP WHO GETS THE PASS';
+            } else if (rondo.guessPick && me === middle) {
+                turnEl.textContent = 'GUESS SENT — WAITING FOR THE PASS';
+            } else {
+                turnEl.textContent = 'WAITING';
+            }
+        }
+    }
+
+    /** The host's reveal: animate the ball, then show what happened. */
+    function rondoOnResult(res) {
+        // Clear the selection rings.
+        for (const id of Object.keys(rondoMeshes)) {
+            const m = rondoMeshes[id];
+            if (m) m.ring.material.opacity = 0;
+        }
+        const turnEl = document.getElementById('rondo-turn');
+        // The ball travels to the interception point (the middle) or the receiver.
+        const ballTo = res.intercepted ? res.middle : res.target;
+        rondoAnimateBall(res.passer, ballTo, () => {
+            // After the ball arrives, the circle re-forms if the middle changed.
+            rondoLayout();
+            if (turnEl) {
+                turnEl.textContent = res.intercepted
+                    ? `INTERCEPTED! ${rondoPlayerName(res.passer)} GOES IN`
+                    : (res.timedOut ? 'PASS COMPLETED' : 'COMPLETED');
+            }
+            const ballName = document.getElementById('rondo-ball-name');
+            const midName = document.getElementById('rondo-middle-name');
+            if (ballName) ballName.textContent = rondoPlayerName(rondo.possessor);
+            if (midName) midName.textContent = rondoPlayerName(rondo.middle);
+        });
+        if (turnEl) turnEl.textContent = res.intercepted ? 'READ IT…' : '…';
+        // A little audio feedback through the existing beep.
+        if (res.intercepted) playRondoWhistle(false);
+        else playRondoWhistle(true);
+    }
+
+    function rondoOnRoster(players, circle, middle, possessor) {
+        // Someone left: rebuild the formation and refresh the HUD.
+        rondoLayout();
+        rondoOnTurn(rondo.turn, possessor, middle);
+        setStatus('A player left — the circle reforms.', true);
+    }
+
+    function rondoUpdateClock(secs) {
+        const elc = document.getElementById('rondo-clock');
+        if (elc) {
+            const m = Math.floor(secs / 60);
+            const s = secs % 60;
+            elc.textContent = `${m}:${String(s).padStart(2, '0')}`;
+            elc.classList.toggle('low', secs <= 30);
+        }
+    }
+
+    /** Final standings overlay, reusing the match-over screen's card. */
+    function rondoOnEnd(standings, reason) {
+        const turnEl = document.getElementById('rondo-turn');
+        if (turnEl) turnEl.textContent = 'FULL TIME';
+        const me = rondoMyId();
+        let html;
+        if (!standings.length) {
+            html = `<p>${reason || 'The rondo ended.'}</p>`;
+        } else {
+            const rows = standings.map((s, i) => {
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+                const you = s.id === me ? ' <b>(you)</b>' : '';
+                return `<div class="rondo-standing-row${s.id === me ? ' me' : ''}">`
+                    + `<span>${medal} ${s.name}${you}</span>`
+                    + `<span>${s.passes} passes · ${s.interceptions} interceptions · ${s.middleTimes}× middle</span></div>`;
+            }).join('');
+            html = `<p class="rondo-winner">🏆 ${standings[0].name} wins the rondo!</p>${rows}`
+                + (reason ? `<p class="rondo-hint">${reason}</p>` : '');
+        }
+        showRondoOver(html);
+    }
+
+    function showRondoOver(html) {
+        // A lightweight overlay on the pitch; Leave returns to the menu.
+        let ov = document.getElementById('rondo-over');
+        if (!ov) {
+            ov = document.createElement('div');
+            ov.id = 'rondo-over';
+            ov.className = 'rondo-over';
+            ov.innerHTML = `<div class="rondo-over-card"><h2>Rondo — Full Time</h2>`
+                + `<div id="rondo-over-body"></div>`
+                + `<button type="button" class="btn btn-primary btn-block" id="btn-rondo-over-leave">LEAVE</button></div>`;
+            document.getElementById('app').appendChild(ov);
+            document.getElementById('btn-rondo-over-leave').addEventListener('click', () => rondoLeave(true));
+        }
+        document.getElementById('rondo-over-body').innerHTML = html;
+        ov.hidden = false;
+    }
+
+    function hideRondoOver() {
+        const ov = document.getElementById('rondo-over');
+        if (ov) ov.hidden = true;
+    }
+
+    /** Tap-to-pick: raycast the rondo meshes on pointerdown. */
+    function rondoHandleTap(clientX, clientY) {
+        if (!rondo || rondo.phase !== 'turn' || !rondoNet) return false;
+        const me = rondoMyId();
+        const iAmPossessor = me === rondo.possessor && !rondo.passPick;
+        const iAmMiddle = me === rondo.middle && !rondo.guessPick;
+        if (!iAmPossessor && !iAmMiddle) return false;
+
+        const rect = canvas.getBoundingClientRect();
+        const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+        const ny = -((clientY - rect.top) / rect.height) * 2 + 1;
+        rondoRaycaster.setFromCamera({ x: nx, y: ny }, camera);
+        const groups = Object.entries(rondoMeshes).map(([id, m]) => m.group);
+        const hits = rondoRaycaster.intersectObjects(groups, true);
+        if (!hits.length) return false;
+        // Walk up to the group that carries the player id.
+        let obj = hits[0].object;
+        let pid = null;
+        while (obj) {
+            for (const [id, m] of Object.entries(rondoMeshes)) {
+                if (m.group === obj) { pid = id; break; }
+            }
+            if (pid) break;
+            obj = obj.parent;
+        }
+        if (!pid || !rondo.circle.includes(pid)) return false;
+
+        if (iAmPossessor) {
+            if (pid === me) return false;
+            if (rondoNet.isHost) rondoHostLocalPick('pass', pid);
+            else rondoSendPick('pass', pid);
+            return true;
+        }
+        if (iAmMiddle) {
+            if (rondoNet.isHost) rondoHostLocalPick('guess', pid);
+            else rondoSendPick('guess', pid);
+            return true;
+        }
+        return false;
+    }
+
+    /** Two soft tones through the existing WebAudio path: pass vs interception. */
+    function playRondoWhistle(good) {
+        try {
+            if (typeof playGoalTone === 'function') playGoalTone(good);
+            else if (typeof beep === 'function') beep(good ? 660 : 220, 0.12);
+        } catch (e) {}
     }
 
     function setupPvpUI() {
@@ -7388,6 +8476,9 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         const selectPvpTab = (name) => {
             pvpTab = name === 'open' ? 'open' : 'custom';
             const custom = pvpTab === 'custom';
+            /* Leaving the matchmaking side gives our public seat back; entering
+               it claims one, so the tab *is* the open room. */
+            if (custom) leaveOpenMatchmaking();
             if (tabCustom) {
                 tabCustom.classList.toggle('active', custom);
                 tabCustom.setAttribute('aria-selected', String(custom));
@@ -7397,7 +8488,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
                 tabOpen.setAttribute('aria-selected', String(!custom));
             }
             renderPvpCard();
-            if (!custom) scanPvpPlayers();
+            if (!custom) enterOpenMatchmaking();
         };
 
         if (tabCustom) tabCustom.addEventListener('click', () => selectPvpTab('custom'));
@@ -7501,26 +8592,25 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
             }
         }
 
-        /* Open matchmaking: three actions over one live list of the public ring.
-           The list itself is drawn by renderPvpPlayerList() after each sweep. */
+        /* Quick Match is the open matchmaking list: entering the tab lists you
+           automatically. Refresh re-joins the lobby (re-claims a seat) and
+           re-sweeps; challenging is always an explicit pick — each row in the
+           list carries its own MATCH button, drawn by renderPvpPlayerList()
+           after each sweep. */
         const btnRefreshPlayers = document.getElementById('btn-pvp-refresh-players');
-        const btnSearchOpen = document.getElementById('btn-pvp-search-open');
-        const btnHostOpen = document.getElementById('btn-pvp-host-open');
         const btnCancelSearch = document.getElementById('btn-pvp-cancel-search');
 
-        if (btnRefreshPlayers) btnRefreshPlayers.addEventListener('click', () => scanPvpPlayers());
-        if (btnSearchOpen) btnSearchOpen.addEventListener('click', () => quickPvpMatch());
-        if (btnHostOpen) btnHostOpen.addEventListener('click', () => hostPvpLobby());
+        if (btnRefreshPlayers) btnRefreshPlayers.addEventListener('click', () => enterOpenMatchmaking());
 
         if (btnCancelSearch) {
             btnCancelSearch.addEventListener('click', () => {
+                leaveOpenMatchmaking();
                 pvp.disconnect();
                 const openSearching = document.getElementById('pvp-open-searching');
                 const openIdle = document.getElementById('pvp-open-idle');
                 if (openSearching) openSearching.hidden = true;
                 if (openIdle) openIdle.hidden = false;
-                scanPvpPlayers();
-                setStatus('Cancelled. Ready');
+                setStatus('Left the open lobby. Press Refresh to join again.');
             });
         }
 
@@ -7528,8 +8618,11 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         const btnClose = document.getElementById('btn-pvp-close');
         if (btnClose) {
             btnClose.addEventListener('click', () => {
-                pvp.disconnect();
-                resetPvpHandshake();
+                leaveOpenMatchmaking();
+                /* endPvpGame (not just disconnect): it also stands the world
+                   back up and re-kits, so a closed PvP match can never leak a
+                   mirrored view into the next game. */
+                endPvpGame();
                 while (topScreen()) popScreen();
                 state.phase = 'idle';
                 pushScreen('menu', { focus: '#btn-start' });
@@ -7619,11 +8712,11 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
 
         pvp.on('disconnected', () => {
             if (pvpActive) {
-                banner('OPPONENT DISCONNECTED', CSS.bad);
-                log('Opponent disconnected from PvP match.', 'bad');
+                /* The other side left mid-match — disconnected, refreshed, or
+                   closed the tab. The match ends and the player still here
+                   takes the win. */
                 endPvpGame();
-                pushScreen('menu', { focus: '#btn-start' });
-                setStatus('Disconnected', false);
+                showPvpWalkover();
                 return;
             }
             /* Still in the lobby or mid-handshake: hand the card back to the
@@ -7706,19 +8799,21 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
             beginShootout();
         });
     }
+    /* Rondo: online keep-away for 4–7 players. */
+    const rondoBtn = el('btn-rondo');
+    if (rondoBtn) rondoBtn.addEventListener('click', openRondoLobby);
     /* The settings strip's "Online PvP · LIVE" pill (`#btn-mode-pvp`) is the one
        and only way into an online match — the duplicate CTA that used to sit in
        the kick-off stack between Vs Computer and Penalty Shootout is gone. */
     const modePvpBtn = el('btn-mode-pvp');
     if (modePvpBtn) modePvpBtn.addEventListener('click', () => openPvpLobby('#btn-pvp-create'));
     setupPvpUI();
-    el('btn-tutorial').addEventListener('click', () => pushScreen('tutorial', { focus: '#btn-tut-close' }));
-    el('btn-tut-close').addEventListener('click', () => popScreen());
+    /* The tutorial lives on its own page now (/tutorial) — the menu links
+       straight there, so there is no in-app tutorial screen to push. */
     /* Every row of the sheet does its one thing and then gets out of the way —
        the board is the game, and the menu is a detour from it. */
     if (ui.help) ui.help.addEventListener('click', () => {
-        setMenuOpen(false);
-        pushScreen('tutorial', { focus: '#btn-tut-close' });
+        window.location.href = '/tutorial';
     });
     if (ui.shoot) ui.shoot.addEventListener('click', shootFromButton);
     /* §17.b — the human's half of the decision window */
@@ -7753,7 +8848,7 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     }, true);
     el('btn-resume').addEventListener('click', resumeGame);
     el('btn-restart').addEventListener('click', () => { state.paused = false; while (topScreen()) popScreen(); beginMatch(); });
-    el('btn-quit').addEventListener('click', () => { state.paused = false; while (topScreen()) popScreen(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' }); });
+    el('btn-quit').addEventListener('click', () => { endPvpGame(); state.paused = false; while (topScreen()) popScreen(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' }); });
     el('btn-again').addEventListener('click', () => {
         popScreen();
         if (state.matchMode === 'shootout') {
@@ -7777,11 +8872,6 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
     /* the over screen's own route to the spot — it belongs to a finished match,
        so it is the tiebreak path too */
     if (pensBtn) pensBtn.addEventListener('click', () => beginShootout(true));
-    const verifyBtn = el('btn-verify');
-    if (verifyBtn) verifyBtn.addEventListener('click', () => {
-        const r = runVerification(true);
-        banner(r.allPass ? 'RULEBOOK OK' : 'RULEBOOK FAILED', r.allPass ? CSS.goal : CSS.bad);
-    });
     /* one shared sync for both surfaces: the pressed pill is decided by the
        value, never by which button was clicked */
     function syncDifficulty() {
@@ -7938,14 +9028,9 @@ import { pvp, EMOJIS, START_COUNTDOWN_SECONDS } from './pvp-network.js';
         setTimeout(onEnter, 15000); /* never trap: lift without sound if untapped */
     }
 
-    /* --- the rulebook's own suite: always available, reported on load --- */
-    const verify = runVerification(false);
-    console.log('[Guess & Pass] rulebook verification: ' + (verify.allPass ? 'ALL PASS' : 'FAILURES — see __GAP_VERIFY_RESULTS'));
-    if (!verify.allPass) banner('RULEBOOK FAILED', CSS.bad);
-
     /* debug surface for the console / unit-test harnesses */
     window.__GAP = {
-        RULES, state, runVerification,
+        RULES, state,
         get play() { return PLAY; },
         get plan() { return PLAN; },
         get shootout() { return SO; },

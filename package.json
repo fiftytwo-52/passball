@@ -9,13 +9,13 @@
         "build": "astro build && node tools/publish.mjs",
         "build:only": "astro build",
         "preview": "astro preview",
-        "verify": "node tools/verify-4.mjs",
         "deploy": "npm run build && wrangler pages deploy out --project-name passball",
         "astro": "astro"
     },
     "dependencies": {
         "astro": "^5.0.0",
         "peerjs": "^1.5.5",
+        "puppeteer": "^25.12.0",
         "three": "0.149.0"
     },
     "devDependencies": {

@@ -196,6 +196,35 @@ import '../styles/global.css';
                 </span>
             </section>
 
+            <!-- ===================== HUD (RONDO STRIP) =====================
+                 While a rondo is live the HUD swaps into this view: the clock,
+                 whose ball it is, who is in the middle, and what the local
+                 player must do right now. -->
+            <section id="hud-rondo" hidden aria-label="Rondo">
+                <span class="panel panel-rondo">
+                    <span class="hud-label">RONDO</span>
+                    <span class="rondo-clock" id="rondo-clock" aria-live="polite">3:00</span>
+                </span>
+
+                <span class="panel panel-rondo">
+                    <span class="hud-label">Ball</span>
+                    <span id="rondo-ball-name" class="rondo-name">–</span>
+                </span>
+
+                <span class="panel panel-rondo">
+                    <span class="hud-label">Middle</span>
+                    <span id="rondo-middle-name" class="rondo-name rondo-middle">–</span>
+                </span>
+
+                <span class="panel panel-rondo rondo-turn-group">
+                    <span id="rondo-turn" aria-live="polite">WAITING</span>
+                </span>
+
+                <span class="panel panel-rondo">
+                    <button type="button" class="btn btn-ghost-sm" id="btn-rondo-quit">Leave</button>
+                </span>
+            </section>
+
             <!-- ============================== DECISION RING ==============================
                  The decision window, drawn ON the pitch centre circle.
                  Circular progress bar showing remaining response time to make a move,
@@ -328,8 +357,7 @@ import '../styles/global.css';
          of `game.css` before renaming anything:
            #btn-start    → beginMatch()            (focused on every menu entry)
            #btn-penalty  → beginShootout()
-           #btn-tutorial → pushScreen('tutorial')
-           #btn-verify   → the rulebook self-test, mirrored into #verify-out
+           (tutorial / about / contact / privacy are standalone pages now)
            #difficulty-start / #half-length-start /
            #sound-start  → the four `.segmented` groups the engine syncs.
          #menu-title is the dialog's accessible name.
@@ -367,16 +395,14 @@ import '../styles/global.css';
                         <span class="cap">6-a-side</span>
                     </div>
 
-                    <!-- The utility row. Tutorial and the rulebook self-test open a
-                         real in-app surface; the three pills that *describe* the
-                         project have no screen to open, so they hand the player to
-                         the browser rather than pretending to be one. -->
+                    <!-- The utility row. Tutorial opens the standalone tutorial
+                         page; the three pills that *describe* the project hand
+                         the player to their own dedicated pages. -->
                     <div class="caps-row utility">
-                        <button type="button" class="btn cap" id="btn-tutorial">Tutorial</button>
-                        <a class="cap" href="https://passball.pages.dev/">About us</a>
-                        <a class="cap" href="mailto:ganeshkhatiwada071@gmail.com">Contact</a>
-                        <a class="cap" href="https://passball.pages.dev/">Privacy policy</a>
-                        <button type="button" class="btn cap" id="btn-verify">Rulebook tests</button>
+                        <a class="cap" href="/tutorial">Tutorial</a>
+                        <a class="cap" href="/about">About us</a>
+                        <a class="cap" href="/contact">Contact</a>
+                        <a class="cap" href="/privacy">Privacy policy</a>
                     </div>
                 </div>
             </div>
@@ -433,7 +459,7 @@ import '../styles/global.css';
                                 <circle cx="16" cy="8" r="3" />
                                 <path d="M3 20c0-3 2.5-5 5-5s5 2 5 5M11 20c0-3 2.5-5 5-5s5 2 5 5" />
                             </svg>
-                            Online PvP <span class="badge-live">LIVE</span>
+                            PVP <span class="badge-live">LIVE</span>
                         </button>
                     </div>
 
@@ -543,59 +569,24 @@ import '../styles/global.css';
                         </svg>
                         Penalty Shootout
                     </button>
+                    <button type="button" class="btn kickoff-rondo" id="btn-rondo" title="Online rondo: 4–7 players, circle keep-away">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
+                            <circle cx="12" cy="12" r="8" />
+                            <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+                            <circle cx="12" cy="4" r="1.4" fill="currentColor" />
+                            <circle cx="19" cy="12" r="1.4" fill="currentColor" />
+                            <circle cx="12" cy="20" r="1.4" fill="currentColor" />
+                            <circle cx="5" cy="12" r="1.4" fill="currentColor" />
+                        </svg>
+                        Rondo <span class="badge-live">LIVE</span>
+                    </button>
                 </div>
 
-                <div class="test-result" id="verify-out" aria-live="polite" hidden></div>
-            </div>
-
-            <!-- The phone's home-indicator stand-in: it gives the bottom of a tall
-                 screen a floor. Hidden once the layout is a desktop row. -->
-            <div class="homebar" aria-hidden="true"></div>
-        </div>
-    </div>
-
-    <div class="screen" id="screen-tutorial" hidden>
-        <div class="card" role="dialog" aria-modal="true" aria-labelledby="tut-title">
-            <div class="eyebrow">How to play</div>
-            <h2 id="tut-title">Stack your moves, then watch them play out</h2>
-
-            <ul class="spec-list">
-                <li><strong>Your end</strong> — <strong>you defend the BOTTOM goal and attack the TOP one.</strong>
-                    Six a side: your keeper and five outfielders all start in your own half, so you always play
-                    away from yourself.</li>
-                <li><strong>The decision window</strong> — the moment either side wins the ball, the match pauses and
-                    the ring in the centre circle starts draining. Nothing moves until it empties. You
-                    stack <em>as many moves as you like</em> in that time; they all resolve together.</li>
-                <li><strong>The pass</strong> — <em>drag from the ball-carrier onto a team-mate</em> to pass to them,
-                    or <em>into empty space</em> to play it there. Anyone can receive, keeper included. The ball is
-                    led into a team-mate's run, so a pass to a moving player meets them on the way.</li>
-                <li><strong>The runs</strong> — <em>drag any of your players</em> to drop a ring where they should be
-                    when the ball is played. Stack as many runners as you have players.</li>
-                <li><strong>The shot</strong> — inside 30 units of goal, press <strong>SHOOT</strong> (or
-                    <span class="keyhint">Space</span>, or double-tap the goal mouth) to stack a shot. The keeper
-                    commits to a side, so <strong>aim across him</strong> — the far post is open. Outside that
-                    range the button does nothing.</li>
-                <li><strong>The save</strong> — defending, <em>drag your keeper to the dive point</em> to stack the
-                    save. Leave it and the keeper dives on their own read.</li>
-                <li><strong>Closing the window</strong> — press <strong>MOVES DONE</strong> (or
-                    <span class="keyhint">Enter</span>). The CPU has to be ready too: if it has finished and you
-                    have not, the board <em>stays frozen</em>. If you give no instruction at all, your side plays a
-                    random pass.</li>
-                <li><strong>The race</strong> — a pass only belongs to you if <em>the nearest player to the ball is
-                    yours</em> when it lands. Send the wrong man and it spills loose, and the closest body from
-                    either side goes for it. Whoever wins it opens the next window.</li>
-                <li><strong>Keyboard</strong> — <span class="keyhint">Space</span> shoot ·
-                    <span class="keyhint">Enter</span> moves done · <span class="keyhint">Esc</span> pause ·
-                    <span class="keyhint">M</span> mute · <span class="keyhint">R</span> restart match.</li>
-                <li><strong>Penalties</strong> — level at full time, press <strong>GO TO PENALTIES</strong>. Draw the aim
-                    line, then draw the dive line: within the keeper's reach it is saved, otherwise it is a goal.</li>
-            </ul>
-
-            <div class="actions">
-                <button type="button" class="btn btn-primary" id="btn-tut-close">GOT IT</button>
+                <div class="homebar" aria-hidden="true"></div>
             </div>
         </div>
     </div>
+
 
     <div class="screen" id="screen-pause" hidden>
         <div class="card" role="dialog" aria-modal="true" aria-labelledby="pause-title">
@@ -666,7 +657,7 @@ import '../styles/global.css';
 
             <div class="pvp-tabs" id="pvp-tabs" role="tablist">
                 <button type="button" class="pvp-tab active" id="tab-btn-custom" role="tab" aria-selected="true">Custom Room</button>
-                <button type="button" class="pvp-tab" id="tab-btn-open" role="tab" aria-selected="false">Open Matchmaking</button>
+                <button type="button" class="pvp-tab" id="tab-btn-open" role="tab" aria-selected="false">Quick Match</button>
             </div>
 
             <!-- Custom Room Pane -->
@@ -766,7 +757,11 @@ import '../styles/global.css';
                 </div>
             </div>
 
-            <!-- Open Matchmaking Pane -->
+            <!-- Quick Match Pane — the open matchmaking list. Entering this tab
+                 is opening a room: you are listed for everyone else the moment
+                 you arrive, and the same list shows everyone waiting. Pick a
+                 player and press their MATCH button, or just wait — a challenger
+                 can pick you off the list. -->
             <div class="pvp-pane" id="pane-open" hidden>
                 <div id="pvp-open-idle">
                     <div class="pvp-section">
@@ -831,12 +826,10 @@ import '../styles/global.css';
                              with its own MATCH button. -->
                         <div class="pvp-player-list" id="pvp-player-list" role="list"></div>
                         <p class="pvp-players-empty" id="pvp-players-empty">
-                            Checking who is online… press Refresh to scan again.
+                            Joining the open lobby…
                         </p>
                         <div class="pvp-open-actions">
                             <button type="button" class="btn btn-ghost-sm" id="btn-pvp-refresh-players">Refresh</button>
-                            <button type="button" class="btn btn-secondary btn-sm" id="btn-pvp-search-open">Quick Match</button>
-                            <button type="button" class="btn btn-primary btn-sm" id="btn-pvp-host-open">Host &amp; Wait</button>
                         </div>
                     </div>
                 </div>
@@ -881,6 +874,93 @@ import '../styles/global.css';
         </div>
     </div>
 
+    <div class="screen" id="screen-rondo" hidden>
+        <div class="card card-pvp" role="dialog" aria-modal="true" aria-labelledby="rondo-title">
+            <div class="sheet-head pvp-sheet-head">
+                <div class="pvp-title-wrap">
+                    <h2 id="rondo-title">Rondo</h2>
+                    <span class="pvp-badge-live">LIVE</span>
+                </div>
+                <button type="button" class="btn btn-icon-xs" id="btn-rondo-close" aria-label="Close Rondo">✕</button>
+            </div>
+
+            <p class="rondo-blurb">Circle keep-away, online. 4–7 players: the circle passes, the middle
+                guesses the receiver. Guess right and the passer takes your place.</p>
+
+            <!-- Identity: every seat needs a name before it can host or join. -->
+            <div class="pvp-section" id="rondo-identity">
+                <span class="pvp-section-title">Your Name</span>
+                <input type="text" id="rondo-name" class="pvp-input" placeholder="e.g. Striker99"
+                    maxlength="16" autocomplete="nickname" />
+            </div>
+
+            <div class="pvp-tabs" id="rondo-tabs" role="tablist">
+                <button type="button" class="pvp-tab active" id="tab-rondo-create" role="tab" aria-selected="true">Create Room</button>
+                <button type="button" class="pvp-tab" id="tab-rondo-join" role="tab" aria-selected="false">Join Room</button>
+            </div>
+
+            <!-- Create pane -->
+            <div class="pvp-pane" id="pane-rondo-create">
+                <div class="pvp-section">
+                    <span class="pvp-section-title">Host a Rondo Room</span>
+                    <div id="rondo-create-idle">
+                        <button type="button" class="btn btn-primary btn-block" id="btn-rondo-create">Create Room</button>
+                    </div>
+                    <div id="rondo-create-active" hidden>
+                        <div class="room-code-display">
+                            <span class="room-code-label">ROOM CODE</span>
+                            <span class="room-code-num" id="rondo-room-code-val">----</span>
+                        </div>
+                        <div class="pvp-share-row">
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-rondo-copy-code">Copy Code</button>
+                            <button type="button" class="btn btn-ghost-sm" id="btn-rondo-cancel-host">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Join pane -->
+            <div class="pvp-pane" id="pane-rondo-join" hidden>
+                <div class="pvp-section">
+                    <span class="pvp-section-title">Join with a Code</span>
+                    <div class="pvp-join-row">
+                        <input type="text" id="rondo-join-code" class="pvp-input pvp-code-input"
+                            placeholder="CODE" maxlength="4" autocomplete="off"
+                            style="text-transform: uppercase;" />
+                        <button type="button" class="btn btn-primary" id="btn-rondo-join">Join</button>
+                    </div>
+                    <div id="rondo-join-active" hidden>
+                        <div class="pvp-share-row">
+                            <button type="button" class="btn btn-ghost-sm" id="btn-rondo-leave">Leave Room</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- The roster: who is in, and whether the room can start. -->
+            <div class="pvp-section" id="rondo-roster-box" hidden>
+                <span class="pvp-section-title">Players <span id="rondo-player-count" class="pvp-count">(0/7)</span></span>
+                <div class="rondo-player-list" id="rondo-player-list"></div>
+                <p class="rondo-hint" id="rondo-roster-hint">Need at least 4 players to start.</p>
+                <div id="rondo-host-controls" hidden>
+                    <button type="button" class="btn btn-primary btn-block" id="btn-rondo-start" disabled>START RONDO</button>
+                </div>
+                <div id="rondo-guest-wait" hidden>
+                    <div class="pvp-wait-box">
+                        <span class="pvp-spinner"></span>
+                        <span>Waiting for the host to start...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Network Status Bar -->
+            <div class="pvp-status-bar">
+                <span class="status-dot" id="rondo-status-dot"></span>
+                <span id="rondo-status-msg">Ready</span>
+            </div>
+        </div>
+    </div>
+
     <div id="err" role="alert"></div>
 
     <!-- Portrait gate (mobile/touch only): shown over everything — game and
@@ -903,38 +983,6 @@ import '../styles/global.css';
     <!-- Three.js is bundled from node_modules by Vite (no CDN dependency). -->
     <script>
         import '../scripts/game-source.js';
-
-        /* The engine's rulebook self-test logs a table and stashes the report on
-           window.__GAP_VERIFY_RESULTS. Mirror that verdict into the menu card so
-           it is legible without opening devtools — the engine stays the sole
-           authority on pass/fail; this only renders what it reported.
-
-           Registration order matters and is safe: importing the engine above
-           synchronously installs its own click handler first, so by the time this
-           listener runs the report has already been refreshed. */
-        const verifyOut = document.getElementById('verify-out');
-        const verifyBtn = document.getElementById('btn-verify');
-
-        if (verifyOut && verifyBtn) {
-            verifyBtn.addEventListener('click', () => {
-                const report = window.__GAP_VERIFY_RESULTS;
-                if (!report) {
-                    verifyOut.textContent = 'No report available — reload the page and try again.';
-                    verifyOut.hidden = false;
-                    return;
-                }
-
-                const failed = report.results.filter(r => !r.pass);
-                const head = (report.allPass ? 'ALL PASS · ' : 'FAILURES · ')
-                    + report.properties + ' properties';
-                const body = failed.length
-                    ? failed.map(r => 'FAIL  ' + r.name + (r.detail ? '\n      ' + r.detail : '')).join('\n')
-                    : 'Every property held — the resolution races agree with the geometry.';
-
-                verifyOut.textContent = head + '\n' + body;
-                verifyOut.hidden = false;
-            });
-        }
     </script>
 </body>
 

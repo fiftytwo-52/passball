@@ -13,7 +13,7 @@ const OPEN_SLOT_PREFIX = 'passball-v1-open-';
 const OPEN_SLOTS_COUNT = 10;
 /* How long one sweep of the ring may take. Every seat is probed in parallel, so
    this is the whole budget, not a per-seat one. */
-const OPEN_SCAN_TIMEOUT = 1800;
+const OPEN_SCAN_TIMEOUT = 6000;
 /* The kick-off countdown that precedes a matchmade game. */
 export const START_COUNTDOWN_SECONDS = 5;
 
@@ -58,6 +58,11 @@ class PvpNetwork {
         /* Every seat opened by a list scan, so the ones that were not picked can
            be released the moment one of them is. */
         this.scanConns = [];
+        /* The public seat this side is waiting on while the Quick Match tab is
+           open. Entering the tab *is* opening a room: there is no separate host
+           step. Kept on its own peer so list scans never tear it down. */
+        this.openHostPeer = null;
+        this.openHostSlot = null;
         this.listeners = {};
         this.callbacks = {
             onState: null,
@@ -127,6 +132,7 @@ class PvpNetwork {
             this.pingTimer = null;
         }
         this.closeScanConnections();
+        this.releaseOpenSeat();
         if (this.conn) {
             try { this.conn.close(); } catch (e) {}
             this.conn = null;
@@ -141,6 +147,15 @@ class PvpNetwork {
         this.guestPassword = '';
         this.connected = false;
         this.ping = 0;
+    }
+
+    /** Give up the public seat claimed for the Quick Match tab, if any. */
+    releaseOpenSeat() {
+        if (this.openHostPeer) {
+            try { this.openHostPeer.destroy(); } catch (e) {}
+            this.openHostPeer = null;
+        }
+        this.openHostSlot = null;
     }
 
     disconnect() {
@@ -177,7 +192,7 @@ class PvpNetwork {
             }
         };
 
-        // If the data channel is already open (e.g. probed in findOpenMatch),
+        // If the data channel is already open (e.g. probed while scanning),
         // send AUTH immediately rather than waiting for a second 'open' event.
         if (conn.open) {
             sendGuestAuth();
@@ -387,14 +402,16 @@ class PvpNetwork {
      * joinOpenPlayer()/closeScanConnections(). Resolves with [] when nobody is
      * hosting — the honest answer, not an error.
      */
-    async scanOpenPlayers(onProgress, timeout = OPEN_SCAN_TIMEOUT) {
-        this.cleanup();
+    async scanOpenPlayers(onProgress, timeout = OPEN_SCAN_TIMEOUT, excludeSlot = null) {
+        /* The scan runs on its own probe peer and never touches this.peer or
+           the claimed open seat: entering the Quick Match tab means this side
+           is *also* waiting on a seat, and the sweep must not tear that down. */
+        this.closeScanConnections();
         this.emit('status', 'Scanning public lobbies...');
         if (onProgress) onProgress('Scanning public lobbies...');
 
         const found = [];
         const probePeer = new Peer(undefined, PEER_CONFIG);
-        this.peer = probePeer;
         this.scanConns = found;
 
         return new Promise((resolve) => {
@@ -404,7 +421,6 @@ class PvpNetwork {
                 done = true;
                 if (!found.length) {
                     try { probePeer.destroy(); } catch (e) {}
-                    this.peer = null;
                 }
                 found.sort((a, b) => a.slot - b.slot);
                 if (onProgress) {
@@ -418,6 +434,8 @@ class PvpNetwork {
 
             probePeer.on('open', () => {
                 for (let slot = 1; slot <= OPEN_SLOTS_COUNT; slot++) {
+                    /* Never list our own waiting seat back to ourselves. */
+                    if (excludeSlot && slot === excludeSlot) continue;
                     const seat = slot;
                     const conn = probePeer.connect(OPEN_SLOT_PREFIX + seat, { reliable: true });
                     conn.on('open', () => {
@@ -450,6 +468,9 @@ class PvpNetwork {
         if (!entry || !entry.conn || !entry.conn.open) {
             return Promise.reject(new Error('That player is not available any more. Refresh the list.'));
         }
+        /* Challenging someone else means we stop waiting on our own seat: it
+           goes back into the ring for the next player. */
+        this.releaseOpenSeat();
         /* Only the seat that was picked stays open: the others were discovery. */
         (this.scanConns || []).forEach(other => {
             if (other === entry) return;
@@ -484,18 +505,20 @@ class PvpNetwork {
     }
 
     /**
-     * Open a public lobby: take the lowest free seat in the ring and wait for a
-     * challenger. Resolves with the lobby's label once an opponent's handshake
-     * completes, or null when every seat in the ring is taken.
+     * Claim a public seat for the Quick Match tab. Entering the tab *is*
+     * opening a room, so this runs the moment the tab opens and returns at
+     * once with the claimed seat — { slot, label, name } — instead of waiting
+     * for a challenger. The seat stays claimed (and listed to everyone else)
+     * until releaseOpenSeat() runs: a challenger who connects triggers the
+     * usual 'connected' handshake on the host side. Returns null when every
+     * seat in the ring is taken.
      */
-    async hostOpenMatch(onProgress) {
-        this.cleanup();
-        this.emit('status', 'Looking for a free public lobby...');
+    async claimOpenSeat(onProgress) {
+        this.releaseOpenSeat();
 
         for (let slot = 1; slot <= OPEN_SLOTS_COUNT; slot++) {
-            if (onProgress) onProgress(`Opening public lobby #${slot}...`);
+            if (onProgress) onProgress(`Joining the open lobby as ${slotPlayerName(slot)}...`);
             const hostPeer = new Peer(OPEN_SLOT_PREFIX + slot, PEER_CONFIG);
-            this.peer = hostPeer;
             /* Attached before the seat is claimed: a challenger can knock the
                moment the seat appears in somebody's sweep. */
             hostPeer.on('connection', conn => this.acceptHostConnection(conn));
@@ -510,43 +533,20 @@ class PvpNetwork {
 
             if (!claimed) {
                 try { hostPeer.destroy(); } catch (e) {}
-                this.peer = null;
                 continue;
             }
 
-            const label = `Lobby #${slot}`;
+            this.openHostPeer = hostPeer;
+            this.openHostSlot = slot;
             this.roomCode = `OPEN-${slot}`;
             this.roomPassword = '';
-            this.emit('status', `${label} is open as ${slotPlayerName(slot)}. Waiting for an opponent...`);
-            if (onProgress) onProgress(`${label} open — waiting for an opponent to join...`);
-
             hostPeer.on('error', err => this.emit('error', err.message || 'Lobby error'));
-
-            return new Promise((resolve) => {
-                const onConn = () => {
-                    this.off('connected', onConn);
-                    resolve(label);
-                };
-                this.on('connected', onConn);
-            });
+            this.emit('status', `You are listed as ${slotPlayerName(slot)} — waiting for an opponent...`);
+            return { slot, label: `Lobby #${slot}`, name: slotPlayerName(slot) };
         }
 
         this.emit('status', 'Every public lobby is taken right now.');
         return null;
-    }
-
-    /**
-     * One-click matchmaking: take the first lobby that is waiting, and open one
-     * of our own when nobody is.
-     */
-    async findOpenMatch(onProgress) {
-        const players = await this.scanOpenPlayers(onProgress);
-        if (players.length) return this.joinOpenPlayer(players[0]);
-        return this.hostOpenMatch(onProgress);
-    }
-
-    searchOpenRoom(onProgress) {
-        return this.findOpenMatch(onProgress);
     }
 
     /** Send data packet over WebRTC (only works after AUTH handshake) */
