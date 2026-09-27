@@ -88,6 +88,23 @@
     text-align: center;
 }
 
+.hero-sticker {
+    position: absolute;
+    width: 120px;
+    height: auto;
+    pointer-events: none;
+    user-select: none;
+    filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.22));
+    z-index: 2;
+    transition: transform 0.3s ease;
+}
+
+@media (max-width: 640px) {
+    .hero-sticker {
+        width: 76px;
+    }
+}
+
 .info-hero::before {
     content: "";
     position: absolute;
@@ -256,68 +273,333 @@
 .tut-step p strong { color: var(--c-ink); }
 .tut-step p em { color: var(--c-link-deep); font-style: normal; font-weight: 600; }
 
-/* ---- pitch diagram ---- */
-.pitch-demo {
-    background: linear-gradient(160deg, #1d7a3a, #145c2a);
+.tut-step .step-icon svg {
+    width: 22px;
+    height: 22px;
+    color: var(--c-link-deep);
+    stroke-width: 2;
+    transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.tut-step:hover .step-icon svg {
+    transform: scale(1.15);
+}
+
+/* ---- gameplay systems showcase ---- */
+.system-showcase {
+    background: linear-gradient(165deg, #154724 0%, #0d2e17 100%);
     border-radius: 22px;
-    padding: 30px 26px;
+    padding: 24px;
     color: #fff;
-    position: relative;
+    box-shadow: 0 20px 48px rgba(13, 46, 23, 0.25);
+    border: 1px solid rgba(80, 227, 194, 0.2);
     overflow: hidden;
 }
 
-.pitch-demo h3 {
-    margin: 0 0 6px;
-    font-size: 20px;
-    font-weight: 800;
-    letter-spacing: -0.01em;
+.system-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    padding-bottom: 14px;
 }
 
-.pitch-demo p {
-    margin: 0 0 18px;
-    font-size: 14.5px;
-    line-height: 1.6;
+.sys-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.8);
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.sys-tab:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+.sys-tab.active {
+    background: #50e3c2;
+    border-color: #50e3c2;
+    color: #0b2613;
+    font-weight: 750;
+    box-shadow: 0 4px 14px rgba(80, 227, 194, 0.35);
+}
+
+.sys-tab-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.sys-panel {
+    animation: fadeInSys 0.3s ease-out;
+}
+
+@keyframes fadeInSys {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.sys-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+
+.sys-header h3 {
+    margin: 0 0 6px;
+    font-size: 19px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: #ffffff;
+}
+
+.sys-header p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.55;
     color: rgba(255, 255, 255, 0.85);
-    max-width: 560px;
+    max-width: 580px;
+}
+
+.sys-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(80, 227, 194, 0.4);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #50e3c2;
+    white-space: nowrap;
+}
+
+.live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #50e3c2;
+    box-shadow: 0 0 8px #50e3c2;
+    animation: blinkDot 1.4s infinite ease-in-out;
+}
+
+.pause-dot {
+    background: #ffc300;
+    box-shadow: 0 0 8px #ffc300;
+}
+
+.strike-dot {
+    background: #ff2d87;
+    box-shadow: 0 0 8px #ff2d87;
+}
+
+@keyframes blinkDot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.pitch-container {
+    background: rgba(0, 0, 0, 0.22);
+    border-radius: 16px;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .pitch-svg {
     display: block;
     width: 100%;
-    max-width: 520px;
+    max-width: 560px;
     margin: 0 auto;
     border-radius: 12px;
 }
 
-.pitch-svg .ball {
-    animation: ballRoll 4s ease-in-out infinite;
+.pitch-turf {
+    fill: #1c6633;
+    stroke: rgba(255, 255, 255, 0.4);
+    stroke-width: 2;
 }
 
-@keyframes ballRoll {
-    0%, 100% { transform: translate(0, 0); }
-    25% { transform: translate(56px, -30px); }
-    50% { transform: translate(112px, 6px); }
-    75% { transform: translate(56px, 34px); }
+.pitch-label {
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    fill: #50e3c2;
 }
 
-.pitch-svg .pass-line {
-    stroke-dasharray: 6 6;
+/* System 1: Race Animations */
+.pitch-svg-race .anim-ball {
+    animation: raceBallAnim 4.6s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+}
+
+@keyframes raceBallAnim {
+    0%, 12% { transform: translate(80px, 150px); opacity: 1; }
+    58%, 88% { transform: translate(240px, 110px); opacity: 1; }
+    94%, 100% { transform: translate(80px, 150px); opacity: 0; }
+}
+
+.pitch-svg-race .anim-runner {
+    animation: raceRunnerAnim 4.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+@keyframes raceRunnerAnim {
+    0%, 12% { transform: translate(130px, 160px); }
+    58%, 88% { transform: translate(238px, 110px); }
+    94%, 100% { transform: translate(130px, 160px); }
+}
+
+.pitch-svg-race .anim-defender {
+    animation: raceDefenderAnim 4.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+@keyframes raceDefenderAnim {
+    0%, 12% { transform: translate(280px, 60px); }
+    58%, 88% { transform: translate(254px, 102px); }
+    94%, 100% { transform: translate(280px, 60px); }
+}
+
+.pitch-svg-race .landing-pulse {
+    transform-origin: 240px 110px;
+    animation: racePulseAnim 4.6s ease-out infinite;
+}
+
+@keyframes racePulseAnim {
+    0%, 54% { transform: scale(1); opacity: 0; }
+    58% { transform: scale(1); opacity: 0.9; }
+    75% { transform: scale(1.6); opacity: 0; }
+    100% { transform: scale(1); opacity: 0; }
+}
+
+.pitch-svg-race .anim-pass-line {
     animation: dashMove 1.2s linear infinite;
 }
 
+/* System 2: Decision Freeze Animations */
+.decision-drain-ring {
+    stroke-dasharray: 226;
+    animation: drainRingAnim 5s linear infinite;
+}
+
+@keyframes drainRingAnim {
+    0%, 15% { stroke-dashoffset: 0; }
+    65%, 85% { stroke-dashoffset: 226; }
+    90%, 100% { stroke-dashoffset: 0; }
+}
+
+.drain-timer-text {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    fill: #ffc300;
+}
+
+.pulse-carrier {
+    transform-origin: center;
+    animation: ringPulse 2s ease-out infinite;
+}
+
+.freeze-player-1 {
+    animation: freezeRun1 5s ease-in-out infinite;
+}
+
+@keyframes freezeRun1 {
+    0%, 65% { transform: translate(90px, 80px); }
+    75%, 90% { transform: translate(160px, 50px); }
+    98%, 100% { transform: translate(90px, 80px); }
+}
+
+.freeze-player-2 {
+    animation: freezeRun2 5s ease-in-out infinite;
+}
+
+@keyframes freezeRun2 {
+    0%, 65% { transform: translate(180px, 170px); }
+    75%, 90% { transform: translate(250px, 80px); }
+    98%, 100% { transform: translate(180px, 170px); }
+}
+
+.freeze-pass-vector {
+    animation: dashMove 1.4s linear infinite;
+}
+
+/* System 3: Strike & Save Animations */
+.pitch-svg-shoot .anim-shot-ball {
+    animation: shotBallAnim 4.4s cubic-bezier(0.2, 0.8, 0.4, 1) infinite;
+}
+
+@keyframes shotBallAnim {
+    0%, 15% { transform: translate(120px, 135px); opacity: 1; }
+    55%, 85% { transform: translate(380px, 82px); opacity: 1; }
+    92%, 100% { transform: translate(120px, 135px); opacity: 0; }
+}
+
+.pitch-svg-shoot .anim-striker {
+    animation: strikerStepAnim 4.4s ease-out infinite;
+}
+
+@keyframes strikerStepAnim {
+    0%, 10% { transform: translate(105px, 142px); }
+    15%, 85% { transform: translate(120px, 135px); }
+    95%, 100% { transform: translate(105px, 142px); }
+}
+
+.pitch-svg-shoot .anim-gk {
+    animation: gkDiveAnim 4.4s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+}
+
+@keyframes gkDiveAnim {
+    0%, 25% { transform: translate(365px, 110px); }
+    52%, 85% { transform: translate(355px, 94px); }
+    95%, 100% { transform: translate(365px, 110px); }
+}
+
+.pitch-svg-shoot .goal-spark {
+    transform-origin: 380px 82px;
+    animation: sparkAnim 4.4s ease-out infinite;
+}
+
+@keyframes sparkAnim {
+    0%, 53% { transform: scale(0); opacity: 0; }
+    56% { transform: scale(1); opacity: 1; }
+    70% { transform: scale(1.8); opacity: 0; }
+    100% { transform: scale(0); opacity: 0; }
+}
+
+.anim-shot-path {
+    animation: dashMove 1s linear infinite;
+}
+
+/* Shared utility animations */
 @keyframes dashMove {
     to { stroke-dashoffset: -24; }
 }
 
-.pitch-svg .pulse-ring {
-    transform-origin: center;
-    transform-box: fill-box;
-    animation: ringPulse 2.2s ease-out infinite;
+@keyframes ringPulse {
+    0% { transform: scale(0.65); opacity: 0.9; }
+    100% { transform: scale(1.6); opacity: 0; }
 }
 
-@keyframes ringPulse {
-    0% { transform: scale(0.55); opacity: 0.9; }
-    100% { transform: scale(1.5); opacity: 0; }
+/* Mode cards icon style */
+.mode-card .mode-icon-svg {
+    width: 32px;
+    height: 32px;
+    color: var(--c-link-deep);
+    margin-bottom: 12px;
+    display: block;
 }
 
 /* ---- keyboard hints ---- */

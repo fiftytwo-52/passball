@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Passball — Guess & Pass</title>
+<title>takTIK — 6-a-side</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -41,18 +41,18 @@
   /* top grouping capsule */
   .navbar{ padding:20px 16px 0; position:relative; z-index:1; }
   .top-capsule{
-    background:rgba(8,20,13,0.6); backdrop-filter:blur(8px);
-    border:1px solid var(--line); border-radius:26px; padding:14px 16px 12px;
+    background:rgba(8,20,13,0.75); backdrop-filter:blur(14px);
+    border:1px solid rgba(80,227,194,0.25); border-radius:18px; padding:10px 16px;
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
   }
-  .brand-row{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
-  .brand-row svg{ width:20px; height:20px; }
-  .brand-name{ font-family:'Anton',sans-serif; font-size:19px; letter-spacing:0.02em; color:var(--chalk); text-transform:uppercase; }
-  .caps-row{ display:flex; flex-wrap:wrap; gap:7px; }
-  .cap{ font-size:12px; font-weight:700; padding:6px 12px; border-radius:999px; white-space:nowrap;
-    border:1px solid var(--line); color:var(--sage); background:rgba(0,0,0,0.22); }
-  .cap.tag{ color:#40260A; background:var(--amber); border-color:var(--amber); }
-  .caps-row.utility{ margin-top:8px; border-top:1px solid var(--line); padding-top:9px; }
-  .caps-row.utility .cap{ font-size:10.5px; padding:5px 11px; color:var(--sage-dim); background:transparent; }
+  .brand-group{ display:flex; align-items:center; gap:8px; }
+  .brand-row{ display:flex; align-items:center; gap:8px; margin-bottom:0; }
+  .brand-row svg{ width:20px; height:20px; filter:drop-shadow(0 0 6px rgba(242,166,60,0.4)); }
+  .brand-name{ font-family:'Anton',sans-serif; font-size:20px; letter-spacing:0.03em; color:var(--chalk); text-transform:uppercase; }
+  .brand-tag{ font-size:11px; font-weight:800; letter-spacing:0.1em; color:var(--amber); background:rgba(242,166,60,0.12); border:1px solid rgba(242,166,60,0.3); padding:3px 7px; border-radius:4px; line-height:1; }
+  .game-nav-links{ display:flex; align-items:center; gap:4px; }
+  .game-nav-link{ font-size:12.5px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:rgba(238,241,230,0.72); text-decoration:none; padding:5px 9px; border-radius:6px; transition:all 0.16s ease; }
+  .game-nav-link:hover{ color:#fff; background:rgba(80,227,194,0.12); text-shadow:0 0 8px rgba(80,227,194,0.5); }
 
   /* hero pitch */
   .hero{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -93,12 +93,9 @@
     .navbar{ padding:26px 40px 0; }
     .top-capsule{
       display:flex; align-items:center; justify-content:space-between;
-      padding:12px 12px 12px 22px; border-radius:999px;
+      padding:12px 22px; border-radius:18px;
     }
-    .brand-row{ margin-bottom:0; }
-    .caps-row.primary{ display:flex; gap:8px; }
-    .caps-row.utility{ margin-top:0; border-top:none; padding-top:0; display:flex; gap:4px; }
-    .caps-row.utility .cap{ font-size:12px; padding:8px 14px; }
+    .game-nav-link{ font-size:13.5px; padding:6px 12px; }
 
     .hero{ flex-direction:row; gap:60px; justify-content:center; padding:0 40px; }
     .hero .vs{ display:none; }
@@ -128,19 +125,18 @@
 
   <div class="navbar">
     <div class="top-capsule">
-      <div class="brand-row">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#F2A63C" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 6l3.5 2.6-1.3 4h-4.4l-1.3-4z"/></svg>
-        <span class="brand-name">Passball</span>
+      <div class="brand-group">
+        <div class="brand-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#F2A63C" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 6l3.5 2.6-1.3 4h-4.4l-1.3-4z"/></svg>
+          <span class="brand-name">takTIK</span>
+        </div>
+        <span class="brand-tag">6-A-SIDE</span>
       </div>
-      <div class="caps-row primary">
-        <span class="cap tag">Guess &amp; Pass</span>
-        <span class="cap">6-a-side</span>
-      </div>
-      <div class="caps-row utility">
-        <span class="cap">Tutorial</span>
-        <span class="cap">Contact</span>
-        <span class="cap">About us</span>
-        <span class="cap">Privacy policy</span>
+      <div class="game-nav-links">
+        <a class="game-nav-link" href="/tutorial">Tutorial</a>
+        <a class="game-nav-link" href="/about">About us</a>
+        <a class="game-nav-link" href="/contact">Contact</a>
+        <a class="game-nav-link" href="/privacy">Privacy policy</a>
       </div>
     </div>
   </div>
@@ -165,7 +161,7 @@
     </svg>
     <div class="hero-copy">
       <div class="eyebrow">Your shape · 2 : 3 : 1</div>
-      <h1>Guess &amp; Pass</h1>
+      <h1>takTIK</h1>
       <p>Freeze the board on every change of possession, stack your moves, then watch both sides play them out.</p>
     </div>
   </div>

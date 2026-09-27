@@ -1512,6 +1512,150 @@ body {
 }
 
 /* Halftime card */
+/* ---- Redesigned Pause Screen & Card ---- */
+#screen-pause.screen {
+    background: rgba(10, 20, 14, 0.76);
+    backdrop-filter: blur(18px) saturate(130%);
+    -webkit-backdrop-filter: blur(18px) saturate(130%);
+}
+
+.card-pause {
+    width: min(420px, 92vw);
+    background: #ffffff;
+    border: 1px solid rgba(80, 227, 194, 0.35);
+    border-radius: 24px;
+    box-shadow: 0 28px 70px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.8) inset;
+    padding: clamp(22px, 4vmin, 32px);
+    animation: pauseCardEnter 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pauseCardEnter {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.pause-header {
+    margin-bottom: 22px;
+}
+
+.pause-eyebrow-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.pause-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: #ffefe5;
+    border: 1px solid #ffd4bd;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #d95818;
+}
+
+.pause-icon-mini {
+    width: 12px;
+    height: 12px;
+}
+
+.pause-clock-chip {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--c-mute);
+    background: var(--c-hairline-soft);
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--c-hairline);
+}
+
+.card-pause h2 {
+    font-size: clamp(24px, 4.2vmin, 28px);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin: 0 0 6px;
+    color: var(--c-ink);
+}
+
+.pause-subtitle {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--c-body);
+    margin: 0;
+}
+
+.pause-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.pause-btn-resume {
+    height: 46px;
+    font-size: 14.5px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    background: #171717;
+    color: #ffffff;
+    border-radius: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+    transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.pause-btn-resume:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
+}
+
+.pause-btn-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.pause-btn-restart,
+.pause-btn-quit {
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 700;
+    border-radius: 11px;
+}
+
+.btn-icon {
+    width: 14px;
+    height: 14px;
+    pointer-events: none;
+    flex-shrink: 0;
+}
+
+@media (max-width: 420px) {
+    .pause-btn-row {
+        grid-template-columns: 1fr;
+    }
+}
+
 .card-halftime {
     width: min(440px, 100%);
     text-align: center;
@@ -1699,85 +1843,115 @@ body {
 }
 
 #screen-menu .top-capsule {
-    padding: 10px 14px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 18px;
+    background: rgba(8, 22, 14, 0.75);
+    backdrop-filter: blur(14px) saturate(130%);
+    -webkit-backdrop-filter: blur(14px) saturate(130%);
+    border: 1px solid rgba(80, 227, 194, 0.25);
+    border-radius: 18px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+#screen-menu .brand-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 #screen-menu .brand-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 10px;
+    margin-bottom: 0;
 }
 
 #screen-menu .brand-mark {
     flex: none;
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     color: var(--amber);
+    filter: drop-shadow(0 0 8px rgba(242, 166, 60, 0.45));
 }
 
 #screen-menu .brand-name {
     font-family: 'Anton', var(--f-sans);
-    font-size: 19px;
+    font-size: 21px;
     font-weight: 400;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.04em;
     line-height: 1;
     color: var(--chalk);
     text-transform: uppercase;
 }
 
-#screen-menu .caps-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 7px;
-}
-
-/* The utility row is a separate band: a hairline separates the two pills that
-   describe the match from the five that leave it. */
-#screen-menu .caps-row.utility {
-    margin-top: 8px;
-    padding-top: 9px;
-    border-top: 1px solid var(--turf-line);
-}
-
-/* --- pills ---------------------------------------------------------------
-   One recipe for the two brand tags, the three outbound links and the two
-   buttons that open a real screen. Anchors and buttons have to render
-   identically, so the reset the `.btn` base applies is restated for both. */
-#screen-menu .cap {
-    padding: 6px 12px;
-    border: 1px solid var(--turf-line);
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.22);
+#screen-menu .brand-tag {
     font-family: 'Rajdhani', var(--f-sans);
-    font-size: 12px;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    color: var(--amber);
+    background: rgba(242, 166, 60, 0.12);
+    border: 1px solid rgba(242, 166, 60, 0.3);
+    padding: 3px 8px;
+    border-radius: 4px;
     line-height: 1;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
-    color: var(--sage);
+    text-transform: uppercase;
+}
+
+#screen-menu .game-nav-links {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#screen-menu .game-nav-link {
+    position: relative;
+    font-family: 'Rajdhani', var(--f-sans);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(238, 241, 230, 0.72);
     text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: color 0.18s ease, background 0.18s ease, text-shadow 0.18s ease;
+    white-space: nowrap;
 }
 
-#screen-menu .cap.tag {
-    background: var(--amber);
-    border-color: var(--amber);
-    color: var(--amber-ink);
+#screen-menu .game-nav-link:hover {
+    color: #ffffff;
+    background: rgba(80, 227, 194, 0.12);
+    text-shadow: 0 0 8px rgba(80, 227, 194, 0.5);
 }
 
-/* Everything under the hairline is quieter than the tags above it: those pills
-   leave the match rather than describing how it is played. */
-#screen-menu .caps-row.utility .cap {
-    padding: 5px 11px;
-    background: transparent;
-    font-size: 10.5px;
-    color: var(--sage-dim);
-    transition: color 0.16s ease, border-color 0.16s ease;
+#screen-menu .game-nav-link:active {
+    transform: translateY(1px);
 }
 
-#screen-menu .caps-row.utility .cap:hover {
-    border-color: var(--sage-dim);
-    color: var(--chalk);
+@media (max-width: 640px) {
+    #screen-menu .top-capsule {
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px 8px;
+        border-radius: 14px;
+    }
+    #screen-menu .game-nav-links {
+        width: 100%;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 2px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        padding-top: 6px;
+    }
+    #screen-menu .game-nav-link {
+        font-size: 11.5px;
+        padding: 4px 8px;
+    }
 }
 
 /* --- hero: the shape, drawn --------------------------------------------

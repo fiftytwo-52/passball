@@ -9,15 +9,18 @@ import '../styles/info.css';
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light" />
-    <title>Tutorial — Guess &amp; Pass</title>
-    <meta name="description" content="Learn to play Guess & Pass: stack your moves in the decision window, then watch them play out in real time." />
+    <title>Tutorial — takTIK</title>
+    <meta name="description" content="Learn to play takTIK: stack your moves in the decision window, then watch them play out in real time." />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23171717'/%3E%3Ccircle cx='16' cy='16' r='6.5' fill='none' stroke='%2350e3c2' stroke-width='2.5'/%3E%3C/svg%3E" />
+    <meta property="og:image" content="/og/og-tutorial.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
 </head>
 <body class="info-page">
     <nav class="info-nav">
         <a class="info-brand" href="/">
             <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#171717"/><circle cx="16" cy="16" r="6.5" fill="none" stroke="#50e3c2" stroke-width="2.5"/></svg>
-            Guess &amp; Pass
+            takTIK
         </a>
         <div class="info-links">
             <a href="/tutorial" class="active">Tutorial</a>
@@ -29,9 +32,11 @@ import '../styles/info.css';
     </nav>
 
     <header class="info-hero">
+        <img class="hero-sticker" style="top: 18px; right: 5%; transform: rotate(-8deg);"
+             src="/stickers/sticker-whistle.png" alt="" width="240" height="240" />
         <span class="info-eyebrow">How to play</span>
         <h1>Stack your moves,<br />then watch them play out.</h1>
-        <p class="lead">Guess &amp; Pass is real-time 6-a-side football with a twist: the moment either side wins the ball, the match freezes and both managers plan at once. Then everything resolves together — no turns, no dice, just geometry.</p>
+        <p class="lead">takTIK is real-time 6-a-side football with a twist: the moment either side wins the ball, the match freezes and both managers plan at once. Then everything resolves together — no turns, no dice, just geometry.</p>
     </header>
 
     <main class="info-wrap">
@@ -41,76 +46,331 @@ import '../styles/info.css';
             <div class="tut-steps">
                 <article class="tut-step reveal">
                     <span class="step-num">01</span>
-                    <div class="step-icon">🧲</div>
+                    <div class="step-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polygon points="12,7 16,10 14.5,15 9.5,15 8,10"/>
+                            <line x1="12" y1="7" x2="12" y2="2"/>
+                            <line x1="16" y1="10" x2="20" y2="8"/>
+                            <line x1="14.5" y1="15" x2="18" y2="18.5"/>
+                            <line x1="9.5" y1="15" x2="6" y2="18.5"/>
+                            <line x1="8" y1="10" x2="4" y2="8"/>
+                        </svg>
+                    </div>
                     <h3>Win the ball</h3>
                     <p><strong>You defend the BOTTOM goal and attack the TOP one.</strong> Six a side — your keeper and five outfielders all start in your own half, so you always play away from yourself.</p>
                 </article>
                 <article class="tut-step reveal">
                     <span class="step-num">02</span>
-                    <div class="step-icon">⏸️</div>
+                    <div class="step-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="13" r="8"/>
+                            <path d="M12 2v3"/>
+                            <path d="M9 2h6"/>
+                            <line x1="10" y1="11" x2="10" y2="15"/>
+                            <line x1="14" y1="11" x2="14" y2="15"/>
+                        </svg>
+                    </div>
                     <h3>The decision window</h3>
                     <p>The moment either side wins the ball, the match pauses and the ring in the centre circle starts draining. <strong>Nothing moves until it empties.</strong> Stack as many moves as you like — they all resolve together.</p>
                 </article>
                 <article class="tut-step reveal">
                     <span class="step-num">03</span>
-                    <div class="step-icon">↗️</div>
+                    <div class="step-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="6" y1="18" x2="18" y2="6"/>
+                            <polyline points="10 6 18 6 18 14"/>
+                            <circle cx="6" cy="18" r="2" fill="currentColor"/>
+                        </svg>
+                    </div>
                     <h3>Pass</h3>
                     <p><em>Drag from the ball-carrier onto a team-mate</em> to pass to them, or <em>into empty space</em> to play it there. Anyone can receive, keeper included. The ball is led into a team-mate's run, so a pass to a moving player meets them on the way.</p>
                 </article>
                 <article class="tut-step reveal">
                     <span class="step-num">04</span>
-                    <div class="step-icon">🏃</div>
+                    <div class="step-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="16" cy="4" r="2"/>
+                            <path d="M6 20l4-5 2 2.5 3-4.5"/>
+                            <path d="M9 13.5l-3-2 3.5-4 5.5 2 4.5-2.5"/>
+                        </svg>
+                    </div>
                     <h3>Send the runners</h3>
                     <p><em>Drag any of your players</em> to drop a ring where they should be when the ball is played. Stack as many runners as you have players.</p>
                 </article>
                 <article class="tut-step reveal">
                     <span class="step-num">05</span>
-                    <div class="step-icon">🥅</div>
+                    <div class="step-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 19V6h18v13"/>
+                            <path d="M7 6v13"/>
+                            <path d="M12 6v13"/>
+                            <path d="M17 6v13"/>
+                            <path d="M3 12h18"/>
+                            <circle cx="17" cy="9" r="2" fill="currentColor"/>
+                        </svg>
+                    </div>
                     <h3>Shoot</h3>
                     <p>Inside 30 units of goal, press <strong>SHOOT</strong> (or <strong>Space</strong>, or double-tap the goal mouth) to stack a shot. The keeper commits to a side, so <strong>aim across him</strong> — the far post is open. Outside that range the button does nothing.</p>
                 </article>
                 <article class="tut-step reveal">
                     <span class="step-num">06</span>
-                    <div class="step-icon">🧤</div>
+                    <div class="step-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                            <path d="M9 12l2 2 4-4"/>
+                        </svg>
+                    </div>
                     <h3>Save</h3>
                     <p>Defending, <em>drag your keeper to the dive point</em> to stack the save. Leave it and the keeper dives on their own read.</p>
                 </article>
                 <article class="tut-step reveal">
                     <span class="step-num">07</span>
-                    <div class="step-icon">✅</div>
+                    <div class="step-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="9"/>
+                            <polyline points="8 12 11 15 16 9"/>
+                        </svg>
+                    </div>
                     <h3>Close the window</h3>
                     <p>Press <strong>MOVES DONE</strong> (or <strong>Enter</strong>). The CPU has to be ready too: if it has finished and you have not, the board <em>stays frozen</em>. Give no instruction at all and your side plays a random pass.</p>
                 </article>
                 <article class="tut-step reveal">
                     <span class="step-num">08</span>
-                    <div class="step-icon">⚡</div>
+                    <div class="step-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                        </svg>
+                    </div>
                     <h3>The race</h3>
                     <p>A pass only belongs to you if <em>the nearest player to the ball is yours</em> when it lands. Send the wrong man and it spills loose — the closest body from either side goes for it. Whoever wins it opens the next window.</p>
                 </article>
                 <article class="tut-step reveal">
                     <span class="step-num">09</span>
-                    <div class="step-icon">🎯</div>
+                    <div class="step-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="9"/>
+                            <circle cx="12" cy="12" r="4"/>
+                            <line x1="12" y1="2" x2="12" y2="5"/>
+                            <line x1="12" y1="19" x2="12" y2="22"/>
+                            <line x1="2" y1="12" x2="5" y2="12"/>
+                            <line x1="19" y1="12" x2="22" y2="12"/>
+                        </svg>
+                    </div>
                     <h3>Penalties</h3>
                     <p>Level at full time? Press <strong>GO TO PENALTIES</strong>. Draw the aim line, then draw the dive line: within the keeper's reach it is saved, otherwise it is a goal.</p>
                 </article>
             </div>
         </section>
 
+        <!-- ANIMATED GAMEPLAY SYSTEMS -->
         <section class="info-section">
-            <div class="pitch-demo reveal">
-                <h3>See it: the race is the game</h3>
-                <p>The ball is faster than any player. A pass is a bet that your runner reaches the landing spot first — that dashed line is the whole sport.</p>
-                <svg class="pitch-svg" viewBox="0 0 320 180" role="img" aria-label="Animated diagram of a pass travelling to a runner">
-                    <rect x="4" y="4" width="312" height="172" rx="10" fill="#2c8a46" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
-                    <line x1="160" y1="4" x2="160" y2="176" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
-                    <circle cx="160" cy="90" r="24" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
-                    <circle class="pulse-ring" cx="70" cy="120" r="12" fill="none" stroke="#ffc300" stroke-width="3"/>
-                    <circle cx="70" cy="120" r="7" fill="#1f6bff"/>
-                    <line class="pass-line" x1="70" y1="120" x2="182" y2="126" stroke="#ffffff" stroke-width="2.5"/>
-                    <circle cx="182" cy="126" r="7" fill="#1f6bff" opacity="0.85"/>
-                    <circle cx="215" cy="84" r="7" fill="#ff2d87"/>
-                    <circle class="ball" cx="70" cy="120" r="4.5" fill="#ffffff"/>
-                </svg>
+            <h2 class="reveal">Animated gameplay systems</h2>
+            <p class="sub reveal">takTIK resolves every pass, run, and save through pure geometry. Watch how each system works in real time.</p>
+            
+            <div class="system-showcase reveal">
+                <div class="system-tabs" role="tablist" aria-label="Gameplay systems tabs">
+                    <button class="sys-tab active" data-tab="race" role="tab" aria-selected="true" id="tab-btn-race">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sys-tab-icon"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <span>1. The Pass Race</span>
+                    </button>
+                    <button class="sys-tab" data-tab="window" role="tab" aria-selected="false" id="tab-btn-window">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sys-tab-icon"><circle cx="12" cy="13" r="8"/><path d="M12 2v3"/><path d="M9 2h6"/><line x1="10" y1="11" x2="10" y2="15"/><line x1="14" y1="11" x2="14" y2="15"/></svg>
+                        <span>2. Decision Freeze</span>
+                    </button>
+                    <button class="sys-tab" data-tab="shoot" role="tab" aria-selected="false" id="tab-btn-shoot">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sys-tab-icon"><path d="M3 19V6h18v13"/><path d="M7 6v13"/><path d="M12 6v13"/><path d="M17 6v13"/><path d="M3 12h18"/><circle cx="17" cy="9" r="2" fill="currentColor"/></svg>
+                        <span>3. Strike &amp; Save Duel</span>
+                    </button>
+                </div>
+
+                <!-- SYSTEM 1: THE RACE -->
+                <div class="sys-panel active" id="panel-race" role="tabpanel">
+                    <div class="sys-header">
+                        <div>
+                            <h3>The race is the whole game</h3>
+                            <p>The ball is faster than any player. When you lead a pass into space, your runner and the closest defender enter a simultaneous sprint for the landing spot. Nearest body when the ball arrives wins possession.</p>
+                        </div>
+                        <div class="sys-badge">
+                            <span class="live-dot"></span>
+                            <span class="sys-status-text">Simulating Race</span>
+                        </div>
+                    </div>
+                    <div class="pitch-container">
+                        <svg class="pitch-svg pitch-svg-race" viewBox="0 0 400 220" role="img" aria-label="Animated tactical diagram of a pass race">
+                            <rect x="6" y="6" width="388" height="208" rx="14" class="pitch-turf" />
+                            <line x1="200" y1="6" x2="200" y2="214" stroke="rgba(255,255,255,0.4)" stroke-width="2" />
+                            <circle cx="200" cy="110" r="32" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2" />
+                            <circle cx="200" cy="110" r="2.5" fill="rgba(255,255,255,0.6)" />
+                            
+                            <!-- Penalty box (right side) -->
+                            <rect x="330" y="55" width="64" height="110" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="2" />
+                            
+                            <!-- Landing target zone -->
+                            <circle class="landing-target" cx="240" cy="110" r="16" fill="rgba(80, 227, 194, 0.15)" stroke="#50e3c2" stroke-width="2" stroke-dasharray="4 3" />
+                            <circle class="landing-pulse" cx="240" cy="110" r="16" fill="none" stroke="#50e3c2" stroke-width="2" />
+                            <text x="240" y="88" text-anchor="middle" class="pitch-label">LANDING ZONE</text>
+
+                            <!-- Pass trajectory line -->
+                            <line class="anim-pass-line" x1="80" y1="150" x2="240" y2="110" stroke="#ffffff" stroke-width="2.5" stroke-dasharray="6 4" />
+                            
+                            <!-- Runner sprint guide (blue dashed) -->
+                            <line class="anim-runner-path" x1="130" y1="160" x2="240" y2="110" stroke="#1f6bff" stroke-width="1.8" stroke-dasharray="3 3" opacity="0.65" />
+                            
+                            <!-- Defender sprint guide (pink dashed) -->
+                            <line class="anim-defender-path" x1="280" y1="60" x2="240" y2="110" stroke="#ff2d87" stroke-width="1.8" stroke-dasharray="3 3" opacity="0.65" />
+
+                            <!-- Passer (stationary blue) -->
+                            <g class="player-passer" transform="translate(80, 150)">
+                                <circle r="8.5" fill="#1f6bff" stroke="#ffffff" stroke-width="1.5" />
+                                <text y="3" text-anchor="middle" font-size="8" font-weight="700" fill="#ffffff">P</text>
+                            </g>
+
+                            <!-- Blue Runner -->
+                            <g class="anim-runner">
+                                <circle r="8.5" fill="#1f6bff" stroke="#50e3c2" stroke-width="2" />
+                                <text y="3" text-anchor="middle" font-size="8" font-weight="800" fill="#ffffff">R</text>
+                            </g>
+
+                            <!-- Pink Defender -->
+                            <g class="anim-defender">
+                                <circle r="8.5" fill="#ff2d87" stroke="#ffffff" stroke-width="1.5" />
+                                <text y="3" text-anchor="middle" font-size="8" font-weight="800" fill="#ffffff">D</text>
+                            </g>
+
+                            <!-- Animated Ball -->
+                            <g class="anim-ball">
+                                <circle r="5.5" fill="#ffffff" stroke="#171717" stroke-width="1" />
+                                <circle r="2.5" fill="#ffc300" />
+                            </g>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- SYSTEM 2: DECISION FREEZE -->
+                <div class="sys-panel" id="panel-window" role="tabpanel" style="display:none;">
+                    <div class="sys-header">
+                        <div>
+                            <h3>Decision window: Freeze &amp; Stack</h3>
+                            <p>On every turnover, play freezes. A central decision ring drains like a sand timer. During this window, you can queue passes, reposition runners, and lock in tactical adjustments simultaneously before real time resumes.</p>
+                        </div>
+                        <div class="sys-badge">
+                            <span class="live-dot pause-dot"></span>
+                            <span class="sys-status-text">Window Active</span>
+                        </div>
+                    </div>
+                    <div class="pitch-container">
+                        <svg class="pitch-svg pitch-svg-window" viewBox="0 0 400 220" role="img" aria-label="Animated tactical diagram of decision freeze window">
+                            <rect x="6" y="6" width="388" height="208" rx="14" class="pitch-turf" />
+                            <line x1="200" y1="6" x2="200" y2="214" stroke="rgba(255,255,255,0.4)" stroke-width="2" />
+                            
+                            <!-- Center Decision Countdown Ring -->
+                            <g transform="translate(200, 110)">
+                                <circle r="36" fill="rgba(14, 36, 19, 0.7)" stroke="rgba(255,255,255,0.2)" stroke-width="4" />
+                                <circle class="decision-drain-ring" r="36" fill="none" stroke="#ffc300" stroke-width="4" stroke-linecap="round" />
+                                <text text-anchor="middle" y="4" class="drain-timer-text">FREEZE</text>
+                            </g>
+
+                            <!-- Planned pass vector -->
+                            <line class="freeze-pass-vector" x1="120" y1="140" x2="250" y2="80" stroke="#50e3c2" stroke-width="2.5" stroke-dasharray="5 3" />
+                            
+                            <!-- Planned runner waypoints -->
+                            <line class="freeze-pass-vector" x1="90" y1="80" x2="160" y2="50" stroke="#ffc300" stroke-width="2" stroke-dasharray="4 4" />
+                            <circle cx="160" cy="50" r="11" fill="none" stroke="#ffc300" stroke-width="2" />
+
+                            <line class="freeze-pass-vector" x1="180" y1="170" x2="250" y2="80" stroke="#50e3c2" stroke-width="2" stroke-dasharray="4 4" />
+                            <circle cx="250" cy="80" r="12" fill="none" stroke="#50e3c2" stroke-width="2" />
+
+                            <!-- Ball carrier -->
+                            <g transform="translate(120, 140)">
+                                <circle class="pulse-carrier" r="14" fill="none" stroke="#50e3c2" stroke-width="2" />
+                                <circle r="8.5" fill="#1f6bff" stroke="#ffffff" stroke-width="1.5" />
+                                <text y="3" text-anchor="middle" font-size="8" font-weight="700" fill="#ffffff">1</text>
+                            </g>
+                            <!-- Ball next to carrier -->
+                            <circle cx="132" cy="132" r="5" fill="#ffffff" stroke="#171717" stroke-width="1" />
+
+                            <!-- Runner 1 -->
+                            <g class="freeze-player-1">
+                                <circle r="8.5" fill="#1f6bff" stroke="#ffffff" stroke-width="1.5" />
+                                <text y="3" text-anchor="middle" font-size="8" font-weight="700" fill="#ffffff">2</text>
+                            </g>
+
+                            <!-- Runner 2 -->
+                            <g class="freeze-player-2">
+                                <circle r="8.5" fill="#1f6bff" stroke="#ffffff" stroke-width="1.5" />
+                                <text y="3" text-anchor="middle" font-size="8" font-weight="700" fill="#ffffff">3</text>
+                            </g>
+
+                            <!-- Opponents watching -->
+                            <g transform="translate(240, 150)">
+                                <circle r="8.5" fill="#ff2d87" stroke="#ffffff" stroke-width="1.5" />
+                            </g>
+                            <g transform="translate(290, 80)">
+                                <circle r="8.5" fill="#ff2d87" stroke="#ffffff" stroke-width="1.5" />
+                            </g>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- SYSTEM 3: STRIKE & SAVE -->
+                <div class="sys-panel" id="panel-shoot" role="tabpanel" style="display:none;">
+                    <div class="sys-header">
+                        <div>
+                            <h3>Inside 30 units: Strike &amp; Goalkeeper Dive</h3>
+                            <p>Inside shooting range, aim across the keeper toward the far post. The keeper commits to a dive trajectory — beat the keeper's reach and the goal net ripples. Pure angles and reaction speed.</p>
+                        </div>
+                        <div class="sys-badge">
+                            <span class="live-dot strike-dot"></span>
+                            <span class="sys-status-text">Strike Duel</span>
+                        </div>
+                    </div>
+                    <div class="pitch-container">
+                        <svg class="pitch-svg pitch-svg-shoot" viewBox="0 0 400 220" role="img" aria-label="Animated tactical diagram of striker shot and keeper dive">
+                            <rect x="6" y="6" width="388" height="208" rx="14" class="pitch-turf" />
+                            
+                            <!-- Goal Mouth at right -->
+                            <rect x="372" y="70" width="22" height="80" rx="3" fill="rgba(255,255,255,0.15)" stroke="#ffffff" stroke-width="2.5" />
+                            <!-- Net grid lines -->
+                            <line x1="379" y1="70" x2="379" y2="150" stroke="rgba(255,255,255,0.4)" stroke-width="1" stroke-dasharray="2 2" />
+                            <line x1="386" y1="70" x2="386" y2="150" stroke="rgba(255,255,255,0.4)" stroke-width="1" stroke-dasharray="2 2" />
+                            <line x1="372" y1="90" x2="394" y2="90" stroke="rgba(255,255,255,0.4)" stroke-width="1" stroke-dasharray="2 2" />
+                            <line x1="372" y1="110" x2="394" y2="110" stroke="rgba(255,255,255,0.4)" stroke-width="1" stroke-dasharray="2 2" />
+                            <line x1="372" y1="130" x2="394" y2="130" stroke="rgba(255,255,255,0.4)" stroke-width="1" stroke-dasharray="2 2" />
+                            
+                            <!-- Penalty box area -->
+                            <rect x="270" y="45" width="102" height="130" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2" />
+                            <path d="M 270 85 A 35 35 0 0 0 270 135" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.8" />
+                            
+                            <!-- Shot vector path -->
+                            <path class="anim-shot-path" d="M 120 135 Q 260 75 378 82" fill="none" stroke="#ffc300" stroke-width="2.5" stroke-dasharray="6 4" />
+
+                            <!-- Goalkeeper Dive reach zone -->
+                            <ellipse cx="355" cy="98" rx="20" ry="14" fill="rgba(255, 45, 135, 0.15)" stroke="#ff2d87" stroke-width="1.5" stroke-dasharray="3 3" />
+
+                            <!-- Striker (#1f6bff) -->
+                            <g class="anim-striker">
+                                <circle r="9" fill="#1f6bff" stroke="#ffffff" stroke-width="2" />
+                                <text y="3" text-anchor="middle" font-size="8" font-weight="800" fill="#ffffff">9</text>
+                            </g>
+
+                            <!-- Goalkeeper (#ff2d87) diving -->
+                            <g class="anim-gk">
+                                <circle r="9" fill="#ff2d87" stroke="#ffd700" stroke-width="2" />
+                                <text y="3" text-anchor="middle" font-size="8" font-weight="800" fill="#ffffff">GK</text>
+                            </g>
+
+                            <!-- Shooting Ball -->
+                            <g class="anim-shot-ball">
+                                <circle r="5" fill="#ffffff" stroke="#171717" stroke-width="1" />
+                                <circle r="2" fill="#ff2d87" />
+                            </g>
+
+                            <!-- Goal flash effect -->
+                            <circle class="goal-spark" cx="380" cy="82" r="18" fill="none" stroke="#50e3c2" stroke-width="3" />
+                        </svg>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -127,21 +387,41 @@ import '../styles/info.css';
         </section>
 
         <section class="info-section">
-            <h2 class="reveal">Online modes</h2>
+            <h2 class="reveal">
+                <img src="/stickers/sticker-vs.png" alt="" width="38" height="38"
+                     style="vertical-align: -8px; margin-right: 8px; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.15));" />
+                Online modes
+            </h2>
             <p class="sub reveal">Take the same game online — no accounts, no downloads.</p>
             <div class="mode-cards">
                 <article class="mode-card reveal">
-                    <span class="mode-emoji">🌐</span>
+                    <svg class="mode-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="2" y1="12" x2="22" y2="12"/>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                    </svg>
                     <h3>PVP — Quick Match</h3>
                     <p>Open the tab and you're listed automatically. Challenge anyone waiting, or wait to be challenged. Real-time 1v1 over WebRTC.</p>
                 </article>
                 <article class="mode-card reveal">
-                    <span class="mode-emoji">🔑</span>
+                    <svg class="mode-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="7.5" cy="15.5" r="4.5"/>
+                        <path d="M10.5 12.5L20 3"/>
+                        <path d="M17 3l4 4"/>
+                        <path d="M14 6l3 3"/>
+                    </svg>
                     <h3>PVP — Custom Room</h3>
                     <p>Create a private room with a 4-letter code (and optional password) and share it with a friend.</p>
                 </article>
                 <article class="mode-card reveal">
-                    <span class="mode-emoji">⭕</span>
+                    <svg class="mode-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"/>
+                        <circle cx="12" cy="12" r="4"/>
+                        <circle cx="12" cy="6" r="1.5" fill="currentColor"/>
+                        <circle cx="18" cy="12" r="1.5" fill="currentColor"/>
+                        <circle cx="12" cy="18" r="1.5" fill="currentColor"/>
+                        <circle cx="6" cy="12" r="1.5" fill="currentColor"/>
+                    </svg>
                     <h3>Rondo LIVE</h3>
                     <p>4–7 player keep-away: the circle keeps possession while one player in the middle predicts the pass. Guess right and you're out of the middle.</p>
                 </article>
@@ -162,7 +442,7 @@ import '../styles/info.css';
             <a href="/contact">Contact</a>
             <a href="/privacy">Privacy</a>
         </nav>
-        <span>© 2026 Guess &amp; Pass. Made for football brains.</span>
+        <span>© 2026 takTIK. Made for football brains.</span>
     </footer>
 
     <script>
@@ -170,6 +450,35 @@ import '../styles/info.css';
             entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); } });
         }, { threshold: 0.12 });
         document.querySelectorAll('.reveal').forEach(elm => io.observe(elm));
+
+        // System Tabs Logic
+        const tabs = document.querySelectorAll('.sys-tab');
+        const panels = {
+            race: document.getElementById('panel-race'),
+            window: document.getElementById('panel-window'),
+            shoot: document.getElementById('panel-shoot')
+        };
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const target = tab.dataset.tab;
+                tabs.forEach(t => {
+                    t.classList.remove('active');
+                    t.setAttribute('aria-selected', 'false');
+                });
+                tab.classList.add('active');
+                tab.setAttribute('aria-selected', 'true');
+
+                Object.keys(panels).forEach(key => {
+                    if (panels[key]) {
+                        panels[key].style.display = (key === target) ? 'block' : 'none';
+                        if (key === target) {
+                            panels[key].classList.add('active');
+                        }
+                    }
+                });
+            });
+        });
     </script>
 </body>
 </html>

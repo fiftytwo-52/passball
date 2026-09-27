@@ -1470,11 +1470,16 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            is up, because the roll below is applied about his local z and a body
            turned side-on would somersault instead of dive. */
         if (p.hasBall && Number.isFinite(ball.cdx) && Number.isFinite(ball.cdy)) {
+            /* The carrier's facing is frozen while the decision window is open:
+               easing it toward anything during the freeze would let the body
+               telegraph the plan (a turn toward the drawn pass) before the ball
+               moves. The turn happens when execution starts and the body with it. */
+            const planning = PLAN && !PLAN.armed;
             const target = p.trapping ? p.trapping.toYaw : Math.atan2(ball.cdx, -ball.cdy);
             let d = target - p.yaw;
             while (d > Math.PI) d -= Math.PI * 2;
             while (d < -Math.PI) d += Math.PI * 2;
-            p.yaw += d * Math.min(1, dt * 14);
+            if (!planning) p.yaw += d * Math.min(1, dt * 14);
         } else if (sp > .25 || da > .35) {
             const target = da > .35 ? (p.team === 'you' ? Math.PI : 0) : Math.atan2(dx, -dy);
             let d = target - p.yaw;
@@ -2531,31 +2536,41 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const audio = initBgm();
             if (!audio) return;
             const currentScreen = screenName !== undefined ? screenName : (typeof topScreen === 'function' ? topScreen() : 'menu');
-            const shouldPlay = !muted && (currentScreen === 'menu' || currentScreen === 'pause');
+            const shouldPlay = !muted && !document.hidden && (currentScreen === 'menu' || currentScreen === 'pause' || currentScreen === 'pvp' || currentScreen === 'rondo' || currentScreen === 'over');
             if (shouldPlay) {
-                const p = audio.play();
-                if (p && p.catch) p.catch(() => { });
+                if (audio.paused) {
+                    const p = audio.play();
+                    if (p && p.catch) p.catch(() => { });
+                }
             } else {
-                audio.pause();
+                if (!audio.paused) {
+                    audio.pause();
+                }
             }
         }
-        /** §9.b — the boot preload: resolve once the background track is fully
-            loaded. The menu used to open to silence and start the track half
-            way through, because the multi-megabyte file was the slowest thing
-            on first load; the boot veil (see the end of boot) waits on this.
-            An error — a missing track — also resolves: a broken file must
-            never trap the player on a loading screen. */
+        /** §9.b — the boot preload: resolve once the background track is ready to
+            play. A safety timeout ensures players never get trapped on a loading
+            screen on slow networks or when audio buffering is throttled. */
         function preloadBgm(onReady) {
             const audio = initBgm();
             if (!audio) { if (onReady) onReady(); return; }
             let done = false;
+            let timer = null;
             const finish = () => {
                 if (done) return;
                 done = true;
+                if (timer) clearTimeout(timer);
                 if (onReady) onReady();
                 syncBgm(); /* the menu is up behind the veil: start it if policy allows */
             };
+            if (audio.readyState >= 2) {
+                finish();
+                return;
+            }
+            timer = setTimeout(finish, 1500);
             audio.addEventListener('canplaythrough', finish, { once: true });
+            audio.addEventListener('canplay', finish, { once: true });
+            audio.addEventListener('loadeddata', finish, { once: true });
             audio.addEventListener('error', finish, { once: true });
             audio.load();
         }
@@ -2596,6 +2611,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             unlock,
             syncBgm,
             preloadBgm,
+            getAudio() { return bgm; },
             get muted() { return muted; },
             toggle() { muted = !muted; syncBgm(); return muted; },
             kick() { tone(150, .12, 'triangle', .4); tone(90, .16, 'sine', .3, .01); },
@@ -2867,8 +2883,34 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            legitimately be open underneath one. */
         if (sheetOpen) setMenuOpen(false);
         Sfx.syncBgm(name);
+        syncVideo(name);
         fitView();
     });
+
+    function syncVideo(screenName) {
+        const v = document.getElementById('menu-bg-video') || document.querySelector('.menu-bg-video');
+        if (!v) return;
+        const currentScreen = screenName !== undefined ? screenName : (typeof topScreen === 'function' ? topScreen() : 'menu');
+        const shouldPlay = (currentScreen === 'menu' || currentScreen === 'pvp' || currentScreen === 'rondo') && !document.hidden;
+        if (shouldPlay) {
+            v.muted = true;
+            if (v.paused) {
+                const p = v.play();
+                if (p && p.catch) p.catch(() => { });
+            }
+        } else {
+            if (!v.paused) {
+                v.pause();
+            }
+        }
+    }
+
+    if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', () => {
+            Sfx.syncBgm();
+            syncVideo();
+        });
+    }
 
     /* ==========================================================================
        § 11. LIFECYCLE (canonical §3)
@@ -6278,7 +6320,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     /** Both sides are ready: every stacked move fires together. */
     function beginExecution() {
-        if (!PLAN) return;
+        if (!PLAN || PLAN.armed) return;
         const plan = PLAN;
         plan.armed = true;
         if (ui.done) ui.done.hidden = true;
@@ -9014,6 +9056,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             window.removeEventListener('pointerdown', onPointer);
             window.removeEventListener('keydown', onKey);
             Sfx.unlock(); /* the gesture: resumes Web Audio and starts the track */
+            syncVideo('menu');
             bootVeil.classList.add('is-lifted');
             setTimeout(() => bootVeil.remove(), 700);
         }
@@ -9023,6 +9066,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             window.addEventListener('pointerdown', onPointer, { passive: true });
             window.addEventListener('keydown', onKey);
         }
+        window.addEventListener('pointerdown', onPointer, { passive: true, once: true });
+        window.addEventListener('keydown', onKey, { once: true });
         Sfx.preloadBgm(() => { audioReady = true; showGate(); });
         setTimeout(() => { dwellDone = true; showGate(); }, 900);
         setTimeout(onEnter, 15000); /* never trap: lift without sound if untapped */
@@ -9035,6 +9080,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         get plan() { return PLAN; },
         get shootout() { return SO; },
         get ball() { return ball; },
+        get sfx() { return Sfx; },
         get rotateHold() { return rotateHold; },
         orientation: { isTouchDevice, isLandscapeShape, syncRotateGate },
         api: {

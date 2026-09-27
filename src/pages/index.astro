@@ -13,14 +13,17 @@ import '../styles/global.css';
     <meta name="color-scheme" content="light">
     <meta name="theme-color" content="#171717">
 
-    <title>Guess & Pass — real-time 6-a-side</title>
+    <title>takTIK — real-time 6-a-side</title>
     <meta name="description"
         content="Two two-minute halves of continuous 6-a-side football on a top-view pitch. Pass, shoot and dive in real time — every interception and save is won by geometry, not dice.">
 
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Guess & Pass">
+    <meta property="og:title" content="takTIK">
     <meta property="og:description"
         content="Continuous real-time football: two 2-minute halves, and a penalty shootout if it's level. Nothing is resolved by dice — the ball is faster than the players, and that race is the game.">
+    <meta property="og:image" content="/og/og-home.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
 
     <link rel="icon"
@@ -41,7 +44,7 @@ import '../styles/global.css';
         <div class="card card-floating" style="position:fixed;inset:auto 16px 16px 16px;z-index:99">
             <div class="eyebrow">Needs JavaScript</div>
             <h3>This is a real-time game</h3>
-            <p>Guess & Pass renders a WebGL pitch and simulates the ball in the browser. Enable JavaScript to play.
+            <p>takTIK renders a WebGL pitch and simulates the ball in the browser. Enable JavaScript to play.
             </p>
         </div>
     </noscript>
@@ -75,7 +78,7 @@ import '../styles/global.css';
         <div id="loading-veil" aria-hidden="true">
             <div class="lv-card">
                 <div class="lv-ball-wrap"><span class="lv-ball"></span><span class="lv-shadow"></span></div>
-                <p class="lv-word">GUESS <span>&amp;</span> PASS</p>
+                <p class="lv-word">tak<span>TIK</span></p>
                 <p class="lv-tag">rolling out the pitch…</p>
                 <span class="lv-bar"><i></i></span>
                 <p class="lv-enter">TAP TO KICK OFF</p>
@@ -370,8 +373,10 @@ import '../styles/global.css';
              turf at reduced opacity, so the landing surface reads as a moving
              programme cover without ever competing with the frame above it. It is
              decorative, so it takes no pointer events and is invisible to AT. -->
-        <video class="menu-bg-video" src="/menu-bg.mp4" autoplay muted loop playsinline
-            preload="auto" aria-hidden="true" tabindex="-1"></video>
+        <video id="menu-bg-video" class="menu-bg-video" autoplay muted loop playsinline webkit-playsinline
+            preload="auto" aria-hidden="true" tabindex="-1">
+            <source src="/menu-bg.mp4" type="video/mp4" />
+        </video>
         <!-- Weathering: a vignette to settle the turf at its edges, and fine grain so
              the large flat fills do not band on a wide-gamut panel. Both are
              decorative, so neither may take a pointer event. -->
@@ -381,29 +386,24 @@ import '../styles/global.css';
         <div class="menu-frame" role="dialog" aria-modal="true" aria-labelledby="menu-title">
             <div class="navbar">
                 <div class="top-capsule">
-                    <div class="brand-row">
-                        <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="1.8" aria-hidden="true" focusable="false">
-                            <circle cx="12" cy="12" r="9" />
-                            <path d="M12 6l3.5 2.6-1.3 4h-4.4l-1.3-4z" />
-                        </svg>
-                        <span class="brand-name">Passball</span>
+                    <div class="brand-group">
+                        <div class="brand-row">
+                            <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="1.8" aria-hidden="true" focusable="false">
+                                <circle cx="12" cy="12" r="9" />
+                                <path d="M12 6l3.5 2.6-1.3 4h-4.4l-1.3-4z" />
+                            </svg>
+                            <span class="brand-name">takTIK</span>
+                        </div>
+                        <span class="brand-tag">6-a-side</span>
                     </div>
 
-                    <div class="caps-row primary">
-                        <span class="cap tag">Guess & Pass</span>
-                        <span class="cap">6-a-side</span>
-                    </div>
-
-                    <!-- The utility row. Tutorial opens the standalone tutorial
-                         page; the three pills that *describe* the project hand
-                         the player to their own dedicated pages. -->
-                    <div class="caps-row utility">
-                        <a class="cap" href="/tutorial">Tutorial</a>
-                        <a class="cap" href="/about">About us</a>
-                        <a class="cap" href="/contact">Contact</a>
-                        <a class="cap" href="/privacy">Privacy policy</a>
-                    </div>
+                    <nav class="game-nav-links" aria-label="Game links">
+                        <a class="game-nav-link" href="/tutorial">Tutorial</a>
+                        <a class="game-nav-link" href="/about">About us</a>
+                        <a class="game-nav-link" href="/contact">Contact</a>
+                        <a class="game-nav-link" href="/privacy">Privacy policy</a>
+                    </nav>
                 </div>
             </div>
 
@@ -431,7 +431,7 @@ import '../styles/global.css';
 
                 <div class="hero-copy">
                     <div class="eyebrow">Your shape · 2 : 3 : 1</div>
-                    <h1 id="menu-title">Guess & Pass</h1>
+                    <h1 id="menu-title">takTIK</h1>
                     <p>Freeze the board on every change of possession, stack your moves, then watch both sides play
                         them out.</p>
                 </div>
@@ -589,26 +589,38 @@ import '../styles/global.css';
 
 
     <div class="screen" id="screen-pause" hidden>
-        <div class="card" role="dialog" aria-modal="true" aria-labelledby="pause-title">
-            <div class="eyebrow">Paused</div>
-            <h2 id="pause-title">Time out</h2>
-            <p>The match clock is paused too — it resumes exactly where it stopped.</p>
+        <div class="card card-pause" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+            <div class="pause-header">
+                <div class="pause-eyebrow-row">
+                    <span class="pause-badge">
+                        <svg class="pause-icon-mini" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="6" y="4" width="4" height="16" rx="1"/>
+                            <rect x="14" y="4" width="4" height="16" rx="1"/>
+                        </svg>
+                        Paused
+                    </span>
+                    <span class="pause-clock-chip">MATCH CLOCK HALTED</span>
+                </div>
+                <h2 id="pause-title">Time out</h2>
+                <p class="pause-subtitle">The match clock is paused too — it resumes exactly where it stopped.</p>
+            </div>
 
-            <ul class="spec-list">
-                <li><strong>1 · Stack the pass</strong> — <em>drag from the ball-carrier</em> onto a team-mate to
-                    pass to them, or into space to play it into an area.</li>
-                <li><strong>2 · Send the runners</strong> — <em>drag your players</em> to drop a ring where each of
-                    them should be when the ball is played.</li>
-                <li><strong>3 · Set the finish</strong> — inside range, press <strong>SHOOT</strong> to stack a shot;
-                    defending, <em>drag your keeper</em> to the dive point.</li>
-                <li><strong>4 · Close the window</strong> — press <strong>MOVES DONE</strong>. Both sides' moves then
-                    resolve at once — nothing here happens one move at a time.</li>
-            </ul>
 
-            <div class="actions">
-                <button type="button" class="btn btn-primary" id="btn-resume">RESUME</button>
-                <button type="button" class="btn btn-secondary" id="btn-restart">RESTART MATCH</button>
-                <button type="button" class="btn btn-ghost-sm" id="btn-quit">QUIT TO MENU</button>
+            <div class="pause-actions">
+                <button type="button" class="btn btn-primary pause-btn-resume" id="btn-resume">
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+                    RESUME
+                </button>
+                <div class="pause-btn-row">
+                    <button type="button" class="btn btn-secondary pause-btn-restart" id="btn-restart">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        RESTART MATCH
+                    </button>
+                    <button type="button" class="btn btn-ghost-sm pause-btn-quit" id="btn-quit">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                        QUIT TO MENU
+                    </button>
+                </div>
             </div>
         </div>
     </div>
