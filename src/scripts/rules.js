@@ -41,7 +41,7 @@ export const RULES = {
     GOAL_HALF_WIDTH: 12.5,     // half the mouth → 25 units = 17 m wide
     SHOT_RANGE: 30,            // max distance from goal to attempt a shot
     HALVES: 2,
-    HALF_LENGTH: 120,          // seconds per half (2:00)
+    HALF_LENGTH: 60,           // seconds per half (1:00)
     PENALTY_SPOT: 10.5,        // penalty spot, units off the goal line
     KEEPER_LINE: 4,            // how far off their line a keeper stands
 
@@ -284,18 +284,27 @@ export function defaultDiveTarget(keeper, target, reach = RULES.KEEPER_REACH) {
    ========================================================================= */
 
 /**
- * One kick. Aiming outside the mouth is an automatic miss; otherwise the dive
- * point is compared against the shot target with a reach / tolerance test —
- * deliberately not an exact-pixel match.
+ * One kick. Aiming outside the mouth is an automatic miss; a shot inside the
+ * mouth but within `postMargin` of either post clatters the woodwork (POST);
+ * otherwise the dive point is compared against the shot target with a reach /
+ * tolerance test — deliberately not an exact-pixel match.
  */
 export function penaltyKickOutcome(input) {
     const shotTarget = input.shotTarget;
     const divePoint = input.divePoint;
     const goalX = input.goalX ?? RULES.GOAL_X;
     const halfWidth = input.goalHalfWidth ?? RULES.GOAL_HALF_WIDTH;
+    const postMargin = input.postMargin ?? 0.45;
 
     if (!isOnTarget(shotTarget.x, goalX, halfWidth)) {
         return { outcome: 'MISS', dist: Infinity, onTarget: false };
+    }
+
+    /* Woodwork: close enough to shave the post. Read before the dive, because
+       the keeper's dive never changes where the ball meets the frame. */
+    const distToPost = halfWidth - Math.abs(shotTarget.x - goalX);
+    if (distToPost >= 0 && distToPost < postMargin) {
+        return { outcome: 'POST', dist: distToPost, onTarget: true };
     }
 
     if (input.byDirection) {
@@ -442,9 +451,9 @@ export function runVerification(log = true) {
         return (mouth >= 24 && mouth <= 26 && RULES.GOAL_X === 50) || 'mouth is ' + mouth;
     });
 
-    check('Two 2:00 halves (match = 240 s)', () => {
+    check('Two 1:00 halves (match = 120 s)', () => {
         return (
-            (RULES.HALVES === 2 && RULES.HALF_LENGTH === 120 && MATCH_LENGTH === 240) ||
+            (RULES.HALVES === 2 && RULES.HALF_LENGTH === 60 && MATCH_LENGTH === 120) ||
             'match length drifted'
         );
     });
@@ -627,6 +636,21 @@ export function runVerification(log = true) {
             divePoint: { x: RULES.GOAL_X, y: 0 }
         });
         return r.outcome === 'MISS' || 'an off-target penalty was not a miss';
+    });
+
+    check('A penalty shaving the post is POST, not a goal or a miss', () => {
+        const near = penaltyKickOutcome({
+            shotTarget: { x: RULES.GOAL_X + RULES.GOAL_HALF_WIDTH - 0.2, y: 0 },
+            divePoint: { x: RULES.GOAL_X - RULES.GOAL_HALF_WIDTH, y: 0 }
+        });
+        const clear = penaltyKickOutcome({
+            shotTarget: { x: RULES.GOAL_X + RULES.GOAL_HALF_WIDTH - 2, y: 0 },
+            divePoint: { x: RULES.GOAL_X - RULES.GOAL_HALF_WIDTH, y: 0 }
+        });
+        return (
+            (near.outcome === 'POST' && clear.outcome === 'GOAL') ||
+            'near=' + near.outcome + ' clear=' + clear.outcome
+        );
     });
 
     check('Shootout: level after five each goes to next five', () => {

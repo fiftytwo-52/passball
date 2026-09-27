@@ -61,7 +61,7 @@ def save(base, name):
 img = og_base()
 draw_badge(img, "REAL-TIME 6-A-SIDE", 100, 100)
 d = ImageDraw.Draw(img)
-d.text((100, 160), "takTIK", font=font_title, fill="white")
+d.text((100, 160), "tactik", font=font_title, fill="white")
 d.text((100, 290), "Simultaneous planning football.\nEvery race won by geometry.", font=font_sub, fill=(220, 238, 226), spacing=12)
 place(img, "public/stickers/sticker-ball.png", (720, 90, 380, 380), rotate_deg=6)
 place(img, "public/stickers/sticker-vs.png", (610, 310, 220, 220), rotate_deg=-8)

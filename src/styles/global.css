@@ -87,6 +87,12 @@ body {
    the frame becomes the page's full measure.
    ========================================================================= */
 
+@media (min-width: 641px) {
+    #screen-menu .menu-frame {
+        max-width: clamp(600px, 86vw, 1120px);
+    }
+}
+
 @media (min-width: 860px) {
     #screen-menu .menu-frame {
         max-width: 1120px;

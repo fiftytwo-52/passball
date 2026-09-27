@@ -13,12 +13,12 @@ import '../styles/global.css';
     <meta name="color-scheme" content="light">
     <meta name="theme-color" content="#171717">
 
-    <title>takTIK — real-time 6-a-side</title>
+    <title>tactik — real-time 6-a-side</title>
     <meta name="description"
         content="Two two-minute halves of continuous 6-a-side football on a top-view pitch. Pass, shoot and dive in real time — every interception and save is won by geometry, not dice.">
 
     <meta property="og:type" content="website">
-    <meta property="og:title" content="takTIK">
+    <meta property="og:title" content="tactik">
     <meta property="og:description"
         content="Continuous real-time football: two 2-minute halves, and a penalty shootout if it's level. Nothing is resolved by dice — the ball is faster than the players, and that race is the game.">
     <meta property="og:image" content="/og/og-home.jpg">
@@ -44,7 +44,7 @@ import '../styles/global.css';
         <div class="card card-floating" style="position:fixed;inset:auto 16px 16px 16px;z-index:99">
             <div class="eyebrow">Needs JavaScript</div>
             <h3>This is a real-time game</h3>
-            <p>takTIK renders a WebGL pitch and simulates the ball in the browser. Enable JavaScript to play.
+            <p>tactik renders a WebGL pitch and simulates the ball in the browser. Enable JavaScript to play.
             </p>
         </div>
     </noscript>
@@ -78,7 +78,7 @@ import '../styles/global.css';
         <div id="loading-veil" aria-hidden="true">
             <div class="lv-card">
                 <div class="lv-ball-wrap"><span class="lv-ball"></span><span class="lv-shadow"></span></div>
-                <p class="lv-word">tak<span>TIK</span></p>
+                <p class="lv-word">tac<span>TIK</span></p>
                 <p class="lv-tag">rolling out the pitch…</p>
                 <span class="lv-bar"><i></i></span>
                 <p class="lv-enter">TAP TO KICK OFF</p>
@@ -393,16 +393,22 @@ import '../styles/global.css';
                                 <circle cx="12" cy="12" r="9" />
                                 <path d="M12 6l3.5 2.6-1.3 4h-4.4l-1.3-4z" />
                             </svg>
-                            <span class="brand-name">takTIK</span>
+                            <span class="brand-name">tactik</span>
                         </div>
                         <span class="brand-tag">6-a-side</span>
                     </div>
 
                     <nav class="game-nav-links" aria-label="Game links">
                         <a class="game-nav-link" href="/tutorial">Tutorial</a>
-                        <a class="game-nav-link" href="/about">About us</a>
+                        <a class="game-nav-link" href="/about">
+                            <span class="nav-text-full">About us</span>
+                            <span class="nav-text-short">About</span>
+                        </a>
                         <a class="game-nav-link" href="/contact">Contact</a>
-                        <a class="game-nav-link" href="/privacy">Privacy policy</a>
+                        <a class="game-nav-link" href="/privacy">
+                            <span class="nav-text-full">Privacy policy</span>
+                            <span class="nav-text-short">Privacy</span>
+                        </a>
                     </nav>
                 </div>
             </div>
@@ -431,7 +437,7 @@ import '../styles/global.css';
 
                 <div class="hero-copy">
                     <div class="eyebrow">Your shape · 2 : 3 : 1</div>
-                    <h1 id="menu-title">takTIK</h1>
+                    <h1 id="menu-title">tactik</h1>
                     <p>Freeze the board on every change of possession, stack your moves, then watch both sides play
                         them out.</p>
                 </div>
@@ -475,9 +481,9 @@ import '../styles/global.css';
                             <div class="select-wrapper">
                                 <select class="setting-select" id="difficulty-start" aria-label="Difficulty">
                                     <option value="0.35">LOW (Amateur)</option>
-                                    <option value="0.75" selected>MID (Semi-Pro)</option>
-                                    <option value="1.25">HARD (Pro)</option>
-                                    <option value="1.85">EXTREME (World Class)</option>
+                                    <option value="1.85" selected>MID (Semi-Pro)</option>
+                                    <option value="2.6">HARD (Pro)</option>
+                                    <option value="3.4">EXTREME (World Class)</option>
                                 </select>
                                 <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                                     <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
@@ -496,8 +502,8 @@ import '../styles/global.css';
                             <div class="select-wrapper">
                                 <select class="setting-select" id="plan-window-start" aria-label="Move timer seconds">
                                     <option value="3">3s (Speed)</option>
-                                    <option value="5">5s (Rapid)</option>
-                                    <option value="10" selected>10s (Standard)</option>
+                                    <option value="5" selected>5s (Rapid)</option>
+                                    <option value="10">10s (Standard)</option>
                                     <option value="20">20s (Relaxed)</option>
                                 </select>
                                 <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
@@ -518,8 +524,8 @@ import '../styles/global.css';
                             <div class="select-wrapper">
                                 <select class="setting-select" id="match-length-start" aria-label="Half length seconds">
                                     <option value="30">1:00 min (Quick)</option>
-                                    <option value="60">2:00 min (Short)</option>
-                                    <option value="120" selected>4:00 min (Standard)</option>
+                                    <option value="60" selected>2:00 min (Short)</option>
+                                    <option value="120">4:00 min (Standard)</option>
                                     <option value="180">6:00 min (Full)</option>
                                 </select>
                                 <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
@@ -689,8 +695,8 @@ import '../styles/global.css';
                                 </label>
                                 <div class="select-wrapper">
                                     <select class="setting-select" id="pvp-setting-timer" aria-label="Turn response time">
-                                        <option value="5">5s (Fast)</option>
-                                        <option value="10" selected>10s (Standard)</option>
+                                        <option value="5" selected>5s (Fast)</option>
+                                        <option value="10">10s (Standard)</option>
                                         <option value="15">15s (Tactical)</option>
                                         <option value="20">20s (Relaxed)</option>
                                     </select>
@@ -711,8 +717,8 @@ import '../styles/global.css';
                                 </label>
                                 <div class="select-wrapper">
                                     <select class="setting-select" id="pvp-setting-length" aria-label="Match total length">
-                                        <option value="60">2:00 min</option>
-                                        <option value="120" selected>4:00 min</option>
+                                        <option value="60" selected>2:00 min</option>
+                                        <option value="120">4:00 min</option>
                                         <option value="180">6:00 min</option>
                                     </select>
                                     <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -794,8 +800,8 @@ import '../styles/global.css';
                                     </label>
                                     <div class="select-wrapper">
                                         <select class="setting-select" id="pvp-open-timer" aria-label="Turn response time">
-                                            <option value="5">5s (Fast)</option>
-                                            <option value="10" selected>10s (Standard)</option>
+                                            <option value="5" selected>5s (Fast)</option>
+                                            <option value="10">10s (Standard)</option>
                                             <option value="15">15s (Tactical)</option>
                                             <option value="20">20s (Relaxed)</option>
                                         </select>
@@ -816,8 +822,8 @@ import '../styles/global.css';
                                     </label>
                                     <div class="select-wrapper">
                                         <select class="setting-select" id="pvp-open-length" aria-label="Match total length">
-                                            <option value="60">2:00 min</option>
-                                            <option value="120" selected>4:00 min</option>
+                                            <option value="60" selected>2:00 min</option>
+                                            <option value="120">4:00 min</option>
                                             <option value="180">6:00 min</option>
                                         </select>
                                         <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -927,6 +933,15 @@ import '../styles/global.css';
                             <button type="button" class="btn btn-secondary btn-sm" id="btn-rondo-copy-code">Copy Code</button>
                             <button type="button" class="btn btn-ghost-sm" id="btn-rondo-cancel-host">Cancel</button>
                         </div>
+                        <div class="rondo-cpu-row">
+                            <span class="pvp-setting-label">Computer players</span>
+                            <div class="rondo-stepper">
+                                <button type="button" class="btn btn-ghost-sm" id="btn-rondo-cpu-minus" aria-label="Fewer computer players">−</button>
+                                <span class="rondo-cpu-count" id="rondo-cpu-count">0</span>
+                                <button type="button" class="btn btn-ghost-sm" id="btn-rondo-cpu-plus" aria-label="More computer players">+</button>
+                            </div>
+                        </div>
+                        <p class="rondo-cpu-hint">No friends online? Add computers to reach 4–7 players. Computers always play at Extreme level.</p>
                     </div>
                 </div>
             </div>

@@ -1,5 +1,5 @@
 /**
- * Passball P2P Network Module
+ * tactik P2P Network Module
  * Serverless real-time multiplayer using WebRTC DataChannels (via PeerJS).
  */
 import { Peer } from 'peerjs';
@@ -21,9 +21,10 @@ export const START_COUNTDOWN_SECONDS = 5;
    under a friendly handle instead of a peer id. The handle is derived from the
    seat, never random: the same lobby reads the same to everybody scanning it. */
 export const PLAYER_NAMES = [
-    'CoolDog', 'SexyCat', 'SwiftFox', 'BraveOwl', 'NeonWolf', 'TinyBear',
-    'IronPanda', 'LuckyDuck', 'WildHorse', 'SlickSeal', 'GrimLion', 'HappyGoat',
-    'RocketBee', 'SilentMoth', 'TurboSnail', 'ZeroFalcon', 'CosmicBat', 'RoyalToad'
+    'CoolBoy67', 'RockStar69', 'TurboFox404', 'NeonWolf67', 'SwiftFox69',
+    'BraveOwl404', 'TinyBear67', 'IronPanda69', 'LuckyDuck404', 'WildHorse67',
+    'SlickSeal69', 'GrimLion404', 'HappyGoat67', 'RocketBee69', 'SilentMoth404',
+    'TurboSnail67', 'ZeroFalcon69', 'CosmicBat404', 'RoyalToad67', 'CoolDog69'
 ];
 
 export function slotPlayerName(slot) {

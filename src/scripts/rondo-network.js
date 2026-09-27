@@ -1,5 +1,5 @@
 /**
- * Passball Rondo Network Module
+ * tactik Rondo Network Module
  * Online keep-away for 4–7 players. Star topology over PeerJS: one host holds
  * a data channel to every guest, and the host is the authority for the lobby
  * roster and every turn. Guests never talk to each other.
@@ -38,6 +38,22 @@ export class RondoNet extends EventTarget {
         this.guests = new Map();       // host side: id -> { id, name, conn }
         this.connected = false;
         this._seen = new Set();        // dedupe connection ids
+        this._lobbyPlayers = null;     // host-side provider for the full lobby list (humans + CPUs)
+    }
+
+    /** Host: register a function returning the full lobby player list, so guests
+        see computer players in the pre-match roster too. */
+    setLobbyPlayers(fn) {
+        this._lobbyPlayers = (typeof fn === 'function') ? fn : null;
+    }
+
+    /** Host: push the current full lobby list to every guest. */
+    pushLobby() {
+        if (!this.isHost) return;
+        this.broadcast({
+            type: 'RONDO_LOBBY',
+            players: this._lobbyPlayers ? this._lobbyPlayers() : this.roster(),
+        });
     }
 
     emit(name, detail) {
@@ -61,6 +77,7 @@ export class RondoNet extends EventTarget {
         this.connected = false;
         this.roomCode = null;
         this._seen.clear();
+        this._lobbyPlayers = null;
     }
 
     /* ------------------------------------------------------------------ */
@@ -113,7 +130,7 @@ export class RondoNet extends EventTarget {
             if (!data || typeof data !== 'object') return;
             if (data.type === 'RONDO_JOIN') {
                 this._admitGuest(conn, String(data.name || 'Player').slice(0, 16) || 'Player', String(data.id || ''));
-            } else if (data.type === 'RONDO_PASS' || data.type === 'RONDO_GUESS' || data.type === 'RONDO_LEAVE') {
+            } else if (data.type && typeof data.type === 'string' && data.type.startsWith('RONDO_')) {
                 const guest = this._guestByConn(conn);
                 this.emit('guestmsg', { from: guest ? guest.id : null, msg: data });
             }
@@ -143,10 +160,16 @@ export class RondoNet extends EventTarget {
         // Name clash: keep both, the roster shows them apart by seat number.
         this.guests.set(pid, { id: pid, name, conn });
         try {
-            conn.send({ type: 'RONDO_WELCOME', id: pid, players: this.roster(), code: this.roomCode });
+            conn.send({
+                type: 'RONDO_WELCOME',
+                id: pid,
+                players: this._lobbyPlayers ? this._lobbyPlayers() : this.roster(),
+                code: this.roomCode,
+            });
         } catch (e) {}
         this.emit('lobby', this.roster());
         this.emit('status', `${name} joined (${this.roster().length}/${RONDO_MAX_PLAYERS}).`);
+        this.pushLobby();
     }
 
     _guestByConn(conn) {
@@ -161,6 +184,7 @@ export class RondoNet extends EventTarget {
         this.emit('guestleft', { id: g.id, name: g.name });
         this.emit('lobby', this.roster());
         this.emit('status', `${g.name} left (${this.roster().length}/${RONDO_MAX_PLAYERS}).`);
+        this.pushLobby();
     }
 
     roster() {
@@ -231,6 +255,8 @@ export class RondoNet extends EventTarget {
                         fail('That room is full (7 players).');
                     } else if (data.type === 'RONDO_HOSTMSG') {
                         this.emit('hostmsg', data.msg);
+                    } else if (data.type === 'RONDO_LOBBY') {
+                        this.emit('lobby', data.players || []);
                     }
                 });
 

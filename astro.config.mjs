@@ -1,7 +1,7 @@
 import { defineConfig } from 'astro/config';
 
 /**
- * Passball — Astro configuration.
+ * tactik — Astro configuration.
  *
  * `output: 'static'` emits a plain HTML/CSS/JS bundle (no SSR runtime), which is
  * exactly what Cloudflare Pages wants for a direct upload.
@@ -16,7 +16,7 @@ import { defineConfig } from 'astro/config';
  * copies it into the output root, where Pages expects to find it.
  */
 export default defineConfig({
-    site: 'https://passball.pages.dev',
+    site: 'https://tactik.pages.dev',
     output: 'static',
     outDir: './out',
     build: {

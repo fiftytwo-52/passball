@@ -1,15 +1,15 @@
 {
-    "name": "passball",
+    "name": "tactik",
     "version": "1.0.0",
     "private": true,
     "type": "module",
-    "description": "Passball — 3D players on a 2D top-view pitch. Real-time 6-a-side football: two 2:00 halves and a penalty shootout, resolved by deterministic proximity races instead of dice.",
+    "description": "tactik — 3D players on a 2D top-view pitch. Real-time 6-a-side football: two 2:00 halves and a penalty shootout, resolved by deterministic proximity races instead of dice.",
     "scripts": {
         "dev": "astro dev",
         "build": "astro build && node tools/publish.mjs",
         "build:only": "astro build",
         "preview": "astro preview",
-        "deploy": "npm run build && wrangler pages deploy out --project-name passball",
+        "deploy": "npm run build && wrangler pages deploy out --project-name tactik",
         "astro": "astro"
     },
     "dependencies": {

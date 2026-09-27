@@ -1,6 +1,6 @@
-# ⚽ Guess & Pass
+# ⚽ tactik
 
-A real-time football duel: **3D low-poly players on a 2D top-view pitch**, seven a side, no dice.
+A real-time football duel: **3D low-poly players on a 2D top-view pitch**, 6-a-side, no dice.
 You drag a pass and it travels; the defender you aimed past either gets there in time or does not.
 The ball tells the truth because the ball is the truth.
 
@@ -269,11 +269,11 @@ can gate a deploy.
 
 ## ☁️ Deploy
 
-Live at **https://passball.pages.dev** — Cloudflare Pages, direct upload:
+Live at **https://tactik.pages.dev** — Cloudflare Pages, direct upload:
 
 ```bash
 npm run deploy
-# ≡ npm run build && npx wrangler pages deploy out --project-name passball
+# ≡ npm run build && npx wrangler pages deploy out --project-name tactik
 ```
 
 [`wrangler.toml`](wrangler.toml) points `pages_build_output_dir` at `out`, which is self-contained.
