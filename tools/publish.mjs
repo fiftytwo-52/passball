@@ -59,5 +59,5 @@ console.log('  ' + walk(OUT).join('\n  '));
 console.log('');
 console.log('  Deploy it with:');
 console.log('    npm run deploy');
-console.log('    # ≡ npm run build && npx wrangler pages deploy out --project-name tactik');
+console.log('    # ≡ npm run build && npx wrangler pages deploy out --project-name passball --force');
 console.log('');

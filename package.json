@@ -9,7 +9,7 @@
         "build": "astro build && node tools/publish.mjs",
         "build:only": "astro build",
         "preview": "astro preview",
-        "deploy": "npm run build && wrangler pages deploy out --project-name tactik",
+        "deploy": "npm run build && wrangler pages deploy out --project-name passball --force",
         "astro": "astro"
     },
     "dependencies": {
