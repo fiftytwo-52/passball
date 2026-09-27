@@ -8887,16 +8887,29 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         return sp;
     }
 
-    /** Hide the regulation match's bodies so the circle owns the pitch. */
+    /** Hide the regulation match's bodies and markers so the circle owns the pitch. */
     function rondoParkMatch() {
         for (const p of allPlayers) {
             if (p.mesh) p.mesh.visible = false;
+            if (p.ring) p.ring.visible = false;
+            if (p.shadow) p.shadow.visible = false;
         }
+        hideQueueMarkers();
+        if (typeof runnerMarker !== 'undefined') runnerMarker.visible = false;
+        if (typeof playerDragLine !== 'undefined') playerDragLine.visible = false;
+        if (typeof diveLine !== 'undefined') diveLine.visible = false;
+        if (typeof diveMarker !== 'undefined') diveMarker.visible = false;
+        if (typeof soAimLine !== 'undefined') soAimLine.visible = false;
+        if (typeof soDiveLine !== 'undefined') soDiveLine.visible = false;
+        if (typeof soTargetMarker !== 'undefined') soTargetMarker.visible = false;
+        if (typeof keeperDragLine !== 'undefined') keeperDragLine.visible = false;
     }
 
     function rondoRestoreMatch() {
         for (const p of allPlayers) {
             if (p.mesh) p.mesh.visible = true;
+            if (p.ring) p.ring.visible = true;
+            if (p.shadow) p.shadow.visible = true;
         }
     }
 
