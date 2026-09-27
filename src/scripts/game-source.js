@@ -1844,6 +1844,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     rondoPassAimLine.visible = false;
     const rondoDefAimLine = groundLine(0xffaa00, 2.5);
     rondoDefAimLine.visible = false;
+    const rondoMoveAimLine = groundLine(0x35c4ff, 2.5);
+    rondoMoveAimLine.visible = false;
 
     /* --- §8.b the stacked moves (§17.b) -------------------------------------
        A ring per queued run, plus one line for the queued ball. These show the
@@ -2954,6 +2956,123 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         syncVideo(name);
         fitView();
     });
+
+    /* ==========================================================================
+       CONFIRM SHEET — the one "this ends your game" prompt
+       --------------------------------------------------------------------------
+       Restart, quit to menu, leave the rondo, close an online room: every one of
+       those throws away something that is already running, so every one of them
+       asks first. One overlay serves them all — a dimmed board behind a card
+       that holds the question, the consequence, and the destructive verb on the
+       right. `confirmAction()` returns a promise, so a handler reads as
+       `if (!(await confirmAction({ ... }))) return;`. Escape cancels, Enter
+       confirms, the backdrop cancels, and CANCEL takes the focus — so a stray
+       keypress can never end a match. `confirmOpen()` tells the keyboard
+       shortcuts to keep their hands off while the question is on screen.
+       ========================================================================== */
+
+    let confirmSheet = null;     // lazily built DOM: { over, title, msg, ok, cancel }
+    let confirmResolve = null;   // the resolver of the question currently on screen
+
+    /** True while a prompt is up: the prompt owns the keyboard. */
+    function confirmOpen() { return !!confirmResolve; }
+
+    /** Answer the open prompt. Safe to call when there is none. */
+    function settleConfirm(answer) {
+        const resolve = confirmResolve;
+        confirmResolve = null;
+        if (confirmSheet) confirmSheet.over.hidden = true;
+        if (resolve) resolve(!!answer);
+    }
+
+    /** Build the sheet once and hand back its parts. */
+    function confirmSheetEls() {
+        if (confirmSheet) return confirmSheet;
+        const over = document.createElement('div');
+        over.className = 'confirm-over';
+        over.id = 'confirm-over';
+        over.hidden = true;
+        over.setAttribute('role', 'alertdialog');
+        over.setAttribute('aria-modal', 'true');
+        over.setAttribute('aria-labelledby', 'confirm-title');
+        over.setAttribute('aria-describedby', 'confirm-msg');
+        over.innerHTML = `<div class="confirm-card">`
+            + `<h2 class="confirm-title" id="confirm-title"></h2>`
+            + `<p class="confirm-msg" id="confirm-msg"></p>`
+            + `<div class="confirm-actions">`
+            + `<button type="button" class="btn confirm-cancel" id="btn-confirm-cancel"></button>`
+            + `<button type="button" class="btn confirm-ok" id="btn-confirm-ok"></button>`
+            + `</div></div>`;
+        (document.getElementById('app') || document.body).appendChild(over);
+        over.querySelector('.confirm-cancel').addEventListener('click', () => settleConfirm(false));
+        over.querySelector('.confirm-ok').addEventListener('click', () => settleConfirm(true));
+        /* The backdrop is a cancel target; the card is not, so a tap that starts
+           inside the question can never dismiss it by accident. */
+        over.addEventListener('click', (e) => { if (e.target === over) settleConfirm(false); });
+        confirmSheet = {
+            over,
+            title: over.querySelector('.confirm-title'),
+            msg: over.querySelector('.confirm-msg'),
+            cancel: over.querySelector('.confirm-cancel'),
+            ok: over.querySelector('.confirm-ok'),
+        };
+        return confirmSheet;
+    }
+
+    /** Ask before something irreversible. Resolves true to go ahead. */
+    function confirmAction(opts) {
+        const o = opts || {};
+        /* Two questions are never live at once: the older one answers itself
+           with a no, so its caller falls through to its own safe path. */
+        if (confirmResolve) settleConfirm(false);
+        const els = confirmSheetEls();
+        els.title.textContent = o.title || 'Are you sure?';
+        els.msg.textContent = o.message || '';
+        els.msg.hidden = !o.message;
+        els.ok.textContent = o.confirmLabel || 'CONFIRM';
+        els.cancel.textContent = o.cancelLabel || 'CANCEL';
+        /* `danger: false` is for the rare prompt that is not throwing a game
+           away — it keeps the neutral fill instead of the red one. */
+        els.ok.classList.toggle('is-quiet', o.danger === false);
+        els.over.hidden = false;
+        return new Promise(resolve => {
+            confirmResolve = resolve;
+            requestAnimationFrame(() => els.cancel.focus());
+        });
+    }
+
+    /** The two questions the whole app asks, so the wording lives in one place. */
+    function confirmRestart() {
+        return confirmAction({
+            title: 'Restart the match?',
+            message: 'This game will be lost and the board resets to kick-off.',
+            confirmLabel: 'RESTART',
+        });
+    }
+
+    function confirmQuitToMenu() {
+        return confirmAction({
+            title: 'Quit to the menu?',
+            message: 'This game will be lost.',
+            confirmLabel: 'QUIT',
+        });
+    }
+
+    /* Escape cancels, Enter confirms, and neither may reach the match underneath:
+       a capture-phase listener runs before the game's own bubble-phase
+       shortcuts, and stopImmediatePropagation keeps them from firing at all. */
+    window.addEventListener('keydown', (e) => {
+        if (!confirmOpen()) return;
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            settleConfirm(false);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            settleConfirm(true);
+        }
+    }, true);
 
     function syncVideo(screenName) {
         const v = document.getElementById('menu-bg-video') || document.querySelector('.menu-bg-video');
@@ -5537,6 +5656,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (state.phase === 'rondo') {
             const pt = canvasPoint(e);
             drag.x0 = pt.x; drag.y0 = pt.y; drag.x = pt.x; drag.y = pt.y; drag.moved = 0; drag.id = e.pointerId;
+            drag.active = true;
             drag.kind = 'rondo';
             try { canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId); } catch (err) {}
             canvas.classList.add('grabbing');
@@ -5766,6 +5886,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         drag.kind = null; drag.player = null; drag.id = null; drag.lockedReceiver = null;
 
         if (kind === 'rondo' || state.phase === 'rondo') {
+            drag.active = false;
             rondoHandlePointerUp(e);
             return;
         }
@@ -6010,18 +6131,27 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     /* --- keyboard --- */
     window.addEventListener('keydown', e => {
+        /* The confirm sheet owns the keyboard while a question is on screen. */
+        if (confirmOpen()) return;
         if (e.key === 'Escape') {
             e.preventDefault();
             if (rotateHold) return;
-            if (topScreen() && topScreen() !== 'menu' && topScreen() !== 'over') popScreen();
-            else if (!topScreen() && state.phase !== 'idle' && state.phase !== 'over') pauseGame();
+            const top = topScreen();
+            /* Escaping out of an online card is a *leave*: the rondo and the PvP
+               card both take the room — and any seat in it — with them, so the
+               two go through the same guarded exit as their ✕ button instead of
+               a bare pop that would strand a room behind the menu. */
+            if (top === 'rondo') { closeRondoLobby(); return; }
+            if (top === 'pvp') { closePvpLobby(); return; }
+            if (top && top !== 'menu' && top !== 'over') popScreen();
+            else if (!top && state.phase !== 'idle' && state.phase !== 'over') pauseGame();
             return;
         }
         if (rotateHold || topScreen()) return;
         if (e.key === 'm' || e.key === 'M') toggleMute();
         if (e.key === 'r' || e.key === 'R') {
             if (state.phase === 'over') beginMatch();
-            else if (matchInProgress() && window.confirm('Restart the match? The current game will be lost.')) beginMatch();
+            else if (gameInProgress()) confirmRestart().then(ok => { if (ok) beginMatch(); });
         }
         if (e.key === 'h' || e.key === 'H') window.location.href = '/tutorial';
         if (e.key === 'a' || e.key === 'A') { e.preventDefault(); humanDone(); }
@@ -7382,12 +7512,25 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         }
     }
 
-    function spawnFloatingEmoji(emoji, isSelf = true) {
+    function spawnFloatingEmoji(emoji, isSelf = true, senderName = '') {
         const layer = document.getElementById('emoji-layer');
         if (!layer) return;
         const bubble = document.createElement('div');
         bubble.className = 'floating-emoji';
-        bubble.textContent = emoji;
+
+        const charSpan = document.createElement('span');
+        charSpan.className = 'floating-emoji-char';
+        charSpan.textContent = emoji;
+        bubble.appendChild(charSpan);
+
+        const nameToDisplay = senderName || (isSelf ? 'You' : '');
+        if (nameToDisplay) {
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'floating-emoji-name';
+            nameSpan.textContent = nameToDisplay;
+            bubble.appendChild(nameSpan);
+        }
+
         const leftPercent = isSelf ? (25 + Math.random() * 20) : (55 + Math.random() * 20);
         bubble.style.left = leftPercent + '%';
         bubble.style.bottom = '110px';
@@ -7808,7 +7951,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     }
 
     /* ==================== RONDO MODE ====================
-       Online keep-away for 4–7 players. One host, star topology: the host is
+       Online keep-away for 4–10 players. One host, star topology: the host is
        the authority for the roster and every turn; guests only send their pass
        pick / guess and render what the host broadcasts.
 
@@ -7871,7 +8014,25 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         setupRondoUI();
     }
 
-    function closeRondoLobby() {
+    async function closeRondoLobby() {
+        /* Closing the card is only free when there is nothing behind it: a live
+           rondo, or a room other people have joined, is a seat somebody is
+           standing in — so that version asks first. */
+        const inGame = state.phase === 'rondo';
+        const live = (inGame && rondo) || !!(rondoNet && rondoLobby);
+        if (live) {
+            const hosting = !!(rondoNet && rondoNet.isHost);
+            const ok = await confirmAction({
+                title: inGame ? 'Leave the rondo?' : 'Close the room?',
+                message: inGame
+                    ? (hosting
+                        ? 'The game ends for everyone in the room — you are the host.'
+                        : 'The game in progress will be lost and you will drop out of the circle.')
+                    : 'Everyone who joined with the code will be dropped.',
+                confirmLabel: inGame ? 'LEAVE' : 'CLOSE ROOM',
+            });
+            if (!ok) return;
+        }
         /* Pop the lobby screen first: the old order ran rondoLeave() (which
            pushes 'menu' via the game teardown) and *then* tried to pop 'rondo',
            so the popup never actually closed and the stack grew every visit. */
@@ -7934,8 +8095,20 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             }
         });
 
+        /* Cancel, Leave Room and the in-game Leave all give something up: the
+           open room, or the seat in it. Each one asks first. */
         const btnCancelHost = document.getElementById('btn-rondo-cancel-host');
-        if (btnCancelHost) btnCancelHost.addEventListener('click', () => rondoLeave(false));
+        if (btnCancelHost) btnCancelHost.addEventListener('click', async () => {
+            if (rondoNet && rondoLobby && rondoLobby.isHost) {
+                const ok = await confirmAction({
+                    title: 'Close the room?',
+                    message: 'Everyone who joined with the code will be dropped.',
+                    confirmLabel: 'CLOSE ROOM',
+                });
+                if (!ok) return;
+            }
+            rondoLeave(false);
+        });
 
         // Join
         const btnJoin = document.getElementById('btn-rondo-join');
@@ -7946,15 +8119,32 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         });
 
         const btnLeave = document.getElementById('btn-rondo-leave');
-        if (btnLeave) btnLeave.addEventListener('click', () => rondoLeave(false));
+        if (btnLeave) btnLeave.addEventListener('click', async () => {
+            const ok = await confirmAction({
+                title: 'Leave the room?',
+                message: 'You give up your seat — the host keeps the rondo running.',
+                confirmLabel: 'LEAVE',
+            });
+            if (ok) rondoLeave(false);
+        });
 
         // Start (host)
         const btnStart = document.getElementById('btn-rondo-start');
         if (btnStart) btnStart.addEventListener('click', rondoHostStart);
 
-        // Quit mid-game
+        // Quit mid-game — the rondo goes with it, for everyone, so it asks.
         const btnQuit = document.getElementById('btn-rondo-quit');
-        if (btnQuit) btnQuit.addEventListener('click', () => rondoLeave(true));
+        if (btnQuit) btnQuit.addEventListener('click', async () => {
+            const hosting = !!(rondoNet && rondoNet.isHost);
+            const ok = await confirmAction({
+                title: 'Leave the rondo?',
+                message: hosting
+                    ? 'The game ends for everyone in the room — you are the host.'
+                    : 'The game in progress will be lost and you will drop out of the circle.',
+                confirmLabel: 'LEAVE',
+            });
+            if (ok) rondoLeave(true);
+        });
     }
 
     function rondoRenderRoster(players) {
@@ -8001,14 +8191,25 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     /** Kit colours: circle players cycle vivid hues; the middle always wears magenta. */
     function rondoKitColor(seat) {
-        const palette = [0x1f6bff, 0x2bf7c0, 0xffb020, 0x9b5bff, 0x35c4ff, 0xff7a1a];
+        const palette = [
+            0x1f6bff, // vibrant blue
+            0x2bf7c0, // mint / bright teal
+            0xffb020, // amber
+            0x9b5bff, // purple
+            0x35c4ff, // sky cyan
+            0xff7a1a, // orange
+            0xeab308, // gold
+            0x06b6d4, // turquoise
+            0x84cc16, // lime
+            0xf43f5e, // coral rose
+        ];
         return palette[seat % palette.length];
     }
     const RONDO_MIDDLE_KIT = 0xff2d87;
 
     /* ---------------- Host: computer players ----------------
        The host can pad the room with CPU players so a rondo starts even when
-       nobody is online, or to reach a full 7. Computers live only on the host:
+       nobody is online, or to reach up to 10 players. Computers live only on the host:
        guests see them as ordinary roster entries (flagged `cpu`), and the host
        submits their pass/guess picks on a human-like delay. They always play
        at Extreme level — an unpredictable passer and a habit-reading guesser. */
@@ -8333,8 +8534,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             return;
         }
         if (msg.type === 'RONDO_EMOJI') {
-            spawnFloatingEmoji(msg.emoji, false);
-            if (rondoNet) rondoNet.hostSend({ t: 'RONDO_EMOJI', from, emoji: msg.emoji });
+            const name = rondoPlayerName(from);
+            spawnFloatingEmoji(msg.emoji, false, name);
+            if (rondoNet) rondoNet.hostSend({ t: 'RONDO_EMOJI', from, name, emoji: msg.emoji });
             return;
         }
         if (msg.type === 'RONDO_LEAVE') {
@@ -8453,56 +8655,90 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         rondoOnExecute(pkt);
     }
 
-    /** Host: a guest left mid-game — remove them, repair the circle. */
+    /** Host: tell every client — and this one — who is still on the pitch. */
+    function rondoBroadcastRoster(leftId) {
+        const players = rondo.players;
+        const circle = [...rondo.circle];
+        if (rondoNet && rondoNet.isHost) {
+            rondoNet.hostSend({
+                t: 'RONDO_ROSTER',
+                leftId: leftId || null,
+                players, circle,
+                middle: rondo.middle, possessor: rondo.possessor,
+                scores: JSON.parse(JSON.stringify(rondo.scores)),
+            });
+        }
+        rondoOnRoster(players, circle, rondo.middle, rondo.possessor);
+    }
+
+    /** Host: a guest left mid-game — remove them, repair the circle.
+
+        The leaver is deleted *everywhere* — the roster, the seating order, their
+        score line, the CPU's memory of who they used to pass to, and any pick
+        they had half-made — and their mesh, name tag and ring are disposed, so
+        nothing of them is left on the pitch. Nobody is ever moved *into* their
+        body either: each survivor keeps their own kit, name and seat identity
+        and simply walks round to close the gap the leaver left behind. */
     function rondoHostOnGuestLeft(id) {
         if (!rondo || rondo.phase === 'over') return;
         if (!rondo.players.some(p => p.id === id)) return;
         const wasMiddle = rondo.middle === id;
         const wasPossessor = rondo.possessor === id;
+
+        // 1. Off the roster: seat, seating order and score line.
         rondo.circle = rondo.circle.filter(x => x !== id);
         rondo.players = rondo.players.filter(p => p.id !== id);
         delete rondo.scores[id];
+        /* ...and out of the CPU's read of the circle's habits: a history that
+           still names them keeps predicting passes to an empty seat. */
+        if (rondo.history) rondo.history = rondo.history.filter(h => h.from !== id && h.target !== id);
 
-        // 1. Remove 3D player mesh immediately so they do not remain on pitch
+        // 2. Off the pitch: mesh, name tag and ring, disposed for good.
         rondoRemovePlayerMesh(id);
 
+        // 3. Any half-made decision that named them is dropped, not left to
+        //    resolve against somebody who is no longer there.
+        if (rondo.passPick && (rondo.passPick.from === id || rondo.passPick.target === id)) rondo.passPick = null;
+        if (rondo.defPick && rondo.defPick.by === id) rondo.defPick = null;
+        if (rondoPassAimLine) rondoPassAimLine.visible = false;
+        if (rondoDefAimLine) rondoDefAimLine.visible = false;
+        if (rondoMoveAimLine) rondoMoveAimLine.visible = false;
+
+        // 4. A rondo needs its minimum: below it the game is over — and the
+        //    survivors are told who is gone *first*, so no client is left with a
+        //    ghost standing on the pitch behind the full-time card.
         if (rondo.players.length < RONDO_MIN_PLAYERS) {
+            rondoBroadcastRoster(id);
             rondoHostEnd('Too few players — the rondo is over.');
             return;
         }
-        if (wasMiddle) {
-            // The circle's first player steps into the middle.
+
+        // 5. The middle seat is never empty: the first circle player steps in,
+        //    their own identity intact — rondoLayout() only turns the shirt.
+        if (wasMiddle && rondo.circle.length) {
             const nm = rondo.circle.shift();
             rondo.middle = nm;
             if (rondo.scores[nm]) rondo.scores[nm].middleTimes++;
         }
+
+        // 6. The ball cannot belong to somebody who left, and no pass may still
+        //    be in the air towards the seat they vacated.
         if (wasPossessor || wasMiddle) {
-            rondo.possessor = rondo.circle[Math.floor(Math.random() * rondo.circle.length)];
+            rondo.possessor = rondo.circle[Math.floor(Math.random() * rondo.circle.length)] || rondo.circle[0];
+            rondoBallAnim = null;
             const pm = rondoMeshes[rondo.possessor];
-            if (pm && ballMesh) {
+            if (pm && typeof ballMesh !== 'undefined' && ballMesh) {
                 ballMesh.position.set(worldX(pm.gx), 0.22, worldZ(pm.gy));
             }
         }
-        // Clean up pending picks referencing the departing player
-        if (rondo.passPick && (rondo.passPick.from === id || rondo.passPick.target === id)) {
-            rondo.passPick = null;
-        }
-        if (rondo.defPick && rondo.defPick.by === id) {
-            rondo.defPick = null;
-        }
-        // If the leaver was possessor or middle, restart the planning pause cleanly
-        if (wasPossessor || wasMiddle) {
-            rondoHostNextTurn();
-            return;
-        }
-        rondoNet.hostSend({
-            t: 'RONDO_ROSTER',
-            leftId: id,
-            players: rondo.players, circle: [...rondo.circle],
-            middle: rondo.middle, possessor: rondo.possessor,
-            scores: JSON.parse(JSON.stringify(rondo.scores)),
-        });
-        rondoOnRoster(rondo.players, rondo.circle, rondo.middle, rondo.possessor);
+
+        // 7. Everyone re-seats: rondoOnRoster() re-spaces the circle evenly and
+        //    gives every survivor their new home to walk to, so the shape is a
+        //    clean circle again rather than the gap the leaver left.
+        rondoBroadcastRoster(id);
+
+        // 8. If the turn belonged to them, the planning pause restarts cleanly.
+        if (wasPossessor || wasMiddle) rondoHostNextTurn();
     }
 
     /** Host: time's up (or the room broke) — final standings. */
@@ -8597,7 +8833,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 break;
             case 'RONDO_EMOJI':
                 if (packet.from !== rondoMyId()) {
-                    spawnFloatingEmoji(packet.emoji, false);
+                    const senderName = packet.name || rondoPlayerName(packet.from);
+                    spawnFloatingEmoji(packet.emoji, false, senderName);
                 }
                 break;
             case 'RONDO_PASS_DONE':
@@ -8688,18 +8925,18 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     const RONDO_RY = RONDO_WORLD_R / ZSTRETCH;  // ~12.85 grid units
     const RONDO_PLAYER_MAX_LEAD = 2.4;         // Very small allowed moving area around circle seat
 
-    function rondoCpuEmote(emoji) {
-        spawnFloatingEmoji(emoji, false);
+    function rondoCpuEmote(emoji, senderId) {
+        const name = senderId ? rondoPlayerName(senderId) : 'CPU';
+        spawnFloatingEmoji(emoji, false, name);
         if (rondoNet && rondoNet.isHost) {
-            rondoNet.hostSend({ t: 'RONDO_EMOJI', from: 'cpu', emoji });
+            rondoNet.hostSend({ t: 'RONDO_EMOJI', from: senderId || 'cpu', name, emoji });
         }
     }
 
     function rondoRecoverCirclePlayers(excludeId) {
         if (!rondo) return;
-        const me = rondoMyId();
         rondo.circle.forEach(id => {
-            if (id === excludeId || id === me) return;
+            if (id === excludeId) return;
             const m = rondoMeshes[id];
             if (m && m.homeGx !== undefined) {
                 m.targetGx = m.homeGx;
@@ -8711,6 +8948,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     /** Build the rondo scene: N-1 in a circle, one in the middle. */
     function rondoBeginLocal(players, circle, middle, possessor, timeLeft) {
+        // Zoom camera slightly in rondo mode for optimal close-up keep-away framing
+        view.zoom = 1.35;
+        fitView();
         // Leave the lobby screen, show the pitch with the rondo HUD.
         hideRondoOver();
         while (topScreen()) popScreen();
@@ -8735,11 +8975,17 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         // Park the match's players and ball out of sight; rondo owns the stage.
         rondoParkMatch();
 
+        if (rondoMeshes) {
+            for (const id of Object.keys(rondoMeshes)) {
+                rondoRemovePlayerMesh(id);
+            }
+        }
         rondoMeshes = {};
         const n = circle.length;
         players.forEach((p, i) => {
             const isMiddle = p.id === middle;
-            const kitColor = isMiddle ? RONDO_MIDDLE_KIT : rondoKitColor(circle.indexOf(p.id));
+            const playerColor = rondoKitColor(i);
+            const kitColor = isMiddle ? RONDO_MIDDLE_KIT : playerColor;
             const kitMat = new THREE.MeshLambertMaterial({ color: kitColor });
             const mesh = makeHuman(kitMat, 'outfield');
             const label = rondoMakeLabel(p.name, p.id === (rondoNet && rondoNet.myId));
@@ -8766,7 +9012,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             mesh.position.set(worldX(gx), 0, worldZ(gy));
 
             rondoMeshes[p.id] = {
-                group: mesh, label, ring, kitMat, seat: i,
+                group: mesh, label, ring, kitMat, seat: i, color: playerColor,
                 gx, gy, targetGx: gx, targetGy: gy,
                 homeGx: gx, homeGy: gy, isMiddle,
                 speed: isMiddle ? 15 : 10,
@@ -8780,35 +9026,32 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         setStatus('Rondo! The circle passes — the middle presses and intercepts.', true);
     }
 
-    /** Remove a player mesh and all its attached children/materials from the 3D scene. */
+    /** Remove one player — mesh, name tag and ring — from the scene for good.
+
+        Geometries are shared here (`limbGeo`, `ringGeo`, and the regulation
+        match's own players are still wearing them) while every material in this
+        group belongs to this player alone, so only the materials and the name
+        tag's canvas are released: a disposal that reached a shared geometry
+        would rob the survivors still using it. */
     function rondoRemovePlayerMesh(id) {
         const m = rondoMeshes[id];
         if (!m) return;
-        if (m.group) {
-            if (m.group.parent) {
-                m.group.parent.remove(m.group);
-            } else if (typeof world !== 'undefined' && world && world.remove) {
-                world.remove(m.group);
-            }
-        }
-        if (m.label && m.label.material) {
-            if (m.label.material.map) {
-                try { m.label.material.map.dispose(); } catch (e) {}
-            }
-            try { m.label.material.dispose(); } catch (e) {}
-        }
-        if (m.kitMat) {
-            try { m.kitMat.dispose(); } catch (e) {}
-        }
-        if (m.ring) {
-            if (m.ring.geometry) {
-                try { m.ring.geometry.dispose(); } catch (e) {}
-            }
-            if (m.ring.material) {
-                try { m.ring.material.dispose(); } catch (e) {}
-            }
-        }
         delete rondoMeshes[id];
+        const g = m.group;
+        if (!g) return;
+        g.visible = false;
+        if (g.parent) g.parent.remove(g);
+        else if (typeof world !== 'undefined' && world && world.remove) world.remove(g);
+        try {
+            g.traverse(obj => {
+                if (!obj.material) return;
+                const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+                mats.forEach(mat => {
+                    if (mat.map) { try { mat.map.dispose(); } catch (e) {} }
+                    try { mat.dispose(); } catch (e) {}
+                });
+            });
+        } catch (e) {}
     }
 
     /** Position every mesh: circle seats around the centre, middle presses the ball. */
@@ -8834,8 +9077,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             m.targetGy = m.homeGy;
             m.isMiddle = false;
             m.speed = 10;
-            // Circle kit (not magenta).
-            const c = rondoKitColor(i);
+            // Circle kit: preserve player's own unique kit color!
+            const c = m.color || rondoKitColor(i);
             m.kitMat.color.setHex(c);
             m.ring.material.color.setHex(c);
             m.ring.visible = true;
@@ -8923,8 +9166,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         rondoBallAnim = null;
         if (rondoPassAimLine) rondoPassAimLine.visible = false;
         if (rondoDefAimLine) rondoDefAimLine.visible = false;
+        if (rondoMoveAimLine) rondoMoveAimLine.visible = false;
         carrierMark.visible = false;
         carrierMarkScale = 0;
+        view.zoom = 1;
+        fitView();
         rondoRestoreMatch();
         document.getElementById('hud-rondo').hidden = true;
         document.getElementById('hud-top').hidden = false;
@@ -8964,8 +9210,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
         const passerIsCpu = rondo.players.some(p => p.id === passer && p.cpu);
         const midIsCpu = rondo.players.some(p => p.id === prevMiddle && p.cpu);
-        if (passerIsCpu) rondoCpuEmote('😱');
-        if (midIsCpu) setTimeout(() => rondoCpuEmote('🧤'), 350);
+        if (passerIsCpu) rondoCpuEmote('😱', passer);
+        if (midIsCpu) setTimeout(() => rondoCpuEmote('🧤', prevMiddle), 350);
 
         rondoBallAnim = null;
         rondoRecoverCirclePlayers(rondo.possessor);
@@ -9017,8 +9263,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
         const passerIsCpu = rondo.players.some(p => p.id === passer && p.cpu);
         const midIsCpu = rondo.players.some(p => p.id === prevMiddle && p.cpu);
-        if (passerIsCpu) rondoCpuEmote('😱');
-        if (midIsCpu) setTimeout(() => rondoCpuEmote('😂'), 350);
+        if (passerIsCpu) rondoCpuEmote('😱', passer);
+        if (midIsCpu) setTimeout(() => rondoCpuEmote('😂', prevMiddle), 350);
 
         rondoBallAnim = null;
         rondoRecoverCirclePlayers(rondo.possessor);
@@ -9255,6 +9501,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         rondoLayout();
 
         const me = rondoMyId();
+        if (rondoMoveAimLine) rondoMoveAimLine.visible = false;
+        if (rondoPassAimLine) rondoPassAimLine.visible = false;
+        if (rondoDefAimLine) rondoDefAimLine.visible = false;
+
         const ballName = document.getElementById('rondo-ball-name');
         const midName = document.getElementById('rondo-middle-name');
         const turnEl = document.getElementById('rondo-turn');
@@ -9269,7 +9519,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const selectable = (iAmPossessor && rondo.circle.includes(id) && id !== me);
             m.ring.material.opacity = selectable ? 0.45 : 0;
             if (selectable) {
-                m.ring.material.color.setHex(rondoKitColor(rondo.circle.indexOf(id)));
+                m.ring.material.color.setHex(m.color || rondoKitColor(rondo.circle.indexOf(id)));
             }
         }
 
@@ -9291,6 +9541,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         rondo.phase = 'action';
         if (rondoPassAimLine) rondoPassAimLine.visible = false;
         if (rondoDefAimLine) rondoDefAimLine.visible = false;
+        if (rondoMoveAimLine) rondoMoveAimLine.visible = false;
 
         for (const id of Object.keys(rondoMeshes)) {
             const m = rondoMeshes[id];
@@ -9368,7 +9619,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
             // Occasional CPU clap on nice pass
             if (rondo.scores[res.passer].passes % 4 === 0) {
-                rondoCpuEmote('👏');
+                rondoCpuEmote('👏', receiverId);
             }
 
             const ballName = document.getElementById('rondo-ball-name');
@@ -9409,8 +9660,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 }
             }
         }
+        if (rondo && rondo.passPick && rondo.passPick.target && circle && !circle.includes(rondo.passPick.target)) {
+            rondo.passPick = null;
+            if (rondoPassAimLine) rondoPassAimLine.visible = false;
+        }
         rondoLayout();
-        rondoOnTurn(rondo.turn, possessor, middle);
+        rondoOnTurn(rondo ? rondo.turn : 0, possessor, middle);
         setStatus('A player left — the circle reforms.', true);
     }
 
@@ -9490,39 +9745,51 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (!rondo || rondo.phase !== 'plan' || !rondoNet) return;
         const me = rondoMyId();
         if (!me) return;
+        const myMesh = rondoMeshes[me];
+        if (!myMesh) return;
+
+        drag.rondoMovingPlayer = null;
 
         if (me === rondo.middle) {
-            const mm = rondoMeshes[rondo.middle];
-            if (mm && rondoDefAimLine) {
-                const tx = clamp(pt.x, 50 - RONDO_RX * 0.95, 50 + RONDO_RX * 0.95);
-                const ty = clamp(pt.y, 50 - RONDO_RY * 0.95, 50 + RONDO_RY * 0.95);
+            // User is the middle defender: aim sprint/intercept run
+            const mm = myMesh;
+            const tx = clamp(pt.x, 50 - RONDO_RX * 0.95, 50 + RONDO_RX * 0.95);
+            const ty = clamp(pt.y, 50 - RONDO_RY * 0.95, 50 + RONDO_RY * 0.95);
+            if (rondoDefAimLine) {
                 rondoDefAimLine.setEnds({ x: mm.gx, y: mm.gy }, { x: tx, y: ty });
                 rondoDefAimLine.visible = true;
-                rondo.defPick = { by: me, targetGx: tx, targetGy: ty };
-                rondoSendPick('def', { targetGx: tx, targetGy: ty });
             }
+            rondo.defPick = { by: me, targetGx: tx, targetGy: ty };
+            rondoSendPick('def', { targetGx: tx, targetGy: ty });
+            drag.rondoMovingPlayer = me;
         } else if (me === rondo.possessor) {
-            const pm = rondoMeshes[rondo.possessor];
-            if (pm && rondoPassAimLine) {
+            // User is the possessor: aim pass line
+            const pm = myMesh;
+            if (rondoPassAimLine) {
                 rondoPassAimLine.setEnds({ x: pm.gx, y: pm.gy }, { x: pt.x, y: pt.y });
                 rondoPassAimLine.visible = true;
             }
+            drag.rondoMovingPlayer = me;
         } else {
-            // Circle player can move slightly within their small allowed area to get available
-            const pm = rondoMeshes[me];
-            if (pm && pm.homeGx !== undefined) {
-                const distFromHome = Math.hypot(pt.x - pm.homeGx, pt.y - pm.homeGy);
-                if (distFromHome <= RONDO_PLAYER_MAX_LEAD * 2.2) {
-                    let nx = pt.x, ny = pt.y;
-                    if (distFromHome > RONDO_PLAYER_MAX_LEAD) {
-                        nx = pm.homeGx + ((pt.x - pm.homeGx) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
-                        ny = pm.homeGy + ((pt.y - pm.homeGy) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
-                    }
-                    pm.targetGx = nx;
-                    pm.targetGy = ny;
-                    pm.speed = 11;
-                    rondoSendCircleMove(me, nx, ny);
+            // Circle player: ONLY controls their own player within small lead zone!
+            const pm = myMesh;
+            const distFromMe = Math.hypot(pt.x - pm.gx, pt.y - pm.gy);
+            const distFromHome = Math.hypot(pt.x - pm.homeGx, pt.y - pm.homeGy);
+            if (distFromMe <= 6.5 || distFromHome <= RONDO_PLAYER_MAX_LEAD * 2.8) {
+                drag.rondoMovingPlayer = me;
+                let nx = pt.x, ny = pt.y;
+                if (distFromHome > RONDO_PLAYER_MAX_LEAD) {
+                    nx = pm.homeGx + ((pt.x - pm.homeGx) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
+                    ny = pm.homeGy + ((pt.y - pm.homeGy) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
                 }
+                pm.targetGx = nx;
+                pm.targetGy = ny;
+                pm.speed = 11;
+                if (rondoMoveAimLine) {
+                    rondoMoveAimLine.setEnds({ x: pm.homeGx, y: pm.homeGy }, { x: nx, y: ny });
+                    rondoMoveAimLine.visible = true;
+                }
+                rondoSendCircleMove(me, nx, ny);
             }
         }
     }
@@ -9531,10 +9798,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (!rondo || rondo.phase !== 'plan') return;
         const me = rondoMyId();
         if (!me) return;
+        const myMesh = rondoMeshes[me];
+        if (!myMesh || drag.rondoMovingPlayer !== me) return;
 
         if (me === rondo.middle) {
-            const mm = rondoMeshes[rondo.middle];
-            if (mm && rondoDefAimLine) {
+            const mm = myMesh;
+            if (rondoDefAimLine) {
                 const tx = clamp(pt.x, 50 - RONDO_RX * 0.95, 50 + RONDO_RX * 0.95);
                 const ty = clamp(pt.y, 50 - RONDO_RY * 0.95, 50 + RONDO_RY * 0.95);
                 rondoDefAimLine.setEnds({ x: mm.gx, y: mm.gy }, { x: tx, y: ty });
@@ -9543,8 +9812,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 rondoSendPick('def', { targetGx: tx, targetGy: ty });
             }
         } else if (me === rondo.possessor) {
-            const pm = rondoMeshes[rondo.possessor];
-            if (!pm) return;
+            const pm = myMesh;
             if (rondoPassAimLine) {
                 rondoPassAimLine.setEnds({ x: pm.gx, y: pm.gy }, { x: pt.x, y: pt.y });
                 rondoPassAimLine.visible = true;
@@ -9603,27 +9871,32 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                             tm.ring.material.color.setHex(0x00ffcc);
                         } else {
                             tm.ring.material.opacity = 0.35;
-                            tm.ring.material.color.setHex(rondoKitColor(rondo.circle.indexOf(id)));
+                            /* The ring speaks for the *player*, never for the
+                               seat: after a departure the index-based palette
+                               would hand somebody else's colour over. */
+                            tm.ring.material.color.setHex(tm.color || rondoKitColor(rondo.circle.indexOf(id)));
                         }
                     }
                 }
             }
         } else {
-            // Circle player drags slightly to adjust position
-            const pm = rondoMeshes[me];
-            if (pm && pm.homeGx !== undefined && drag.active) {
+            // Circle player drags slightly to adjust position - ONLY their own player!
+            const pm = myMesh;
+            if (pm && pm.homeGx !== undefined) {
                 const distFromHome = Math.hypot(pt.x - pm.homeGx, pt.y - pm.homeGy);
-                if (distFromHome <= RONDO_PLAYER_MAX_LEAD * 2.5) {
-                    let nx = pt.x, ny = pt.y;
-                    if (distFromHome > RONDO_PLAYER_MAX_LEAD) {
-                        nx = pm.homeGx + ((pt.x - pm.homeGx) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
-                        ny = pm.homeGy + ((pt.y - pm.homeGy) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
-                    }
-                    pm.targetGx = nx;
-                    pm.targetGy = ny;
-                    pm.speed = 11;
-                    rondoSendCircleMove(me, nx, ny);
+                let nx = pt.x, ny = pt.y;
+                if (distFromHome > RONDO_PLAYER_MAX_LEAD) {
+                    nx = pm.homeGx + ((pt.x - pm.homeGx) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
+                    ny = pm.homeGy + ((pt.y - pm.homeGy) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
                 }
+                pm.targetGx = nx;
+                pm.targetGy = ny;
+                pm.speed = 11;
+                if (rondoMoveAimLine) {
+                    rondoMoveAimLine.setEnds({ x: pm.homeGx, y: pm.homeGy }, { x: nx, y: ny });
+                    rondoMoveAimLine.visible = true;
+                }
+                rondoSendCircleMove(me, nx, ny);
             }
         }
     }
@@ -9651,10 +9924,18 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     rondoPassAimLine.visible = true;
                 }
             }
+        } else if (me !== rondo.middle) {
+            const pm = rondoMeshes[me];
+            if (pm && rondoMoveAimLine && pm.targetGx !== undefined) {
+                rondoMoveAimLine.setEnds({ x: pm.homeGx, y: pm.homeGy }, { x: pm.targetGx, y: pm.targetGy });
+                rondoMoveAimLine.visible = true;
+            }
         }
+        drag.rondoMovingPlayer = null;
     }
 
     window.addEventListener('keydown', (e) => {
+        if (confirmOpen()) return;   // the prompt owns the keys while it is up
         if (state.phase !== 'rondo' || !rondo || rondo.phase !== 'plan') return;
         const me = rondoMyId();
         if (!me) return;
@@ -9681,7 +9962,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 rondoSendPick('def', { targetGx: newTx, targetGy: newTy });
             }
         } else {
-            // Player controls their own circle player within small tethered area!
+            // Player controls ONLY their own single circle player!
             const pm = rondoMeshes[me];
             if (pm && pm.homeGx !== undefined) {
                 const step = 0.85;
@@ -9697,6 +9978,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 pm.targetGx = nx;
                 pm.targetGy = ny;
                 pm.speed = 11;
+                if (rondoMoveAimLine) {
+                    rondoMoveAimLine.setEnds({ x: pm.homeGx, y: pm.homeGy }, { x: nx, y: ny });
+                    rondoMoveAimLine.visible = true;
+                }
                 if (me === rondo.possessor && rondoPassAimLine && rondoPassAimLine.visible) {
                     if (rondo.passPick && rondo.passPick.target) {
                         const tm = rondoMeshes[rondo.passPick.target];
@@ -9750,7 +10035,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 const cm = rondoMeshes[id];
                 if (cm && cm.ring) {
                     cm.ring.material.opacity = (id === pid) ? 0.95 : 0.35;
-                    cm.ring.material.color.setHex((id === pid) ? 0x00ffcc : rondoKitColor(rondo.circle.indexOf(id)));
+                    cm.ring.material.color.setHex((id === pid) ? 0x00ffcc : (cm.color || rondoKitColor(rondo.circle.indexOf(id))));
                 }
             }
             rondoSendPick('pass', pid);
@@ -9765,6 +10050,28 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             if (typeof playGoalTone === 'function') playGoalTone(good);
             else if (typeof beep === 'function') beep(good ? 660 : 220, 0.12);
         } catch (e) {}
+    }
+
+    /** Close the online card. A live match is forfeited, so that version asks
+        first; a lobby, a seat in the open list and a hosted room are not a game
+        yet, so those close straight away. */
+    async function closePvpLobby() {
+        if (pvpActive) {
+            const ok = await confirmAction({
+                title: 'Quit the online match?',
+                message: 'The match ends now and your opponent takes the win.',
+                confirmLabel: 'QUIT MATCH',
+            });
+            if (!ok) return;
+        }
+        leaveOpenMatchmaking();
+        /* endPvpGame (not just disconnect): it also stands the world back up and
+           re-kits, so a closed PvP match can never leak a mirrored view into the
+           next game. */
+        endPvpGame();
+        while (topScreen()) popScreen();
+        state.phase = 'idle';
+        pushScreen('menu', { focus: '#btn-start' });
     }
 
     function setupPvpUI() {
@@ -9839,7 +10146,18 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         }
 
         if (btnCancelHost) {
-            btnCancelHost.addEventListener('click', () => {
+            btnCancelHost.addEventListener('click', async () => {
+                /* An empty room costs nothing to close, but once an opponent is
+                   on the handshake card, cancelling drops them — so that one
+                   asks first. */
+                if (pvp.connected) {
+                    const ok = await confirmAction({
+                        title: 'Close the room?',
+                        message: 'Your opponent is connected — they will be dropped back to the lobby.',
+                        confirmLabel: 'CLOSE ROOM',
+                    });
+                    if (!ok) return;
+                }
                 pvp.disconnect();
                 if (createActive) createActive.hidden = true;
                 if (createIdle) createIdle.hidden = false;
@@ -9914,20 +10232,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             });
         }
 
-        // Close / Back button returns to main menu
+        // Close / Back button returns to main menu — asking first if a match is live
         const btnClose = document.getElementById('btn-pvp-close');
-        if (btnClose) {
-            btnClose.addEventListener('click', () => {
-                leaveOpenMatchmaking();
-                /* endPvpGame (not just disconnect): it also stands the world
-                   back up and re-kits, so a closed PvP match can never leak a
-                   mirrored view into the next game. */
-                endPvpGame();
-                while (topScreen()) popScreen();
-                state.phase = 'idle';
-                pushScreen('menu', { focus: '#btn-start' });
-            });
-        }
+        if (btnClose) btnClose.addEventListener('click', closePvpLobby);
 
         // Quick emoji reactions
         const emojiButtons = document.querySelectorAll('.btn-emoji');
@@ -9935,12 +10242,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             btn.addEventListener('click', () => {
                 const emoji = btn.getAttribute('data-emoji');
                 if (!emoji) return;
-                spawnFloatingEmoji(emoji, true);
+                const myName = (state.phase === 'rondo' && rondoNet) ? rondoPlayerName(rondoMyId()) : 'You';
+                spawnFloatingEmoji(emoji, true, myName);
                 if (pvpActive) {
                     pvp.sendEmoji(emoji);
                 } else if (state.phase === 'rondo' && rondoNet) {
                     if (rondoNet.isHost) {
-                        rondoNet.hostSend({ t: 'RONDO_EMOJI', from: rondoNet.myId, emoji });
+                        rondoNet.hostSend({ t: 'RONDO_EMOJI', from: rondoNet.myId, name: myName, emoji });
                     } else {
                         rondoNet.sendToHost({ type: 'RONDO_EMOJI', emoji });
                     }
@@ -10003,7 +10311,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         });
 
         pvp.on('emoji', emoji => {
-            spawnFloatingEmoji(emoji, false);
+            spawnFloatingEmoji(emoji, false, 'Opponent');
         });
 
         pvp.on('ping', latency => {
@@ -10105,7 +10413,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             beginShootout();
         });
     }
-    /* Rondo: online keep-away for 4–7 players. */
+    /* Rondo: online keep-away for 4–10 players. */
     const rondoBtn = el('btn-rondo');
     if (rondoBtn) rondoBtn.addEventListener('click', openRondoLobby);
     /* The settings strip's "Online PvP · LIVE" pill (`#btn-mode-pvp`) is the one
@@ -10129,15 +10437,20 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     if (ui.menuOpen) ui.menuOpen.addEventListener('click', () => setMenuOpen(!sheetOpen));
     if (ui.menuClose) ui.menuClose.addEventListener('click', () => setMenuOpen(false));
     if (ui.scrim) ui.scrim.addEventListener('click', () => setMenuOpen(false));
-    if (ui.menuRestart) ui.menuRestart.addEventListener('click', () => {
+    if (ui.menuRestart) ui.menuRestart.addEventListener('click', async () => {
+        if (gameInProgress() && !(await confirmRestart())) return;
         setMenuOpen(false);
         state.paused = false;
         while (topScreen()) popScreen();
         beginMatch();
     });
-    if (ui.menuQuit) ui.menuQuit.addEventListener('click', () => {
+    if (ui.menuQuit) ui.menuQuit.addEventListener('click', async () => {
+        if (gameInProgress() && !(await confirmQuitToMenu())) return;
         setMenuOpen(false);
         state.paused = false;
+        /* An online match has to be stood down properly, not just abandoned:
+           endPvpGame() closes the channel and hands the kits back. */
+        if (pvpActive) endPvpGame();
         while (topScreen()) popScreen();
         state.phase = 'idle';
         pushScreen('menu', { focus: '#btn-start' });
@@ -10153,24 +10466,35 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         }
     }, true);
     el('btn-resume').addEventListener('click', resumeGame);
-    /* quitting or restarting mid-match asks first — the match is gone either
-       way, so the player gets one chance to change their mind. No prompt when
-       no match is running (menu, idle): there is nothing to lose. */
-    function matchInProgress() {
-        return ['play', 'restart', 'goal', 'shootout'].indexOf(state.phase) >= 0 || pvpActive;
+    /* Everything that quits or restarts a game asks first — the game is gone
+       either way, so the player gets one chance to change their mind. The one
+       question covers all three kinds of match (AI, online, rondo); nothing is
+       asked when there is nothing running (menu, idle, full time). */
+    function gameInProgress() {
+        if (state.phase === 'rondo') return !!(rondo && rondo.phase !== 'over');
+        return ['play', 'restart', 'goal', 'shootout'].indexOf(state.phase) >= 0;
     }
-    el('btn-restart').addEventListener('click', () => {
-        if (matchInProgress() && !window.confirm('Restart the match? The current game will be lost.')) return;
-        state.paused = false; while (topScreen()) popScreen(); beginMatch();
+    el('btn-restart').addEventListener('click', async () => {
+        if (gameInProgress() && !(await confirmRestart())) return;
+        state.paused = false; while (topScreen()) popScreen();
+        /* A rondo is not a match: restarting it means another rondo with the
+           same seats, so the circle is rebuilt instead of the pitch. */
+        if (state.phase === 'rondo') { rondoReplay(); return; }
+        beginMatch();
     });
-    el('btn-quit').addEventListener('click', () => {
-        if (matchInProgress() && !window.confirm('Quit the match? The current game will be lost.')) return;
-        endPvpGame(); state.paused = false; while (topScreen()) popScreen(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' });
+    el('btn-quit').addEventListener('click', async () => {
+        if (gameInProgress() && !(await confirmQuitToMenu())) return;
+        state.paused = false; while (topScreen()) popScreen();
+        /* Leaving a rondo takes the room with it, so it goes out through the
+           rondo's own exit rather than being left running behind the menu. */
+        if (state.phase === 'rondo') { rondoLeave(true); return; }
+        endPvpGame(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' });
     });
-    /* refresh / back-button guard: the browser's own dialog warns that the
-       match in progress will be lost. Silent on the menu — nothing to lose. */
+    /* refresh / tab-close / back-button guard: the browser's own dialog warns
+       that the game in progress will be lost. It is the one exit the page
+       cannot style, so it stays the plain one. Silent on the menu. */
     window.addEventListener('beforeunload', e => {
-        if (!matchInProgress()) return;
+        if (!gameInProgress()) return;
         e.preventDefault();
     });
     el('btn-again').addEventListener('click', () => {
@@ -10181,8 +10505,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             beginMatch();
         }
     });
-    el('btn-menu').addEventListener('click', () => {
-        if (matchInProgress() && !window.confirm('Quit the match? The current game will be lost.')) return;
+    el('btn-menu').addEventListener('click', async () => {
+        /* The full-time card: the match is already over, so the AI game asks
+           nothing — but an online match still has a socket and a mirrored world
+           to stand down before the menu. */
+        if (gameInProgress() && !(await confirmQuitToMenu())) return;
+        if (pvpActive) endPvpGame();
         while (topScreen()) popScreen(); state.phase = 'idle'; pushScreen('menu', { focus: '#btn-start' });
     });
     /* Halftime continue button — pops the halftime screen and starts the second half */
@@ -10382,6 +10710,17 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             /** Pin the clock, for testing full time without playing the half out. */
             setHalfTime: t => { state.halfT = clamp(t, 0, halfLength); },
             drainHalf: () => { state.halfT = halfLength; state.pendingHalf = true; }
+        },
+        rondo: {
+            get data() { return rondo; },
+            get meshes() { return rondoMeshes; },
+            hostOnGuestLeft: id => rondoHostOnGuestLeft(id)
+        },
+        /* The confirm sheet, so a harness can drive the prompt instead of
+           clicking through whatever UI happens to be on screen. */
+        confirm: {
+            ask: confirmAction,
+            get open() { return confirmOpen(); }
         }
     };
 })();

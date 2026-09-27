@@ -4523,9 +4523,37 @@ body {
 
 .floating-emoji {
     position: absolute;
-    font-size: 2.4rem;
-    filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5));
-    animation: emoji-float-up 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.65));
+    animation: emoji-float-up 2.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    pointer-events: none;
+    z-index: 120;
+}
+
+.floating-emoji-char {
+    font-size: 2.3rem;
+    line-height: 1;
+}
+
+.floating-emoji-name {
+    font-size: 0.70rem;
+    font-weight: 700;
+    color: #ffffff;
+    background: rgba(10, 24, 18, 0.86);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    padding: 1.5px 7px;
+    line-height: 1.25;
+    white-space: nowrap;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
 }
 
 @keyframes emoji-float-up {
@@ -4550,7 +4578,7 @@ body {
     }
 }
 /* ==========================================================================
-   RONDO — online keep-away for 4–7 players
+   RONDO — online keep-away for 4–10 players
    The lobby reuses `.card-pvp` (same sheet, same tabs, same sections); the
    classes below are the rondo-only extras. The in-game strip follows the
    `#hud-pens` pattern, and the full-time sheet is a fixed overlay. Accent is
@@ -4704,16 +4732,61 @@ body {
     transform: translateX(-50%);
     display: flex;
     align-items: center;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     justify-content: center;
-    gap: 6px;
-    max-width: min(calc(100% - 2 * var(--hud-pad)), 880px);
+    width: calc(100% - 12px);
+    max-width: 880px;
+    box-sizing: border-box;
     pointer-events: none;
 }
 
 #hud-rondo .panel-rondo,
 #hud-rondo button {
     pointer-events: auto;
+}
+
+@media (max-width: 640px) {
+    #hud-rondo {
+        top: calc(var(--sa-t) + 4px);
+        gap: 4px;
+        max-width: calc(100% - 8px);
+    }
+    .panel-rondo {
+        padding: 2.5px 6px;
+        gap: 4px;
+    }
+    .panel-rondo .hud-label {
+        font-size: 0.60rem;
+    }
+    .rondo-clock {
+        font-size: 0.78rem;
+        min-width: 30px;
+    }
+    .rondo-name {
+        font-size: 0.72rem;
+        max-width: 72px;
+    }
+    #rondo-turn {
+        font-size: 0.72rem;
+        max-width: 140px;
+    }
+    #btn-rondo-quit {
+        padding: 3px 8px;
+        font-size: 0.72rem;
+    }
+}
+
+@media (max-width: 380px) {
+    .panel-rondo {
+        padding: 2px 4px;
+        gap: 3px;
+    }
+    .rondo-name {
+        max-width: 54px;
+    }
+    #rondo-turn {
+        max-width: 100px;
+    }
 }
 
 .panel-rondo {
@@ -4862,4 +4935,136 @@ body {
 
 .rondo-over-card .rondo-hint {
     margin-top: 10px;
+}
+
+/* ============================================================================
+   CONFIRM SHEET — "this ends your game"
+   ----------------------------------------------------------------------------
+   One overlay for every action that throws a running game away: restart, quit
+   to menu, leave the rondo, close an online room. It sits above the screen
+   stack (30) and above the rondo full-time sheet (60), because it can be opened
+   from either, and it is the one place in the chrome allowed the error red —
+   the fill on the right-hand button *is* the warning. CANCEL wears the quiet
+   white pill, and the backdrop is dimmed rather than veiled: the player should
+   still see the match they are about to give up.
+   ========================================================================= */
+
+.confirm-over {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: grid;
+    place-items: center;
+    padding: calc(var(--s-md) + var(--sa-t)) calc(var(--s-md) + var(--sa-r)) calc(var(--s-md) + var(--sa-b)) calc(var(--s-md) + var(--sa-l));
+    background: rgba(8, 12, 10, 0.62);
+    backdrop-filter: blur(6px) saturate(120%);
+    -webkit-backdrop-filter: blur(6px) saturate(120%);
+    animation: confirm-fade 0.14s ease-out;
+}
+
+.confirm-over[hidden] {
+    display: none;
+}
+
+.confirm-card {
+    width: min(420px, 100%);
+    background: var(--c-canvas-elevated);
+    border: 1px solid var(--c-hairline);
+    border-radius: var(--r-lg);
+    box-shadow: var(--e-2);
+    padding: clamp(18px, 3.2vmin, 26px);
+    animation: confirm-pop 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.confirm-title {
+    margin: 0 0 8px;
+    font-size: clamp(1.05rem, 2.6vmin, 1.25rem);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: var(--c-ink);
+}
+
+.confirm-msg {
+    margin: 0;
+    font-size: var(--t-body-md-size);
+    line-height: var(--t-body-md-leading);
+    color: var(--c-body);
+}
+
+.confirm-msg[hidden] {
+    display: none;
+}
+
+.confirm-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.confirm-actions .btn {
+    flex: 1 1 0;
+    height: 44px;
+    border-radius: var(--r-pill);
+    font-size: var(--t-button-lg-size);
+    font-weight: var(--t-button-lg-weight);
+}
+
+/* The red one: the button that actually ends the game. */
+.confirm-ok {
+    background: var(--c-error-deep);
+    color: #ffffff;
+    border: 1px solid var(--c-error-deep);
+}
+
+.confirm-ok:hover {
+    background: var(--c-error);
+    border-color: var(--c-error);
+}
+
+/* The quiet variant, for the rare prompt that costs nothing. */
+.confirm-ok.is-quiet {
+    background: var(--c-primary);
+    color: var(--c-on-primary);
+    border-color: var(--c-primary);
+}
+
+.confirm-ok.is-quiet:hover {
+    background: #2b2b2b;
+    border-color: #2b2b2b;
+}
+
+.confirm-cancel {
+    background: var(--c-canvas-elevated);
+    color: var(--c-ink);
+    border: 1px solid var(--c-hairline);
+}
+
+.confirm-cancel:hover {
+    background: var(--c-hairline-soft);
+}
+
+@keyframes confirm-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes confirm-pop {
+    from { opacity: 0; transform: translateY(6px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .confirm-over,
+    .confirm-card {
+        animation: none;
+    }
+}
+
+/* On a phone the destructive verb goes on top and full width, so the thumb
+   lands on CANCEL first unless it deliberately reaches past it. */
+@media (max-width: 480px) {
+    .confirm-actions {
+        flex-direction: column-reverse;
+    }
 }

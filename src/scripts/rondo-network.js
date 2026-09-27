@@ -1,6 +1,6 @@
 /**
  * tactik Rondo Network Module
- * Online keep-away for 4–7 players. Star topology over PeerJS: one host holds
+ * Online keep-away for 4–10 players. Star topology over PeerJS: one host holds
  * a data channel to every guest, and the host is the authority for the lobby
  * roster and every turn. Guests never talk to each other.
  */
@@ -12,7 +12,7 @@ const PEER_CONFIG = {
 };
 
 export const RONDO_MIN_PLAYERS = 4;
-export const RONDO_MAX_PLAYERS = 7;
+export const RONDO_MAX_PLAYERS = 10;
 
 /** Generate a clean 4-letter room code. */
 export function rondoRoomCode() {
@@ -252,7 +252,7 @@ export class RondoNet extends EventTarget {
                         this.emit('lobby', data.players || []);
                         resolve(data);
                     } else if (data.type === 'RONDO_FULL') {
-                        fail('That room is full (7 players).');
+                        fail(`That room is full (${RONDO_MAX_PLAYERS} players).`);
                     } else if (data.type === 'RONDO_HOSTMSG') {
                         this.emit('hostmsg', data.msg);
                     } else if (data.type === 'RONDO_LOBBY') {
