@@ -8337,6 +8337,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             if (rondoNet) rondoNet.hostSend({ t: 'RONDO_EMOJI', from, emoji: msg.emoji });
             return;
         }
+        if (msg.type === 'RONDO_LEAVE') {
+            rondoHostOnGuestLeft(from);
+            return;
+        }
         if (!rondo || !from) return;
         if (msg.type === 'RONDO_MOVE' && rondo.phase === 'plan') {
             const m = rondoMeshes[from];
@@ -8452,11 +8456,15 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     /** Host: a guest left mid-game — remove them, repair the circle. */
     function rondoHostOnGuestLeft(id) {
         if (!rondo || rondo.phase === 'over') return;
+        if (!rondo.players.some(p => p.id === id)) return;
         const wasMiddle = rondo.middle === id;
         const wasPossessor = rondo.possessor === id;
         rondo.circle = rondo.circle.filter(x => x !== id);
         rondo.players = rondo.players.filter(p => p.id !== id);
         delete rondo.scores[id];
+
+        // 1. Remove 3D player mesh immediately so they do not remain on pitch
+        rondoRemovePlayerMesh(id);
 
         if (rondo.players.length < RONDO_MIN_PLAYERS) {
             rondoHostEnd('Too few players — the rondo is over.');
@@ -8466,19 +8474,30 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             // The circle's first player steps into the middle.
             const nm = rondo.circle.shift();
             rondo.middle = nm;
-            rondo.scores[nm].middleTimes++;
+            if (rondo.scores[nm]) rondo.scores[nm].middleTimes++;
         }
         if (wasPossessor || wasMiddle) {
             rondo.possessor = rondo.circle[Math.floor(Math.random() * rondo.circle.length)];
+            const pm = rondoMeshes[rondo.possessor];
+            if (pm && ballMesh) {
+                ballMesh.position.set(worldX(pm.gx), 0.22, worldZ(pm.gy));
+            }
         }
-        // If the leaver held an unanswered pick, resolve the turn now.
-        if (rondo.phase === 'turn' && (wasPossessor || wasMiddle)) {
-            if (rondo.turnTimer) clearTimeout(rondo.turnTimer);
-            rondoHostResolve(true);
+        // Clean up pending picks referencing the departing player
+        if (rondo.passPick && (rondo.passPick.from === id || rondo.passPick.target === id)) {
+            rondo.passPick = null;
+        }
+        if (rondo.defPick && rondo.defPick.by === id) {
+            rondo.defPick = null;
+        }
+        // If the leaver was possessor or middle, restart the planning pause cleanly
+        if (wasPossessor || wasMiddle) {
+            rondoHostNextTurn();
             return;
         }
         rondoNet.hostSend({
             t: 'RONDO_ROSTER',
+            leftId: id,
             players: rondo.players, circle: [...rondo.circle],
             middle: rondo.middle, possessor: rondo.possessor,
             scores: JSON.parse(JSON.stringify(rondo.scores)),
@@ -8597,6 +8616,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 break;
             case 'RONDO_ROSTER':
                 if (!rondo) break;
+                if (packet.leftId) {
+                    rondoRemovePlayerMesh(packet.leftId);
+                }
                 rondo.players = packet.players;
                 rondo.circle = packet.circle;
                 rondo.middle = packet.middle;
@@ -8758,9 +8780,49 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         setStatus('Rondo! The circle passes — the middle presses and intercepts.', true);
     }
 
+    /** Remove a player mesh and all its attached children/materials from the 3D scene. */
+    function rondoRemovePlayerMesh(id) {
+        const m = rondoMeshes[id];
+        if (!m) return;
+        if (m.group) {
+            if (m.group.parent) {
+                m.group.parent.remove(m.group);
+            } else if (typeof world !== 'undefined' && world && world.remove) {
+                world.remove(m.group);
+            }
+        }
+        if (m.label && m.label.material) {
+            if (m.label.material.map) {
+                try { m.label.material.map.dispose(); } catch (e) {}
+            }
+            try { m.label.material.dispose(); } catch (e) {}
+        }
+        if (m.kitMat) {
+            try { m.kitMat.dispose(); } catch (e) {}
+        }
+        if (m.ring) {
+            if (m.ring.geometry) {
+                try { m.ring.geometry.dispose(); } catch (e) {}
+            }
+            if (m.ring.material) {
+                try { m.ring.material.dispose(); } catch (e) {}
+            }
+        }
+        delete rondoMeshes[id];
+    }
+
     /** Position every mesh: circle seats around the centre, middle presses the ball. */
     function rondoLayout() {
         if (!rondo) return;
+        // Purge any orphan meshes for players who left
+        if (rondo.players) {
+            const activeIds = new Set(rondo.players.map(p => p.id));
+            for (const id of Object.keys(rondoMeshes)) {
+                if (!activeIds.has(id)) {
+                    rondoRemovePlayerMesh(id);
+                }
+            }
+        }
         const n = rondo.circle.length;
         rondo.circle.forEach((id, i) => {
             const m = rondoMeshes[id];
@@ -8842,12 +8904,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     function rondoTeardownScene() {
         hideRondoOver();
         for (const id of Object.keys(rondoMeshes)) {
-            const m = rondoMeshes[id];
-            if (m && m.group) {
-                world.remove(m.group);
-                if (m.kitMat) m.kitMat.dispose();
-                if (m.ring) { m.ring.geometry.dispose(); m.ring.material.dispose(); }
-            }
+            rondoRemovePlayerMesh(id);
         }
         rondoMeshes = {};
         rondoBallAnim = null;
@@ -9330,7 +9387,15 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     }
 
     function rondoOnRoster(players, circle, middle, possessor) {
-        // Someone left: rebuild the formation and refresh the HUD.
+        // Someone left: purge their mesh, rebuild formation and refresh HUD.
+        if (players) {
+            const activeIds = new Set(players.map(p => p.id));
+            for (const id of Object.keys(rondoMeshes)) {
+                if (!activeIds.has(id)) {
+                    rondoRemovePlayerMesh(id);
+                }
+            }
+        }
         rondoLayout();
         rondoOnTurn(rondo.turn, possessor, middle);
         setStatus('A player left — the circle reforms.', true);
