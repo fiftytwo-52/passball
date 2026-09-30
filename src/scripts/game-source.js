@@ -2293,19 +2293,32 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         holds the classic spot, exactly as before. Both keepers use this; the
         difficulty edge the CPU's keeper already had lives in the save race and
         his dive guess, not here. */
-    function keeperSmartHome(k) {
+    /** Keeper intelligence, 0..1. The CPU's keeper climbs the difficulty
+        ladder — on Extreme he is damn good: reads, reactions, collection and
+        distribution. The player's keeper sits a fixed step below the CPU's at
+        every rung: sharper than he was, never sharper than the other keeper. */
+    function keeperSkill(k) {
+        const d = state.difficulty;
+        const cpu = d >= 3.0 ? 1.0 : (d >= 2.2 ? 0.88 : (d >= 1.5 ? 0.75 : (d >= 1.0 ? 0.6 : 0.45)));
+        return k.team === 'cpu' ? cpu : cpu * 0.8;
+    }
+
+    function keeperSmartHome(k, ks) {
         const home = keeperHome(k.team);
         if (!ball.alive) return home;
         const own = ownGoal(k.team);
         const d = Math.hypot(ball.x - own.x, ball.y - own.y);
         if (d > 55) return home;
+        const skill = ks === undefined ? keeperSkill(k) : ks;
         const threat = clamp(1 - d / 55, 0, 1);
         const gx = own.x;
-        const shadeX = clamp(50 + (ball.x - 50) * 0.55,
+        /* a smarter keeper shades harder to the near post and steps further
+           off his line to cut the angle; a weaker one holds closer to classic */
+        const shadeX = clamp(50 + (ball.x - 50) * (0.45 + 0.2 * skill),
             gx - GOAL_HALF_WIDTH - 3, gx + GOAL_HALF_WIDTH + 3);
-        const x = lerp(home.x, shadeX, 0.35 + 0.45 * threat);
+        const x = lerp(home.x, shadeX, (0.35 + 0.45 * threat) * (0.7 + 0.5 * skill));
         const dirY = Math.sign(home.y - own.y) || 1;
-        return { x, y: home.y + dirY * threat * 3 };
+        return { x, y: home.y + dirY * threat * 3 * (0.6 + 0.8 * skill) };
     }
 
     /** §0.d — a ball in flight that is heading into this keeper's own mouth.
@@ -4223,6 +4236,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            him, and the carrier is the one body nothing in this engine is allowed
            to move on its own — possession only advances by a pass or a shot. */
         if (ball.mode === 'held' && ball.holder === k) return;
+        /* keeper intelligence for everything below: the CPU's climbs the
+           difficulty ladder, the player's sits a fixed step under it */
+        const ks = keeperSkill(k);
         const home = keeperHome(k.team);
         if (k.dive) {
             moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED * KEEPER_SCALE, dt);
@@ -4243,7 +4259,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            into a corner still beats him and the mouth keeps its corners. He is
            never sent outside the mouth, so a pass that is going wide leaves him
            where he was. */
-        if (k.team !== state.possession && ball.mode === 'pass' && ball.t >= KEEPER_REACT_DELAY) {
+        /* a sharper keeper reads the ball's line sooner */
+        if (k.team !== state.possession && ball.mode === 'pass' && ball.t >= KEEPER_REACT_DELAY * (1.35 - 0.7 * ks)) {
             /* only the keeper who is actually DEFENDING this ball — the one
                contestFlight() lets claim it, keeperOf(other(possession)). A
                keeper whose own team is in possession has nothing to stop: his
@@ -4277,8 +4294,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                         rivalTime = Math.min(rivalTime, dist(q.x, q.y, ball.target.x, ball.target.y) / PLAYER_SPEED);
                     for (const q of teamOutfield('cpu'))
                         rivalTime = Math.min(rivalTime, dist(q.x, q.y, ball.target.x, ball.target.y) / PLAYER_SPEED);
-                    if (kTime <= rivalTime + KEEPER_CHALLENGE_SLACK) {
-                        const ty = own.y + Math.sign(dyT) * Math.min(Math.abs(dyT), KEEPER_PASS_MAX);
+                    if (kTime <= rivalTime + KEEPER_CHALLENGE_SLACK * (0.7 + 0.6 * ks)) {
+                        const ty = own.y + Math.sign(dyT) * Math.min(Math.abs(dyT), KEEPER_PASS_MAX * (0.75 + 0.5 * ks));
                         moveToward(k, clamp(ball.target.x, 6, 94), ty,
                             DIVE_SPEED * KEEPER_SCALE, dt);
                         return;
@@ -4311,8 +4328,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     moveToward(k, k.dive.x, k.dive.y, DIVE_SPEED * KEEPER_SCALE, dt);
                     return;
                 }
-                /* the run: part of the way to the crossing point, on his line */
-                moveToward(k, k.x + (clamp(crossX, gx - GOAL_HALF_WIDTH, gx + GOAL_HALF_WIDTH) - k.x) * KEEPER_TRACK_GAIN,
+                /* the run: part of the way to the crossing point, on his line —
+                   a sharper keeper takes up more of the ground */
+                moveToward(k, k.x + (clamp(crossX, gx - GOAL_HALF_WIDTH, gx + GOAL_HALF_WIDTH) - k.x) * KEEPER_TRACK_GAIN * (0.75 + 0.5 * ks),
                     home.y, DIVE_SPEED * KEEPER_SCALE, dt);
                 return;
             }
@@ -4350,32 +4368,32 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                    vacuum. */
                 let deadCollect = false;
                 if (!mate && Number.isFinite(ball.speed) && ball.speed < 7 &&
-                    fromHome > KEEPER_CHASE_DIST && fromHome <= 26) {
+                    fromHome > KEEPER_CHASE_DIST && fromHome <= 26 * (0.75 + 0.5 * ks)) {
                     deadCollect = true;
                     for (const q of teamOutfield(other(k.team))) {
                         if (dist(q, ball) <= 8) { deadCollect = false; break; }
                     }
                 }
-                if (!mate && (fromHome <= KEEPER_CHASE_DIST || dist(k, ball) <= KEEPER_CLEAR_R || deadCollect)) {
+                if (!mate && (fromHome <= KEEPER_CHASE_DIST * (0.75 + 0.5 * ks) || dist(k, ball) <= KEEPER_CLEAR_R || deadCollect)) {
                     const dyHome = home.y - own.y;      // points OFF his own line
                     const dyBall = ball.y - own.y;      // same sign when the ball is off it
                     let ty = k.y;
                     if (dyHome !== 0 && dyBall * dyHome > 0) {
                         ty = own.y + Math.sign(dyBall) *
-                            Math.min(Math.abs(dyBall), KEEPER_SWEEP_MAX);
+                            Math.min(Math.abs(dyBall), KEEPER_SWEEP_MAX * (0.7 + 0.6 * ks));
                     }
-                    moveToward(k, clamp(ball.x, 6, 94), ty, DRILL_SPEED * 1.6 * KEEPER_SCALE, dt);
+                    moveToward(k, clamp(ball.x, 6, 94), ty, DRILL_SPEED * 1.6 * KEEPER_SCALE * (0.9 + 0.25 * ks), dt);
                     return;
                 }
             }
             if (dist(ball, own) <= KEEPER_SLIDE_DIST) {
                 /* the smart home already leans with the ball and shades the
                    near post — one target instead of a separate slide branch */
-                const sh = keeperSmartHome(k);
+                const sh = keeperSmartHome(k, ks);
                 moveToward(k, sh.x, sh.y, DRILL_SPEED * 1.2 * KEEPER_SCALE, dt);
                 return;
             }
-            const sh = keeperSmartHome(k);
+            const sh = keeperSmartHome(k, ks);
             if (dist(k.x, k.y, sh.x, sh.y) > 0.5) {
                 moveToward(k, sh.x, sh.y, DRILL_SPEED * 1.5 * KEEPER_SCALE, dt);
             }
@@ -4400,19 +4418,19 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 if (dist(p, ball) <= KEEPER_SWEEP_R) { mate = true; break; }
             }
             const fromHome = dist(home.x, home.y, ball.x, ball.y);
-            if (!mate && (fromHome <= KEEPER_CHASE_DIST || dist(k, ball) <= KEEPER_CLEAR_R)) {
+            if (!mate && (fromHome <= KEEPER_CHASE_DIST * (0.75 + 0.5 * ks) || dist(k, ball) <= KEEPER_CLEAR_R)) {
                 const dyHome = home.y - own.y;      // points OFF his own line
                 const dyBall = ball.y - own.y;      // same sign when the ball is off it
                 let ty = k.y;
                 if (dyHome !== 0 && dyBall * dyHome > 0) {
                     ty = own.y + Math.sign(dyBall) *
-                        Math.min(Math.abs(dyBall), KEEPER_SWEEP_MAX);
+                        Math.min(Math.abs(dyBall), KEEPER_SWEEP_MAX * (0.7 + 0.6 * ks));
                 }
-                moveToward(k, clamp(ball.x, 6, 94), ty, DRILL_SPEED * 1.6 * KEEPER_SCALE, dt);
+                moveToward(k, clamp(ball.x, 6, 94), ty, DRILL_SPEED * 1.6 * KEEPER_SCALE * (0.9 + 0.25 * ks), dt);
                 return;
             }
         }
-        const sh = keeperSmartHome(k);
+        const sh = keeperSmartHome(k, ks);
         moveToward(k, sh.x, sh.y, DRILL_SPEED * 1.5 * KEEPER_SCALE, dt);
     }
 
@@ -4510,6 +4528,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            there IS a carrier: with the ball loose it would exempt a man who no
            longer has anything to do with the play. */
         const holder = (!loose && ball.mode === 'held') ? ball.holder : null;
+        /* 2026-10-01 — defending legs in vs-computer: the CPU's defenders run
+           a touch hotter on every rung (+0.02). PvP is untouched — both sides
+           there are human, so the ladders stay exactly as they were. */
+        const defBoost = pvpActive ? 0 : 0.02;
 
         const holdShape = (p, i) => {
             if (p.dest) return;        // the human's stacked run outranks the shape
@@ -4549,7 +4571,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                        Hard 1.00 / Extreme 1.08. The lower tiers still win with
                        positioning and decisions, not legs: only Extreme
                        outruns the human (+8% interceptions, was +10%). */
-                    const interceptSpeed = isCpu ? (PLAYER_SPEED * (isWorld ? 1.08 : (isPro ? 1.0 : (isExtreme ? 0.96 : 0.9)))) : (PLAYER_SPEED * 0.88);
+                    const interceptSpeed = isCpu ? (PLAYER_SPEED * ((isWorld ? 1.08 : (isPro ? 1.0 : (isExtreme ? 0.96 : 0.9))) + defBoost)) : (PLAYER_SPEED * 0.88);
                     moveToward(p, ball.x, ownHalf(p.team, ball.y), interceptSpeed, dt);
                     return;
                 }
@@ -4559,7 +4581,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                    re-reading the human's intention sixty times a second. */
                 const s = interceptTarget(p, c, pressPoint(c, mine));
                 /* Extreme: +8% interceptions (was +10%) — full ladder above */
-                const interceptSpeed = isCpu ? (PLAYER_SPEED * (isWorld ? 1.08 : (isPro ? 1.0 : (isExtreme ? 0.96 : 0.9)))) : (PLAYER_SPEED * 0.88);
+                const interceptSpeed = isCpu ? (PLAYER_SPEED * ((isWorld ? 1.08 : (isPro ? 1.0 : (isExtreme ? 0.96 : 0.9))) + defBoost)) : (PLAYER_SPEED * 0.88);
                 moveToward(p, s.x, ownHalf(p.team, s.y), interceptSpeed, dt);
                 return;
             }
@@ -4574,7 +4596,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 };
                 /* Marking ladder: Low 0.88 / Mid 0.94 / Hard 1.00 /
                    Extreme 1.03 (+3%, was +5%) — only Extreme outruns the human. */
-                const markSpeed = isCpu ? (PLAYER_SPEED * (isWorld ? 1.03 : (isPro ? 1.0 : (isExtreme ? 0.94 : 0.88)))) : (PLAYER_SPEED * 0.85);
+                const markSpeed = isCpu ? (PLAYER_SPEED * ((isWorld ? 1.03 : (isPro ? 1.0 : (isExtreme ? 0.94 : 0.88))) + defBoost)) : (PLAYER_SPEED * 0.85);
                 moveToward(p, s.x, ownHalf(p.team, s.y), markSpeed, dt);
                 return;
             }
@@ -4607,7 +4629,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 const isExtreme = state.difficulty >= 1.5;
                 const isPro = state.difficulty >= 2.2;
                 const isWorld = state.difficulty >= 3.0;
-                chaseSpeed = PLAYER_SPEED * (isWorld ? 1.10 : (isPro ? 1.0 : (isExtreme ? 0.97 : 0.94)));
+                chaseSpeed = PLAYER_SPEED * ((isWorld ? 1.10 : (isPro ? 1.0 : (isExtreme ? 0.97 : 0.94))) + defBoost);
             } else {
                 chaseSpeed = PLAYER_SPEED;
             }
@@ -4652,7 +4674,39 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        repaired: there is no honest version of "which of your players are you
        about to use", and a defender does not get to know. */
 
-    /** Score each pass with the very race the player will face. */
+    /** How good a shot is from (px, py) at the goal the CPU is attacking, 0..1.
+        Angle (mouth subtended), distance, the keeper's shape and the nearest
+        defender's pressure all count. Both CPU shooting sites read this, so a
+        shot is only taken when it is genuinely on — the end of hopeful punts
+        straight at a set keeper, and the start of actual build-up. */
+    function cpuShotQuality(px, py) {
+        const goal = PLAY.goal, gx = goal.x, gy = goal.y;
+        const d = Math.hypot(px - gx, py - gy);
+        if (d > SHOT_RANGE) return 0;
+        const a1 = Math.atan2(gx - GOAL_HALF_WIDTH - px, gy - py);
+        const a2 = Math.atan2(gx + GOAL_HALF_WIDTH - px, gy - py);
+        let ang = Math.abs(a1 - a2);
+        if (ang > Math.PI) ang = 2 * Math.PI - ang;
+        const angleQ = clamp((ang - 0.10) / 0.30, 0, 1);
+        const distQ = clamp(1 - d / (SHOT_RANGE * 1.15), 0, 1);
+        const k = keeperOf('you');
+        let keepQ = 0.5;
+        if (k) {
+            const home = keeperHome('you');
+            keepQ = clamp(0.35 + Math.hypot(k.x - home.x, k.y - home.y) / 14, 0, 1);
+        }
+        let press = Infinity;
+        for (const p of teamOutfield('you')) press = Math.min(press, Math.hypot(p.x - px, p.y - py));
+        const pressQ = clamp((press - 2) / 8, 0, 1);
+        return clamp(0.42 * angleQ + 0.30 * distQ + 0.16 * keepQ + 0.12 * pressQ, 0, 1);
+    }
+
+    /** Score each pass with the very race the player will face — plus the two
+        reads the race alone misses: who is marking the receiver, and who is
+        standing on the lane. A pass the race calls COMPLETE but an opponent
+        reaches as fast as the receiver is a hospital ball, and the old scorer
+        played them all day: that is the "passes straight to the opponent"
+        the player sees. */
     function cpuChoosePass(rng, spots) {
         const from = { x: PLAY.carrier.x, y: PLAY.carrier.y };
         const cands = teamOutfield('cpu').filter(p => p !== PLAY.carrier);
@@ -4662,10 +4716,14 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const isExtreme = state.difficulty >= 1.5;
         const isPro = state.difficulty >= 2.2;
         const isWorld = state.difficulty >= 3.0;
+        /* the keeper plays out, he never punts: when he has it, short and safe
+           to a full-back beats everything long */
+        const keeperHasIt = !!PLAY.carrier && PLAY.carrier.role === 'keeper';
 
         const scored = cands.map(m => {
             const s = spots ? spots.get(m) : null;
             const to = s ? leadSpot(from, m, s) : { x: m.x, y: m.y };
+            m._aim = to;
             const race = resolvePassRace({ from, to, defenders, radius: TOUCH_R });
             const groundSafe = race.outcome === 'COMPLETE' ? 1.0 : 0.15;
 
@@ -4678,24 +4736,69 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 m._preferAir = false;
             }
 
+            /* --- the marking check: the receiver must be clearly first to his
+               own spot. An opponent as close as the receiver turns a "safe"
+               race into a 50/50 the passer cannot see. */
+            const recvD = Math.max(1.5, Math.hypot(m.x - to.x, m.y - to.y));
+            let oppD = Infinity;
+            for (const d of defenders) oppD = Math.min(oppD, Math.hypot(d.x - to.x, d.y - to.y));
+            const markSafe = clamp((oppD / recvD - 0.55) / 0.45, 0, 1);
+            /* a defender glued to the receiver's shirt vetoes the ball even
+               when the lead-spot race looks winnable: the pass arrives at a
+               man about to be stripped. Inside tackling range it is nearly a
+               hard no; it eases off out to two-and-a-half tackling ranges. */
+            let shirtD = Infinity;
+            for (const d of defenders) shirtD = Math.min(shirtD, Math.hypot(d.x - m.x, d.y - m.y));
+            const shirtSafe = shirtD < TOUCH_R ? 0.12
+                : clamp(0.12 + 0.88 * ((shirtD - TOUCH_R) / (TOUCH_R * 1.5)), 0.12, 1);
+            const receiveSafe = Math.min(markSafe, shirtSafe);
+
+            /* --- the lane check: a defender standing on the pass line kills it
+               even when the endpoint race looks winnable. */
+            let laneD = Infinity;
+            const sx = to.x - from.x, sy = to.y - from.y;
+            const sl2 = sx * sx + sy * sy;
+            for (const d of defenders) {
+                const t = sl2 > 1e-6 ? clamp(((d.x - from.x) * sx + (d.y - from.y) * sy) / sl2, 0, 1) : 0;
+                laneD = Math.min(laneD, Math.hypot(d.x - (from.x + sx * t), d.y - (from.y + sy * t)));
+            }
+            const laneSafe = clamp((laneD - 2.5) / 4, 0, 1);
+
             const progress = clamp((dist(from, PLAY.goal) - dist(to, PLAY.goal)) / 50, -0.2, 1.2);
             /* favour buildup over hopeful punts: a long ball's goalward
                progress is discounted with distance, so the CPU keeps it short
                and plays through the thirds unless the long option is genuinely
                on (open lane, well-placed runner — safe still counts in full). */
-            const distW = clamp(1.15 - dist(from, to) / 70, 0.45, 1);
-            const shot = dist(to, PLAY.goal) <= SHOT_RANGE ? 0.65 : (dist(to, PLAY.goal) <= SHOT_RANGE * 1.3 ? 0.35 : 0);
+            let distW = clamp(1.15 - dist(from, to) / 70, 0.45, 1);
+            if (keeperHasIt) distW = clamp(1.35 - dist(from, to) / 42, 0.3, 1);
+
+            /* --- coordination: play to shape. A receiver offering width
+               stretches the defence; a straight ball up a crowded gut does
+               not. Backwards to a marked man is the panic the old scorer
+               loved. */
+            const width = Math.min(1, Math.abs(to.x - from.x) / 30);
+            const backwards = (dist(to, PLAY.goal) > dist(from, PLAY.goal) + 6 && receiveSafe < 0.6) ? -0.3 : 0;
+
+            /* --- the shot term, gated on ANGLE: a winger hugging the line
+               inside SHOT_RANGE is a cul-de-sac, not a chance. Only a genuine
+               shooting look counts, and it is recorded for the shoot/pass
+               deferral in the two calling sites. */
+            m._shotQ = cpuShotQuality(to.x, to.y);
+            const shot = m._shotQ * 0.7;
+            m._recvSafe = receiveSafe;
             /* switch of play: when the ball is on a flank, the far winger on
                the weak side is a golden ball — but only when the lane is
-               genuinely open, never a hopeful punt into traffic */
+               genuinely open and he is not marked, never a hopeful punt into
+               traffic */
             let switchBonus = 0;
             if (isPro) {
                 const ballFlank = from.x < 42 ? -1 : (from.x > 58 ? 1 : 0);
                 const toFlank = to.x < 42 ? -1 : (to.x > 58 ? 1 : 0);
-                if (ballFlank !== 0 && toFlank === -ballFlank && safe > 0.6)
+                if (ballFlank !== 0 && toFlank === -ballFlank && safe > 0.6 && receiveSafe > 0.6)
                     switchBonus = isWorld ? 0.35 : 0.25;
             }
-            const v = 0.45 * safe + 0.35 * progress * distW + shot + 0.1 + switchBonus;
+            const v = 0.36 * safe + 0.22 * receiveSafe + 0.14 * laneSafe
+                + 0.30 * progress * distW + 0.08 * width + shot + backwards + 0.08 + switchBonus;
             return isWorld ? Math.pow(v, 3) : (isPro ? Math.pow(v, 2.4) :
                 (isExtreme ? v * v : (isHard ? Math.pow(v, 1.5) : lerp(0.3, v, state.difficulty))));
         });
@@ -4703,7 +4806,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (!isHard && rng() > 0.15 + 0.85 * state.difficulty) {
             return cands[Math.floor(rng() * cands.length)] || cands[0];
         }
-        return weightedPick(cands, scored, rng).item || cands[0];
+        /* a shirt-marked man is simply not an option while any safer ball
+           exists — the veto above tanks his score, this keeps the sampler
+           from ever rolling him anyway */
+        const viable = cands.filter(m => (m._recvSafe || 0) >= 0.25);
+        const pool = viable.length ? viable : cands;
+        const poolScores = pool.map(m => scored[cands.indexOf(m)]);
+        return weightedPick(pool, poolScores, rng).item || cands[0];
     }
 
     function cpuThink(dt) {
@@ -4724,15 +4833,32 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const isWorld = state.difficulty >= 3.0;
         const pwr = isExtreme ? 1.0 : (isHard ? 0.92 : 0.7);
 
-        if (toGoal <= SHOT_RANGE &&
-            (isHard || rng() < (0.5 + 0.5 * state.difficulty) * (1 - 0.5 * (toGoal / SHOT_RANGE)))) {
+        /* the spots the shape is already holding, indexed exactly like the
+           shape loop, so the pass is led to the runner's destination instead
+           of his heels */
+        const cpuOut = teamOutfield('cpu');
+        const mates0 = cpuOut.filter(m => m !== c);
+        const spots = new Map();
+        cpuOut.forEach((m, i) => { if (m !== c) spots.set(m, attackingSpot(c, PLAY.goal, i)); });
+
+        const target = cpuChoosePass(rng, spots);
+        /* build-up before blasting: a mate with a clearly better shooting look
+           gets the ball instead of a hopeful strike — the deferral that turns
+           shots into passages of play */
+        let mateQ = 0;
+        for (const m of mates0) mateQ = Math.max(mateQ, m._shotQ || 0);
+        const q = cpuShotQuality(c.x, c.y);
+        const needQ = isWorld ? 0.34 : (isPro ? 0.40 : (isExtreme ? 0.46 : (isHard ? 0.52 : 0.58)));
+
+        if (toGoal <= SHOT_RANGE && q >= needQ && mateQ * 0.9 <= q &&
+            rng() < (isHard ? 0.9 : 0.45 + 0.45 * q)) {
             shoot(c, cpuShotAim(isWorld ? 0.12 : (isPro ? 0.15 : (isExtreme ? 0.24 : (isHard ? 0.32 : 0.85)))), pwr);
             return;
         }
 
-        const target = cpuChoosePass(rng);
         if (!target) return;
-        passTo(c, target, BALL_SPEED, { air: isHard && target._preferAir === true, pace: isWorld ? 1.0 : (isPro ? 1.0 : (isExtreme ? 1.0 : (isHard ? 0.9 : 0.65))) });
+        const aim = target._aim || { x: target.x, y: target.y };
+        passTo(c, target, BALL_SPEED, { air: isHard && target._preferAir === true, pace: isWorld ? 1.0 : (isPro ? 1.0 : (isExtreme ? 1.0 : (isHard ? 0.9 : 0.65))), aim });
     }
 
     /* ==========================================================================
@@ -4746,12 +4872,16 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            gets exactly the ball it always got: standard pace, on the deck. */
         const air = o.air === true;
         ball.lastTouch = from;
+        /* `aim` is the point the ball is actually struck at — the CPU passes
+           one, led to the runner's destination. `to` stays the man: he is
+           still the receiver, the last touch and the tutor's subject. */
+        const aim = (o.aim && Number.isFinite(o.aim.x) && Number.isFinite(o.aim.y)) ? o.aim : to;
         /* The strike turns the body: the carry direction was frozen for the
            whole decision window (see stepBall), and it is set here — the
            moment the ball is actually kicked — to the direction of the strike,
            so the carrier visibly turns once the plan executes, never before. */
-        if (from && Number.isFinite(to.x) && Number.isFinite(to.y)) {
-            const sx = to.x - from.x, sy = to.y - from.y, sl = Math.hypot(sx, sy);
+        if (from && Number.isFinite(aim.x) && Number.isFinite(aim.y)) {
+            const sx = aim.x - from.x, sy = aim.y - from.y, sl = Math.hypot(sx, sy);
             if (sl > 1e-4) { ball.cdx = sx / sl; ball.cdy = sy / sl; }
         }
         /* §12.b/c — every pass is a rolled ball. It leaves the boot firm, flat on
@@ -4779,7 +4909,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            flight time for the same distance. That is what keeps the drawn
            distance, the strike speed and the moment of arrival describing one
            thing, and it is why `roll` is no longer keyed to `air`. */
-        launchBall(kickFrom(from), { x: to.x, y: to.y },
+        launchBall(kickFrom(from), { x: aim.x, y: aim.y },
             speed || BALL_SPEED,
             {
                 mode: 'pass', passTarget: to.team ? to : null,
@@ -4831,30 +4961,24 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             /* §0.d — one reflex roll per flight, here, beside the CPU's guess.
                A dive the human already drew (queuedDive below) outranks it;
                a keeper who lost this roll still tracks, but never lunges. */
-            ball.keeperReflex = Math.random() < KEEPER_REFLEX_CHANCE;
+            ball.keeperReflex = Math.random() < KEEPER_REFLEX_CHANCE * (0.7 + 0.5 * keeperSkill(k));
             if (k.queuedDive) {
                 k.dive = k.queuedDive;
-            } else if (k.team === 'cpu' && !k.held && !k.dive) {
-                /* §0.d — the CPU's uncommanded keeper dives on a GUESS. The
-                    human's own keeper never guesses: he holds his ground and
-                    the shot either finds him or it does not — his dive is the
-                    player's to draw, and nobody else's.
+            } else if (!k.held && !k.dive) {
+                /* §0.d — an uncommanded keeper dives on a GUESS. A dive the
+                   human already drew (queuedDive above) outranks it, and a dive
+                   already committed is never re-read.
 
-                   Everything that made him unbeatable ran through this branch. He
-                   was handed the shot's true side (defaultDiveTarget) and then
-                   `shotOutcome()` wrapped the rulebook's full KEEPER_REACH around
-                   the spot he dove to, from a seat on x = 50 that is already only
-                   12.5 from either post. That is a wall, not a save model, and it is
-                   also why the computer's keeper read as better than the player's:
-                   the human's own dive is a point he DRAWS, so it is only ever as
-                   good as his read, while this one was always as good as the truth.
+                   The CPU's keeper reads at the difficulty ladder — on Extreme
+                   he is damn good. The player's keeper now reads too, at a
+                   fixed step below the CPU's guess at every rung and with a
+                   shorter step: livelier than the rooted keeper he was, never
+                   out-reading the other keeper.
 
-                   Now the side is a coin flip (KEEPER_READ_CHANCE) and the ground is
-                   short (KEEPER_STEP), so a keeper who guessed wrong is beaten —
-                   including by the ball passing him on the far side — and a keeper
-                   who guessed right still has to be beaten at the far post. A dive
-                   the human drew during the window is never overwritten (`!k.dive`),
-                   which keeps his read the one that decides his own keeper. */
+                   The save itself is still the dive geometry that follows, not
+                   this roll: a keeper who guessed wrong is beaten — including
+                   by the ball passing him on the far side — and a keeper who
+                   guessed right still has to be beaten at the far post. */
                 const gx = PLAY.goal.x;
                 const trueSide = target.x === gx ? 1 : Math.sign(target.x - gx);
                 const isHard = state.difficulty >= 1.0;
@@ -4866,9 +4990,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                    regularly, Hard reads most of it, Extreme is near-automatic on
                    direction. The save itself is still the dive geometry that
                    follows, not this roll. */
-                const diveChance = isWorld ? 0.94 : (isPro ? 0.80 : (isExtreme ? 0.62 : (isHard ? 0.48 : 0.30)));
+                const cpuChance = isWorld ? 0.97 : (isPro ? 0.85 : (isExtreme ? 0.70 : (isHard ? 0.55 : 0.35)));
+                const diveChance = k.team === 'cpu' ? cpuChance : cpuChance * 0.55;
                 const readSide = Math.random() < diveChance ? trueSide : -trueSide;
-                const diveStep = isWorld ? KEEPER_STEP * 1.45 : (isPro ? KEEPER_STEP * 1.38 : (isExtreme ? KEEPER_STEP * 1.3 : (isHard ? KEEPER_STEP * 1.15 : KEEPER_STEP)));
+                const stepMul = k.team === 'cpu'
+                    ? (isWorld ? 1.5 : (isPro ? 1.42 : (isExtreme ? 1.34 : (isHard ? 1.18 : 1.0))))
+                    : 1.0;
+                const diveStep = KEEPER_STEP * stepMul;
                 applyAutoDive(k, { x: gx + readSide * diveStep, y: k.y });
             }
         }
@@ -6201,6 +6329,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         refreshRings();
     }
 
+    let lastCursor = '';
     function updateCursor() {
         /* In the shootout only the two human gestures are "active": drawing your
            own kick, and drawing your keeper's dive against the opponent's. While the
@@ -6209,7 +6338,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const active = SO.active
             ? (SO.phase === 'aim' && SO.turn === myTeam()) || (SO.phase === 'dive' && SO.turn === opponentTeam())
             : !!(state.phase === 'play' && PLAN && !PLAN.armed);
-        canvas.style.cursor = drag.kind ? 'grabbing' : (active ? 'crosshair' : 'default');
+        /* a style write every frame keeps the style engine busy for nothing —
+           only touch it on change */
+        const cur = drag.kind ? 'grabbing' : (active ? 'crosshair' : 'default');
+        if (cur !== lastCursor) { lastCursor = cur; canvas.style.cursor = cur; }
     }
 
     canvas.addEventListener('pointerdown', onDown);
@@ -6519,54 +6651,53 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             }
 
             const inRange = dist(c, PLAY.goal) <= SHOT_RANGE;
-            const quality = inRange ? 1 - 0.5 * (dist(c, PLAY.goal) / SHOT_RANGE) : 0;
             const shotPwr = isExtreme ? 1.0 : (isHard ? 0.92 : 0.7);
             const aimSpread = isWorld ? 0.12 : (isPro ? 0.15 : (isExtreme ? 0.24 : (isHard ? 0.32 : 0.55)));
 
-            const shootProb = isExtreme ? 0.98 : (isHard ? 0.85 : (0.55 + 0.45 * state.difficulty) * quality);
             /* The CPU attacks GOAL.cpu, so the goal it must NOT shoot into is
                ownGoal('cpu') — the human's goal it is defending. Getting this
                backwards rejected every on-target CPU shot, so the CPU never
                pulled the trigger. */
             const cpuOwnGoal = ownGoal('cpu');
             const safeCpuTarget = target => !targetEntersGoal(target, cpuOwnGoal);
-            if (inRange && (isHard || rng() < shootProb)) {
+            /* build-up before blasting, same as the live path: the shot needs
+               a genuine look, and a mate with a better one gets the ball */
+            const target = cpuChoosePass(rng, spots);
+            let mateQ = 0;
+            for (const m of mates) if (m !== c) mateQ = Math.max(mateQ, m._shotQ || 0);
+            const q = cpuShotQuality(c.x, c.y);
+            const needQ = isWorld ? 0.34 : (isPro ? 0.40 : (isExtreme ? 0.46 : (isHard ? 0.52 : 0.58)));
+            if (inRange && q >= needQ && mateQ * 0.9 <= q && rng() < (isHard ? 0.9 : 0.45 + 0.45 * q)) {
                 const aim = cpuShotAim(aimSpread);
                 if (safeCpuTarget(aim)) PLAN.shot.cpu = { ...aim, power: shotPwr };
-            } else {
-                const target = cpuChoosePass(rng, spots);
-                if (target) {
-                    const shotAim = cpuShotAim(aimSpread);
-                    const lane = resolvePassRace({
+            } else if (target) {
+                const shotAim = cpuShotAim(aimSpread);
+                const lane = resolvePassRace({
+                    from: { x: c.x, y: c.y },
+                    to: shotAim,
+                    defenders: defenderInputs('you'),
+                    radius: TOUCH_R
+                });
+                if (inRange && q >= needQ && lane.outcome === 'COMPLETE' && safeCpuTarget(shotAim)) {
+                    PLAN.shot.cpu = { ...shotAim, power: shotPwr };
+                } else {
+                    const s = leadSpot(c, target, spots.get(target));
+                    const race = resolvePassRace({
                         from: { x: c.x, y: c.y },
-                        to: shotAim,
+                        to: s,
                         defenders: defenderInputs('you'),
                         radius: TOUCH_R
                     });
-                    if (inRange && lane.outcome === 'COMPLETE' && safeCpuTarget(shotAim)) {
-                        PLAN.shot.cpu = { ...shotAim, power: shotPwr };
-                    } else {
-                        const s = leadSpot(c, target, spots.get(target));
-                        const race = resolvePassRace({
-                            from: { x: c.x, y: c.y },
-                            to: s,
-                            defenders: defenderInputs('you'),
-                            radius: TOUCH_R
-                        });
-                        const useAir = isHard && (target._preferAir || race.outcome !== 'COMPLETE');
-                        const passPwr = isExtreme ? 1.0 : (isHard ? 0.9 : 0.65);
-                        if (safeCpuTarget(s)) {
-                            PLAN.pass.cpu = {
-                                x: s.x,
-                                y: s.y,
-                                air: useAir,
-                                power: passPwr
-                            };
-                        }
+                    const useAir = isHard && (target._preferAir || race.outcome !== 'COMPLETE');
+                    const passPwr = isExtreme ? 1.0 : (isHard ? 0.9 : 0.65);
+                    if (safeCpuTarget(s)) {
+                        PLAN.pass.cpu = {
+                            x: s.x,
+                            y: s.y,
+                            air: useAir,
+                            power: passPwr
+                        };
                     }
-                } else {
-                    const aim = cpuShotAim(aimSpread);
-                    if (safeCpuTarget(aim)) PLAN.shot.cpu = { ...aim, power: shotPwr };
                 }
             }
             mates.forEach(m => setIntent(m, spots.get(m)));
@@ -7201,6 +7332,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        browser has no invalidated layout of its own to flush; a new projection
        is built only when one of the four numbers actually moved. */
     let lastPC = null;
+    let lastMeasureW = 0, lastMeasureH = 0, insetTick = 0;
     function syncInsets(force) {
         const w = canvas.clientWidth || window.innerWidth;
         const h = canvas.clientHeight || window.innerHeight;
@@ -7209,7 +7341,16 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const wasPC = lastPC;
         lastPC = isPC;
         landscapeCanvas();
-        measureHudInsets(w, h);
+        /* 2026-10-01 — the inset measure walks the DOM with
+           getBoundingClientRect/getComputedStyle, which force a layout pass.
+           Doing that 60x/s was the frame-rate killer. The HUD only changes
+           shape on resize or when a control shows/hides, so re-measure on
+           size change, when forced, or every 30th frame as a safety net. */
+        insetTick++;
+        if (force || w !== lastMeasureW || h !== lastMeasureH || insetTick % 30 === 0) {
+            measureHudInsets(w, h);
+            lastMeasureW = w; lastMeasureH = h;
+        }
         if (!needFit && !force && land === wasLand && isPC === wasPC) return;
         needFit = false;
         fitView();
@@ -10852,6 +10993,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             get open() { return confirmOpen(); }
         },
         /* player handles, so a harness can set up races and read positions */
-        debug: { keeperOf, teamOutfield, ownGoal }
+        debug: { keeperOf, teamOutfield, ownGoal },
+        /* AI internals for the verification harness: shot quality, the CPU
+           pass chooser, keeper skill tiers. */
+        test: { cpuShotQuality, cpuChoosePass, keeperSkill, cpuShotAim }
     };
 })();
