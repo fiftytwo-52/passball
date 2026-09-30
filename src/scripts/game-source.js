@@ -8646,6 +8646,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             passPick: null,          // { from, target }
             defPick: null,           // { by, targetGx, targetGy }
             turnTimer: null,
+            earlyTimer: null,        // short fuse: resolve soon after a pass is drawn
             cpuTimers: [],           // pending computer-player moves
             history: [],             // { from, target } — the guesser's read
             lastCpuTarget: null,     // the passer's anti-repeat memory
@@ -8755,6 +8756,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 const target = pool[Math.floor(Math.random() * pool.length)];
                 rondo.lastCpuTarget = target;
                 rondo.passPick = { from: rondo.possessor, target };
+                rondoMaybeEarlyResolve();
             }, beat()));
         }
         if (isCpu(rondo.middle) && !rondo.defPick) {
@@ -8775,7 +8777,34 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         }
     }
 
+    /* The pass line is finished (pointer up after a draw, or a tap): the host
+       starts the short fuse, a guest tells the host their line is done. */
+    function rondoCommitPass() {
+        if (!rondo || rondo.phase !== 'plan' || !rondo.passPick || !rondoNet) return;
+        if (rondoNet.isHost) {
+            rondoMaybeEarlyResolve();
+        } else if (rondoMyId() === rondo.possessor) {
+            rondoNet.sendToHost({ type: 'RONDO_PASS_COMMIT' });
+        }
+    }
+
+    /* The possessor has drawn their pass: don't make everyone watch the clock.
+       Give the defender a heartbeat to finish their own draw, then play. */
+    function rondoMaybeEarlyResolve() {
+        if (!rondo || rondo.phase !== 'plan' || !rondo.passPick) return;
+        if (!rondoNet || !rondoNet.isHost) return;
+        if (rondo.earlyTimer) return;
+        rondo.earlyTimer = setTimeout(() => {
+            rondo.earlyTimer = null;
+            if (rondo && rondo.phase === 'plan' && rondo.passPick) rondoHostResolveTurn();
+        }, 450);
+    }
+
     function rondoHostClearCpu() {
+        if (rondo && rondo.earlyTimer) {
+            clearTimeout(rondo.earlyTimer);
+            rondo.earlyTimer = null;
+        }
         if (rondo && rondo.cpuTimers) rondo.cpuTimers.forEach(t => clearTimeout(t));
         if (rondo) rondo.cpuTimers = [];
     }
@@ -8837,6 +8866,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             } else if (typeof msg.deadGx === 'number' && typeof msg.deadGy === 'number') {
                 rondo.passPick = { from, target: null, deadGx: msg.deadGx, deadGy: msg.deadGy };
             }
+        } else if (msg.type === 'RONDO_PASS_COMMIT' && from === rondo.possessor) {
+            rondoMaybeEarlyResolve();
         } else if (msg.type === 'RONDO_DEF_RUN' && from === rondo.middle) {
             if (typeof msg.targetGx === 'number' && typeof msg.targetGy === 'number') {
                 rondo.defPick = { by: from, targetGx: msg.targetGx, targetGy: msg.targetGy };
@@ -8851,6 +8882,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (kind === 'pass' && me === rondo.possessor) {
             if (rondo.circle.includes(id) && id !== me) {
                 rondo.passPick = { from: me, target: id };
+                rondoMaybeEarlyResolve();
             }
         }
     }
@@ -9361,17 +9393,14 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             mm.kitMat.color.setHex(RONDO_MIDDLE_KIT);
             mm.ring.material.color.setHex(RONDO_MIDDLE_KIT);
             mm.ring.visible = false; // middle defender has no target ring
-            if (rondo.phase === 'turn' || rondo.phase === 'plan') {
-                if (rondoMyId() !== rondo.middle) {
-                    mm.targetGx = 50;
-                    mm.targetGy = 50;
-                    mm.speed = 12;
-                }
-            } else if (rondo.phase !== 'reveal') {
-                if (rondoMyId() !== rondo.middle) {
-                    mm.targetGx = 50;
-                    mm.targetGy = 50;
-                }
+            /* The interceptor walks into the middle — the human one too, so a
+               touch on their pass visibly sends them inside. They then draw
+               their sprint from the centre; a drawn defPick takes over at
+               execute time, so this walk never fights their aim. */
+            if (rondo.phase === 'reveal' || rondo.phase === 'turn' || rondo.phase === 'plan') {
+                mm.targetGx = 50;
+                mm.targetGy = 50;
+                mm.speed = 12;
             }
         }
     }
@@ -9658,6 +9687,32 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         }
 
         // 2. Step and animate all rondo players
+        // 2a. The hunter in the middle leans very slowly toward the ball-holder
+        // while everyone plans. Two stages: first they walk all the way inside
+        // (rondoLayout's walk-in runs unimpeded), then the lean latches on and
+        // follows the holder, never far from the centre, so the circle keeps
+        // its advantage. The latch resets when a new hunter goes in.
+        if (rondo.phase === 'plan') {
+            const mm = rondoMeshes[rondo.middle];
+            const pm = rondoMeshes[rondo.possessor];
+            if (mm && pm) {
+                if (rondo._creepMid !== rondo.middle) {
+                    rondo._creepMid = rondo.middle;
+                    mm.creepOn = false;
+                }
+                const dHome = Math.hypot(mm.gx - 50, mm.gy - 50);
+                if (dHome <= 2.5) mm.creepOn = true;
+                if (mm.creepOn) {
+                    const dx = pm.gx - mm.gx;
+                    const dy = pm.gy - mm.gy;
+                    const d = Math.hypot(dx, dy) || 1;
+                    const lean = Math.min(5, d);
+                    mm.targetGx = 50 + (dx / d) * lean;
+                    mm.targetGy = 50 + (dy / d) * lean;
+                    mm.speed = 1.4;
+                }
+            }
+        }
         const t = performance.now() / 1000;
         for (const id of Object.keys(rondoMeshes)) {
             const m = rondoMeshes[id];
@@ -10179,6 +10234,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (me === rondo.possessor) {
             if (drag.moved <= TAP_SLOP) {
                 rondoHandleTap(e.clientX, e.clientY);
+            } else {
+                rondoCommitPass();
             }
             const pm = rondoMeshes[me];
             // Keep rondoPassAimLine pointing to selected target or dead position
@@ -10294,6 +10351,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (iAmPossessor) {
             if (pid === me) return false;
             rondo.passPick = { from: me, target: pid };
+            rondoCommitPass();
             const pm = rondoMeshes[me];
             const tm = rondoMeshes[pid];
             if (pm && tm && rondoPassAimLine) {
