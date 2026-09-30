@@ -381,8 +381,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        ball", which is exactly what it was.
 
        So the ball is now kicked harder than it needs to be and dies into the
-       receiver instead of crawling to him: v0 = PASS_PACE·BALL_SPEED = 30.0, and
-       still PASS_SLOW·v0 = 21.6 when it arrives — faster than a 18.2 run all the
+       receiver instead of crawling to him: v0 = PASS_PACE·BALL_SPEED = 28.1
+       (30.0 before the 2026-10-01 retune), and
+       still PASS_SLOW·v0 = 20.2 when it arrives — faster than a 18.2 run all the
        way down, and only beatable in the final stride. `dec` is solved
        backwards from that single requirement, and the arrival fraction is
        PASS_SLOW for a ball into feet, falling to PASS_SLOW_FAR over
@@ -419,8 +420,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        and the arrival fraction is a RATIO of that kick (PASS_SLOW…PASS_SLOW_FAR,
        below), so the ball is quicker than a running man by a wider margin than
        before — the §12.b
-       guarantee gets stronger, never weaker. Nothing in ./rules.js has moved. */
-    const PASS_PACE = 1.26;       // kick speed, as a multiple of BALL_SPEED
+       guarantee gets stronger, never weaker. Nothing in ./rules.js has moved.
+       2026-10-01 retune: 1.26 → 1.18. The ball was simply too fast at 30.0 off
+       the boot; at 1.18 the kick is 28.1 and a short pass still arrives at
+       0.72 × 28.1 = 20.2, clear of a 18.2 run — the guarantee survives with
+       margin, and everything below keeps working in ratios of the kick. */
+    const PASS_PACE = 1.18;       // kick speed, as a multiple of BALL_SPEED
     const PASS_REACH = 1.0;       // and it has covered this much ground by then
     /* §12.d — the two ends of the stroke's power dial. `pace` maps the drawn
        length across this span (see launchBall), so a nudge into feet and a
@@ -429,13 +434,20 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        longer the line" actually means. Both ends have now been lifted: the floor
        from 0.85 to 0.92, so even a nudge into feet is a struck ball rather than a
        rolled one, and the ceiling from 1.45 to 1.60, so a full-length line is a
-       genuine clearance. The roll still dies to a fraction of whatever it was
+       genuine clearance. 2026-10-01 retune: the ceiling is back to 1.45 — at the
+       1.18 kick a full-length line is still a genuine clearance (40.7 off the
+       boot), just not a shot in disguise. The roll still dies to a fraction of whatever it was
        struck at (passArrivalFrac, below), so the floor is still the slowest ball
        in the game and the profile still protects the "quicker than a runner"
        rule at every power level. */
     const PACE_MIN = 0.92;        // a flick into feet
-    const PACE_MAX = 1.60;        // a full-length line, struck as hard as he can
+    const PACE_MAX = 1.45;        // a full-length line, struck as hard as he can
     const BALL_ROLL_STOP = 11.5;  // turf friction for a loose ball, u/s²
+    const LOOSE_DRAG = 0.05;      // 2026-10-01 — fraction of pace a loose ball loses PER UNIT
+                                  // it travels (s *= e^(−k·step)): distance-based drag, so a hard-struck
+                                  // ball sheds speed over ground — fast at first, ever more gently —
+                                  // instead of grinding down at one flat rate. 0.05 halves it every ~14u.
+    const LOOSE_STOP = 1.5;       // below this pace the exponential tail is just crawl: call it dead
     const BALL_ROLL_ARC = 0.06;   // a rolled ball is on the deck, not in the air
 
     /* ----------------------------------------------------------------------
@@ -475,10 +487,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        ---------------------------------------------------------------------- */
     const POST_R = 0.62;          // the post, as a radius on the canonical grid
     const OUT_PAD = 3.0;          // how far past a line the ball (and a man) may go
-    const BOUNCE_POST = 0.52;     // pace kept off the woodwork
-    const BOUNCE_NET = 0.28;      // pace kept off the back of the net
-    const BOUNCE_BOARD = 0.40;    // pace kept off the hoardings and the touchlines
-    const REBOUND_FLOOR = 7.0;    // and a rebound always comes back with THIS much
+    const BOUNCE_POST = 0.68;     // pace kept off the woodwork (2026-10-01: livelier rebounds)
+    const BOUNCE_NET = 0.38;      // pace kept off the back of the net
+    const BOUNCE_BOARD = 0.55;    // pace kept off the hoardings and the touchlines
+    const REBOUND_FLOOR = 8.0;    // and a rebound always comes back with THIS much
     const SPILL_DAMP = 0.62;      // pace a missed shot keeps as it spills into play
     /* §12.j — and the scramble. One man per kit used to go for a loose ball, which
        on a rebound reads as two players jogging at it while twelve stand and
@@ -542,14 +554,16 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        the ball takes to travel it. */
     const SHOT_POWER_GAIN = 0.22;
     /* §12.h — AND A SHOT IS STRUCK HARDER THAN THE RULEBOOK, TOO. A bare press
-       leaves the boot at SHOT_SPEED × STRIKE_GAIN = 44.8, and a full-length drawn
-       line at 44.8 × 1.22 = 54.66 — about one and a half times the fastest pass in
-       the game (30.0), which is what "extremely fast" has to mean on a board this
-       size. Nothing in ./rules.js moves: SHOT_SPEED stays the rulebook number the
+       leaves the boot at SHOT_SPEED × STRIKE_GAIN = 39.2, and a full-length drawn
+       line at 39.2 × 1.22 = 47.8 — still well clear of the fastest pass in the
+       game (28.1), which is what "extremely fast" has to mean on a board this
+       size. 2026-10-01 retune: STRIKE_GAIN 1.6 → 1.4; the 44.8–54.7 lasers never
+       slowed down (see below — the keeper race needs one pace), so the slowdown
+       lives in the strike, not the flight. Nothing in ./rules.js moves: SHOT_SPEED stays the rulebook number the
        28 property tests pin (`shot 28`), and stays the number the engine falls
        back on wherever a shot has no pace of its own. This is a strike multiplier
        applied at the boot, in shoot(), and nowhere else. */
-    const STRIKE_GAIN = 1.6;
+    const STRIKE_GAIN = 1.4;
     /* --- §12.f THE BALL TRAVELS THE LINE THAT WAS DRAWN ---------------------
        A drawn pass goes straight down the drawn line, and two separate things
        used to pull it off that line.
@@ -1752,7 +1766,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            A pass is rolled, and the roll is derived backwards from the single
            requirement that is about the rules rather than the look: THE BALL HAS
            TO BE FASTER THAN A RUNNING MAN UNTIL THE MOMENT IT RESOLVES. So the
-           KICK speed is fixed first — PASS_PACE·BALL_SPEED, 30.0, a firmly struck
+           KICK speed is fixed first — PASS_PACE·BALL_SPEED, 28.1, a firmly struck
            pass — and `dec` is then chosen so that the ball has died to the
            distance's own fraction of that kick by the time it reaches PASS_REACH
            of the aimed distance — PASS_SLOW into feet, falling to PASS_SLOW_FAR
@@ -4135,14 +4149,18 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                comes to rest rather than stopping dead, so `alive` is only turned
                off once it genuinely has none left. */
             if (ball.alive) {
-                /* §12.b — a loose ball is slowed by TURF, not by the pass
-                   profile. It has been handled — cut out, spilled — and it should
-                   trickle and die. Carrying the pass's much gentler `dec` meant a
-                   cut-out ball kept rolling for another 30-odd units and straight
-                   out of the passage, which is the opposite of a ball worth
-                   chasing. */
-                const dec = BALL_ROLL_STOP;
-                const s = Math.max(0, ball.s - dec * dt);
+                /* §12.b — a loose ball is slowed by TURF *and* by DISTANCE drag,
+                   not by the pass profile. It has been handled — cut out, spilled —
+                   and it should lose its speed over the ground it covers and die
+                   slowly, not grind down at one flat rate and stop dead. Every
+                   unit it travels scrubs LOOSE_DRAG of the pace it still has
+                   (s *= e^(−k·step)), so the loss is steep while it is quick and
+                   ever gentler as it fades; the flat turf term underneath finishes
+                   the crawl the drag would only ever thin out. Euler here is fine:
+                   nobody aimed a loose ball, so there is no arrival point to
+                   protect from drift. */
+                const step = ball.s * dt;
+                const s = Math.max(0, ball.s * Math.exp(-LOOSE_DRAG * step) - BALL_ROLL_STOP * dt);
                 ball.travel += (ball.s + s) * 0.5 * dt;
                 ball.s = s;
                 /* §12.j — NOT clamped. The clamp used to be `clamp(…, 2, 98)`,
@@ -4153,7 +4171,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 ball.x = ball.from.x + ball.dir.x * ball.travel;
                 ball.y = ball.from.y + ball.dir.y * ball.travel;
                 bounceOffBoards();
-                if (ball.s <= 0.01 && ball.travel > 0) ball.alive = false;
+                if (ball.s < LOOSE_STOP && ball.travel > 0) { ball.s = 0; ball.alive = false; }
             }
             /* The CLOSEST player inside the control radius takes it. This used
                to be "the first player in allPlayers order", which is not the same
