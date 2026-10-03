@@ -80,6 +80,50 @@
 
     /* The menu's palette, hoisted to the root so the in-game capsule can be
        built from the same turf tokens the START SCREEN uses. They began life
+       scoped to #screen-menu; the HUD needs the identical ink, and `var()`
+       inside a declaration is all-or-nothing — an unresolved `--turf-line`
+       would silently drop the border to `currentColor` instead of failing
+       loudly. */
+    --turf-0: #081C13;
+    --turf-1: #0E2A1D;
+    --turf-2: #143824;
+    --turf-line: #2A4B37;
+    --chalk: #EEF1E6;
+    --sage: #8CA394;
+    --sage-dim: #5C7266;
+    --amber: #F2A63C;
+    --amber-ink: #40260A;
+
+    /* The capsule's fill densities. These are a *tint*, not a solid: the blur
+       behind them is what carries the legibility, so the alpha is free to stay
+       low and let the pitch read through the chrome. Three densities of one
+       colour, matching the menu's shell-then-nested-pill structure. */
+    --cap-fill: rgba(8, 20, 13, 0.42);
+    --cap-fill-2: rgba(8, 20, 13, 0.3);
+    --cap-fill-3: rgba(8, 20, 13, 0.62);
+
+    /* The decision ring is sized to the *painted* centre circle. The engine
+       measures it in `fitView()` from the camera fit and writes it here, so the
+       arc lands on the grass circle at every aspect ratio instead of being a
+       decorative ring floating near it. The fallback only matters for the first
+       paint, before the first `fitView()` runs. */
+    --ring-d: clamp(96px, 30vmin, 240px);
+
+    /* Dark-glass furniture: one recipe, three densities, so every overlay reads
+       as the same material. */
+    --glass: rgba(10, 20, 12, 0.32);
+    --glass-strong: rgba(10, 20, 12, 0.86);
+    /* `--glass-xthin` is the density reserved for *guiding* copy — the
+       instruction line and the two status pills. They sit over live play and are
+       read, never tapped, so they tint the grass instead of covering it: the
+       ball stays the brightest thing on the pitch. Legibility is carried by a
+       text-shadow rather than by the fill. */
+    --glass-xthin: rgba(10, 20, 12, 0.2);
+    --glass-line: rgba(255, 255, 255, 0.1);
+    --glass-line-soft: rgba(255, 255, 255, 0.055);
+    --on-glass: rgba(255, 255, 255, 0.94);
+    --on-glass-mute: rgba(255, 255, 255, 0.6);
+}
 
 body {
     overflow: hidden;
