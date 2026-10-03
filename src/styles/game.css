@@ -139,6 +139,17 @@ body {
    pitch plane and, behind it, the outfield grass in game-source.js — so this
    recipe is only ever the floor of last resort: the frame before the first WebGL
 
+/* The app shell: full-viewport flex column so #stage fills the screen and the
+   WebGL canvas gets a real size. Without this, #stage collapses and #scene
+   renders at zero height. */
+#app {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 #stage {
     position: relative;
     flex: 1 1 auto;
