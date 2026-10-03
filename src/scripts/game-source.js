@@ -5503,26 +5503,15 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const shotTarget = SO.aim || { x: soGoal().x, y: soGoal().y };
         const divePoint = SO.dive || (k ? { x: k.x, y: k.y } : { x: soGoal().x, y: soGoal().y });
 
-        // Physical contact model: the diving keeper's body covers ~3.5 units.
-        // - Solid contact (dist < 1.5): 85% saved, 15% slips through (goal)
-        // - Fingertip (1.5-3.5): 60% parried out (saved), 40% deflects in (goal)
-        // - No touch (dist > 3.5): clean goal
+        // Keeper save: if the dive point is within reach of the shot target,
+        // it's a save. Reach of 6 covers the keeper's diving range.
         SO.result = penaltyKickOutcome({
             shotTarget,
             divePoint,
             goalX: soGoal().x,
             goalHalfWidth: GOAL_HALF_WIDTH,
-            reach: 3.5
+            reach: 6.0
         });
-        if (SO.result.outcome === 'SAVED') {
-            const d = SO.result.dist || 0;
-            const r = Math.random();
-            if (d < 1.5) {
-                if (r < 0.15) SO.result.outcome = 'GOAL'; // slips through the grasp
-            } else {
-                if (r < 0.40) SO.result.outcome = 'GOAL'; // fingertip deflection in
-            }
-        }
 
         SO.from = { x: ball.x, y: ball.y };
         if (SO.result.outcome === 'GOAL') {
@@ -6116,11 +6105,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 const spot = soSpot();
                 const target = { x: clamp(pt.x, 2, 98), y: soGoal().y };
                 soAimLine.setEnds(spot, target);
-                const onTarget = isOnTarget(target.x, soGoal().x, GOAL_HALF_WIDTH);
-                soAimLine.material.color.setHex(onTarget ? COL.you : 0xff2d87);
+                soAimLine.material.color.setHex(COL.you);
                 soAimLine.visible = true;
                 soTargetMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
-                soTargetMarker.material.color.setHex(onTarget ? COL.you : 0xff2d87);
+                soTargetMarker.material.color.setHex(COL.you);
                 soTargetMarker.visible = true;
                 SO.aim = target;
             } else if (SO.phase === 'dive' && SO.turn === opponentTeam()) {
@@ -6259,11 +6247,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const spot = soSpot();
             const target = { x: clamp(pt.x, 2, 98), y: soGoal().y };
             soAimLine.setEnds(spot, target);
-            const onTarget = isOnTarget(target.x, soGoal().x, GOAL_HALF_WIDTH);
-            soAimLine.material.color.setHex(onTarget ? COL.you : 0xff2d87);
+            soAimLine.material.color.setHex(COL.you);
             soAimLine.visible = true;
             soTargetMarker.position.set(worldX(target.x), 0.09, worldZ(target.y));
-            soTargetMarker.material.color.setHex(onTarget ? COL.you : 0xff2d87);
+            soTargetMarker.material.color.setHex(COL.you);
             soTargetMarker.visible = true;
             SO.aim = target;
         } else if (drag.kind === 'so-dive') {
