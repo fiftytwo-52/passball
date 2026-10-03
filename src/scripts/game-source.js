@@ -5263,7 +5263,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             if (isKicker || isKeeper || inSquad) {
                 if (p.mesh) p.mesh.visible = true;
                 if (p.shadow) p.shadow.visible = true;
-                /* Reset any celebrate/flop transform from the previous kick */
+                /* Reset any celebrate/flop transform from the previous kick.
+                   X/Z are set by the walk-up code; we just clear rotation and Y. */
                 if (p.mesh) {
                     p.mesh.rotation.set(0, p.yaw || 0, 0);
                     p.mesh.position.y = 0;
@@ -5828,16 +5829,56 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 const p = Math.min(1, Math.max(0, 1 - SO.t / total));
                 const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
                 if (!reduced) {
+                    /* Pick a celebration style once per result (stored on SO.result) */
+                    if (SO.result.celebrate === undefined) {
+                        SO.result.celebrate = Math.floor(Math.random() * 4);
+                        /* Store base position for celebrations that move in X/Z */
+                        SO.result.baseX = kicker.mesh.position.x;
+                        SO.result.baseZ = kicker.mesh.position.z;
+                    }
+                    const style = SO.result.celebrate;
                     if (SO.result.outcome === 'GOAL') {
-                        /* Jump twice: bounce up with slight tilt */
-                        const jumps = Math.sin(p * Math.PI * 4);
-                        kicker.mesh.position.y = Math.max(0, jumps * 1.2);
-                        kicker.mesh.rotation.z = Math.sin(p * Math.PI * 2) * 0.15;
+                        if (style === 0) {
+                            /* Jump twice: bounce up with slight tilt */
+                            const jumps = Math.sin(p * Math.PI * 4);
+                            kicker.mesh.position.y = Math.max(0, jumps * 1.2);
+                            kicker.mesh.rotation.z = Math.sin(p * Math.PI * 2) * 0.15;
+                        } else if (style === 1) {
+                            /* Run in a small circle (relative to base) */
+                            const ang = p * Math.PI * 2;
+                            kicker.mesh.position.x = SO.result.baseX + Math.cos(ang) * 2;
+                            kicker.mesh.position.z = SO.result.baseZ + Math.sin(ang) * 2;
+                            kicker.mesh.rotation.y = -ang;
+                        } else if (style === 2) {
+                            /* Backflip: full backward rotation */
+                            kicker.mesh.rotation.x = -p * Math.PI * 2;
+                            kicker.mesh.position.y = Math.sin(p * Math.PI) * 1.5;
+                        } else {
+                            /* Knee slide: move forward, tilt back, arms up */
+                            kicker.mesh.position.z = SO.result.baseZ - p * 3;
+                            kicker.mesh.rotation.x = -p * 0.4;
+                            kicker.mesh.position.y = Math.sin(Math.min(1, p * 2) * Math.PI) * 0.5;
+                        }
                     } else {
-                        /* Flop: tip over to lie down */
-                        const flopP = Math.min(1, p * 1.5);
-                        kicker.mesh.rotation.x = -flopP * 1.35;
-                        kicker.mesh.position.y = flopP * 0.5;
+                        if (style === 0) {
+                            /* Flop: tip over to lie down */
+                            const flopP = Math.min(1, p * 1.5);
+                            kicker.mesh.rotation.x = -flopP * 1.35;
+                            kicker.mesh.position.y = flopP * 0.5;
+                        } else if (style === 1) {
+                            /* Hands on head: crouch and shake */
+                            kicker.mesh.position.y = -Math.sin(p * Math.PI) * 0.4;
+                            kicker.mesh.rotation.z = Math.sin(p * Math.PI * 6) * 0.1;
+                        } else if (style === 2) {
+                            /* Turn away: rotate and walk a few steps */
+                            kicker.mesh.rotation.y = p * Math.PI;
+                            kicker.mesh.position.z = SO.result.baseZ + p * 2;
+                        } else {
+                            /* Kick the ground in frustration: small hop */
+                            const hop = Math.sin(p * Math.PI * 3);
+                            kicker.mesh.position.y = Math.max(0, hop * 0.6);
+                            kicker.mesh.rotation.x = Math.sin(p * Math.PI * 3) * 0.2;
+                        }
                     }
                 }
             }
