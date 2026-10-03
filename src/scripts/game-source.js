@@ -8417,14 +8417,17 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         });
 
         const btnLeave = document.getElementById('btn-rondo-leave');
-        if (btnLeave) btnLeave.addEventListener('click', async () => {
+        const doLeave = async () => {
             const ok = await confirmAction({
                 title: 'Leave the room?',
                 message: 'You give up your seat — the host keeps the rondo running.',
                 confirmLabel: 'LEAVE',
             });
             if (ok) rondoLeave(false);
-        });
+        };
+        if (btnLeave) btnLeave.addEventListener('click', doLeave);
+        const btnLeave2 = document.getElementById('btn-rondo-leave2');
+        if (btnLeave2) btnLeave2.addEventListener('click', doLeave);
 
         // Start (host)
         const btnStart = document.getElementById('btn-rondo-start');
@@ -8446,10 +8449,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     }
 
     function rondoRenderRoster(players) {
-        const box = document.getElementById('rondo-roster-box');
-        const list = document.getElementById('rondo-player-list');
-        const countNum = document.getElementById('rondo-player-count-num');
-        const hint = document.getElementById('rondo-roster-hint');
+        const isHost = !!(rondoLobby && rondoLobby.isHost);
+        /* Host and guest each have their own lineup; render the shirts into
+           whichever is on screen. */
+        const box = document.getElementById(isHost ? 'rondo-roster-box' : 'rondo-guest-box');
+        const list = document.getElementById(isHost ? 'rondo-player-list' : 'rondo-guest-list');
+        const countNum = document.getElementById(isHost ? 'rondo-player-count-num' : 'rondo-guest-count-num');
+        const hint = document.getElementById(isHost ? 'rondo-roster-hint' : 'rondo-guest-hint');
         const hostCtl = document.getElementById('rondo-host-controls');
         const guestWait = document.getElementById('rondo-guest-wait');
         const btnStart = document.getElementById('btn-rondo-start');
@@ -8484,16 +8490,16 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const canStart = n >= RONDO_MIN_PLAYERS;
         if (hint) {
             hint.textContent = canStart
-                ? (rondoLobby && rondoLobby.isHost ? 'Squad ready — kick off when you like!' : 'The host can start the game.')
+                ? (isHost ? 'Squad ready — kick off when you like!' : 'The host can start the game.')
                 : `Need at least ${RONDO_MIN_PLAYERS} players to start (${n}/${RONDO_MIN_PLAYERS}).`;
         }
-        const isHost = !!(rondoLobby && rondoLobby.isHost);
         if (hostCtl) hostCtl.hidden = !isHost;
         if (guestWait) guestWait.hidden = isHost;
         if (btnStart) btnStart.disabled = !canStart;
     }
 
-    /** Kit colours: circle players cycle vivid hues; the middle always wears magenta. */
+    /** Kit colours: circle players cycle vivid hues; the middle keeps their
+        own shirt — going inside never re-dyes anyone. */
     function rondoKitColor(seat) {
         const palette = [
             0x1f6bff, // vibrant blue
@@ -8509,7 +8515,6 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         ];
         return palette[seat % palette.length];
     }
-    const RONDO_MIDDLE_KIT = 0xff2d87;
 
     /* ---------------- Host: computer players ----------------
        The host can pad the room with CPU players so a rondo starts even when
@@ -8621,6 +8626,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             await rondoNet.joinRoom(code, name);
             rondoLobby = { isHost: false, code };
             document.getElementById('rondo-join-active').hidden = false;
+            const jf = document.getElementById('rondo-join-form');
+            if (jf) jf.hidden = true;
             document.getElementById('btn-rondo-join').disabled = false;
         } catch (err) {
             rondoSetStatus(err.message || 'Could not join.');
@@ -9170,6 +9177,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 break;
             case 'RONDO_EMOJI':
                 if (packet.from !== rondoMyId()) {
+                    /* Per-player 2s throttle on the receiving side too. */
+                    const nowE = Date.now();
+                    rondo._emojiAt = rondo._emojiAt || {};
+                    if (nowE - (rondo._emojiAt[packet.from] || 0) < 2000) break;
+                    rondo._emojiAt[packet.from] = nowE;
                     const senderName = packet.name || rondoPlayerName(packet.from);
                     spawnFloatingEmoji(packet.emoji, false, senderName);
                 }
@@ -9322,7 +9334,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         players.forEach((p, i) => {
             const isMiddle = p.id === middle;
             const playerColor = rondoKitColor(i);
-            const kitColor = isMiddle ? RONDO_MIDDLE_KIT : playerColor;
+            const kitColor = playerColor;
             const kitMat = new THREE.MeshLambertMaterial({ color: kitColor });
             const mesh = makeHuman(kitMat, 'outfield');
             const label = rondoMakeLabel(p.name, p.id === (rondoNet && rondoNet.myId));
@@ -9425,8 +9437,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             mm.isMiddle = true;
             mm.homeGx = 50;
             mm.homeGy = 50;
-            mm.kitMat.color.setHex(RONDO_MIDDLE_KIT);
-            mm.ring.material.color.setHex(RONDO_MIDDLE_KIT);
+            /* The hunter keeps their own shirt — no re-dye on going inside. */
+            const keepC = mm.color || rondoKitColor(rondo.circle.indexOf(rondo.middle));
+            mm.kitMat.color.setHex(keepC);
+            mm.ring.material.color.setHex(keepC);
             mm.ring.visible = false; // middle defender has no target ring
             /* The interceptor walks into the middle — the human one too, so a
                touch on their pass visibly sends them inside. They then draw
@@ -10644,10 +10658,14 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const btnClose = document.getElementById('btn-pvp-close');
         if (btnClose) btnClose.addEventListener('click', closePvpLobby);
 
-        // Quick emoji reactions
+        // Quick emoji reactions — 2s cooldown per player so nobody can spam.
+        let lastEmojiSentAt = 0;
         const emojiButtons = document.querySelectorAll('.btn-emoji');
         emojiButtons.forEach(btn => {
             btn.addEventListener('click', () => {
+                const now = Date.now();
+                if (now - lastEmojiSentAt < 2000) return;
+                lastEmojiSentAt = now;
                 const emoji = btn.getAttribute('data-emoji');
                 if (!emoji) return;
                 const myName = (state.phase === 'rondo' && rondoNet) ? rondoPlayerName(rondoMyId()) : 'You';
@@ -10719,6 +10737,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         });
 
         pvp.on('emoji', emoji => {
+            const nowP = Date.now();
+            if (nowP - (pvp._emojiAt || 0) < 2000) return;
+            pvp._emojiAt = nowP;
             spawnFloatingEmoji(emoji, false, 'Opponent');
         });
 

@@ -5391,3 +5391,105 @@ body {
 @media (prefers-reduced-motion: reduce) {
     .rondo-dialog, .rondo-dialog * { animation: none !important; transition: none !important; }
 }
+
+/* ============ Rondo lobby: desktop — everything fits, no page scroll ============ */
+@media (min-width: 900px) {
+    #screen-rondo {
+        align-items: center;
+        padding: 16px;
+    }
+    #screen-rondo .rondo-dialog {
+        width: min(920px, 96vw);
+        max-height: 96vh;
+        overflow: hidden; /* the lobby fits; never a scroll page on PC */
+        display: flex;
+        flex-direction: column;
+    }
+    .rondo-hero {
+        padding: 18px 26px 16px;
+        flex: none;
+    }
+    .rondo-hero h2 {
+        font-size: 38px;
+    }
+    .rondo-lede {
+        margin-top: 6px;
+        font-size: 14px;
+    }
+    .rondo-body {
+        padding: 14px 26px 16px;
+        overflow: hidden;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+    /* Name + tabs side by side, compact */
+    .rondo-name-tabs {
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        align-items: end;
+        margin-bottom: 12px;
+    }
+    .rondo-input, .rondo-sq {
+        height: 46px;
+    }
+    .rondo-sq { width: 46px; }
+    .rondo-tab { height: 44px; }
+    /* Host active room: two columns */
+    .rondo-desk-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+        gap: 20px;
+        align-items: start;
+    }
+    .rondo-desk-left {
+        display: grid;
+        gap: 12px;
+        align-content: start;
+    }
+    .rondo-board {
+        margin-bottom: 0;
+        padding: 12px;
+    }
+    .rondo-code span {
+        width: 54px;
+        height: 64px;
+        font-size: 42px;
+    }
+    .rondo-bots {
+        margin-bottom: 0;
+        padding: 10px 12px;
+    }
+    .rondo-bots strong { font-size: 17px; }
+    .rondo-step { width: 42px; height: 42px; }
+    .rondo-stepper output { font-size: 26px; }
+    /* Lineup: compact pitch */
+    .rondo-lineup-head { margin: 0 0 6px; }
+    .rondo-pitch { padding: 10px 8px 8px; }
+    .rondo-team { gap: 6px 2px; }
+    .rondo-shirt { width: min(100%, 48px); }
+    .rondo-legend { margin-top: 6px; }
+    .rondo-hint { margin-top: 6px; font-size: 13px; }
+    #rondo-player-list, #rondo-guest-list {
+        max-height: none;
+        overflow: visible;
+    }
+    /* Footer: tight */
+    .rondo-foot {
+        margin-top: 12px;
+        padding-top: 12px;
+    }
+    .rondo-btn.rondo-kick { min-height: 50px; font-size: 20px; }
+    .rondo-statusbar { margin-top: 10px; }
+    /* Join pane: compact */
+    .rondo-join-input { height: 72px; font-size: 46px; }
+}
+
+/* Short desktop viewports: squeeze further rather than scroll */
+@media (min-width: 900px) and (max-height: 760px) {
+    .rondo-hero { padding: 12px 26px 10px; }
+    .rondo-hero h2 { font-size: 32px; }
+    .rondo-lede { display: none; }
+    .rondo-body { padding: 10px 26px 12px; }
+    .rondo-name-tabs { margin-bottom: 8px; }
+    .rondo-foot { margin-top: 8px; padding-top: 8px; }
+}

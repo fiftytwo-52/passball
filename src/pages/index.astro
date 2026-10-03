@@ -924,24 +924,51 @@ import '../styles/global.css';
                         <button type="button" class="rondo-btn rondo-kick rondo-block" id="btn-rondo-create">⚽ Create Room</button>
                     </div>
                     <div id="rondo-create-active" hidden>
-                        <div class="rondo-board">
-                            <small>ROOM CODE</small>
-                            <div class="rondo-code" id="rondo-room-code-val" aria-label="Room code"></div>
-                            <div class="rondo-board-actions">
-                                <button class="rondo-btn rondo-on-dark" id="btn-rondo-copy-code" type="button">⧉ Copy</button>
-                                <button class="rondo-btn rondo-on-dark" id="btn-rondo-share" type="button">↗ Share</button>
+                        <div class="rondo-desk-grid">
+                            <div class="rondo-desk-left">
+                                <div class="rondo-board">
+                                    <small>ROOM CODE</small>
+                                    <div class="rondo-code" id="rondo-room-code-val" aria-label="Room code"></div>
+                                    <div class="rondo-board-actions">
+                                        <button class="rondo-btn rondo-on-dark" id="btn-rondo-copy-code" type="button">⧉ Copy</button>
+                                        <button class="rondo-btn rondo-on-dark" id="btn-rondo-share" type="button">↗ Share</button>
+                                    </div>
+                                </div>
+
+                                <div class="rondo-bots">
+                                    <div>
+                                        <strong>Computer players</strong>
+                                        <span class="rondo-sub">No friends online? Fill the circle with bots (always Extreme level).</span>
+                                    </div>
+                                    <div class="rondo-stepper">
+                                        <button class="rondo-step" id="btn-rondo-cpu-minus" type="button" aria-label="Fewer computer players">−</button>
+                                        <output id="rondo-cpu-count" aria-live="polite">0</output>
+                                        <button class="rondo-step" id="btn-rondo-cpu-plus" type="button" aria-label="More computer players">+</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="rondo-desk-right" id="rondo-roster-box" hidden>
+                                <div class="rondo-lineup-head">
+                                    <span class="rondo-label" style="margin:0">Starting lineup</span>
+                                    <span class="rondo-count"><b id="rondo-player-count-num">1</b>/10 · min 4</span>
+                                </div>
+                                <div class="rondo-pitch"><div class="rondo-team" id="rondo-player-list"></div></div>
+                                <div class="rondo-legend">
+                                    <span><i style="background:#fff;border:1px solid #bbb"></i>You</span>
+                                    <span><i style="background:#2f80ed"></i>Friends</span>
+                                    <span><i style="background:#ffd23f"></i>Bots</span>
+                                </div>
+                                <p class="rondo-hint" id="rondo-roster-hint">Need at least 4 players to start.</p>
                             </div>
                         </div>
 
-                        <div class="rondo-bots">
-                            <div>
-                                <strong>Computer players</strong>
-                                <span class="rondo-sub">No friends online? Fill the circle with bots (always Extreme level).</span>
-                            </div>
-                            <div class="rondo-stepper">
-                                <button class="rondo-step" id="btn-rondo-cpu-minus" type="button" aria-label="Fewer computer players">−</button>
-                                <output id="rondo-cpu-count" aria-live="polite">0</output>
-                                <button class="rondo-step" id="btn-rondo-cpu-plus" type="button" aria-label="More computer players">+</button>
+                        <div class="rondo-foot">
+                            <div class="rondo-actions">
+                                <button class="rondo-btn rondo-ghost-red" id="btn-rondo-cancel-host" type="button">Cancel</button>
+                                <span id="rondo-host-controls" hidden>
+                                    <button class="rondo-btn rondo-kick rondo-block" id="btn-rondo-start" type="button" disabled>⚽ Kick off</button>
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -949,46 +976,39 @@ import '../styles/global.css';
 
                 <!-- Join pane -->
                 <section class="rondo-panel" id="pane-rondo-join" role="tabpanel" aria-labelledby="tab-rondo-join" hidden>
-                    <label class="rondo-label" for="rondo-join-code">Room code</label>
-                    <input class="rondo-join-input" id="rondo-join-code" maxlength="4" placeholder="····" autocomplete="off" spellcheck="false">
-                    <p class="rondo-hint">Ask the host for their 4-letter code.</p>
-                    <div class="rondo-foot">
-                        <div class="rondo-actions">
-                            <button class="rondo-btn rondo-ghost-red" id="btn-rondo-leave" type="button">Cancel</button>
-                            <button class="rondo-btn rondo-kick" id="btn-rondo-join" type="button" disabled>⚽ Join match</button>
-                        </div>
-                    </div>
-                    <div id="rondo-join-active" hidden></div>
-                </section>
-
-                <!-- Shared roster: lineup shirts, host controls / guest wait -->
-                <div id="rondo-roster-box" hidden>
-                    <div class="rondo-lineup-head">
-                        <span class="rondo-label" style="margin:0">Starting lineup</span>
-                        <span class="rondo-count"><b id="rondo-player-count-num">1</b>/10 · min 4</span>
-                    </div>
-                    <div class="rondo-pitch"><div class="rondo-team" id="rondo-player-list"></div></div>
-                    <div class="rondo-legend">
-                        <span><i style="background:#fff;border:1px solid #bbb"></i>You</span>
-                        <span><i style="background:#2f80ed"></i>Friends</span>
-                        <span><i style="background:#ffd23f"></i>Bots</span>
-                    </div>
-                    <p class="rondo-hint" id="rondo-roster-hint">Need at least 4 players to start.</p>
-                    <div class="rondo-foot">
-                        <div class="rondo-actions">
-                            <button class="rondo-btn rondo-ghost-red" id="btn-rondo-cancel-host" type="button">Cancel</button>
-                            <span id="rondo-host-controls" hidden>
-                                <button class="rondo-btn rondo-kick rondo-block" id="btn-rondo-start" type="button" disabled>⚽ Kick off</button>
-                            </span>
-                        </div>
-                        <div id="rondo-guest-wait" hidden>
-                            <div class="rondo-wait-box">
-                                <span class="rondo-spinner"></span>
-                                <span>Waiting for the host to start...</span>
+                    <div id="rondo-join-form">
+                        <label class="rondo-label" for="rondo-join-code">Room code</label>
+                        <input class="rondo-join-input" id="rondo-join-code" maxlength="4" placeholder="····" autocomplete="off" spellcheck="false">
+                        <p class="rondo-hint">Ask the host for their 4-letter code.</p>
+                        <div class="rondo-foot">
+                            <div class="rondo-actions">
+                                <button class="rondo-btn rondo-ghost-red" id="btn-rondo-leave" type="button">Cancel</button>
+                                <button class="rondo-btn rondo-kick" id="btn-rondo-join" type="button" disabled>⚽ Join match</button>
                             </div>
                         </div>
                     </div>
-                </div>
+                    <div id="rondo-join-active" hidden>
+                        <div id="rondo-guest-box">
+                            <div class="rondo-lineup-head">
+                                <span class="rondo-label" style="margin:0">Starting lineup</span>
+                                <span class="rondo-count"><b id="rondo-guest-count-num">1</b>/10 · min 4</span>
+                            </div>
+                            <div class="rondo-pitch"><div class="rondo-team" id="rondo-guest-list"></div></div>
+                            <p class="rondo-hint" id="rondo-guest-hint">Waiting for the host to start...</p>
+                            <div class="rondo-foot">
+                                <div id="rondo-guest-wait">
+                                    <div class="rondo-wait-box">
+                                        <span class="rondo-spinner"></span>
+                                        <span>Waiting for the host to start...</span>
+                                    </div>
+                                </div>
+                                <div class="rondo-actions" style="margin-top:10px">
+                                    <button class="rondo-btn rondo-ghost-red" id="btn-rondo-leave2" type="button">Leave Room</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
 
                 <!-- Network Status Bar -->
                 <div class="rondo-statusbar">
