@@ -11631,10 +11631,32 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     });
     /* §17.b — the human's half of the decision window */
     if (ui.done) ui.done.addEventListener('click', humanDone);
-    if (ui.pause) ui.pause.addEventListener('click', () => { setMenuOpen(false); pauseGame(); });
+    if (ui.pause) ui.pause.addEventListener('click', () => {
+        setMenuOpen(false);
+        /* If paused via the pause icon, this button resumes. Otherwise it pauses. */
+        if (state.paused) {
+            if (state.phase === 'play' || state.phase === 'plan') state.paused = false;
+        } else {
+            pauseGame();
+        }
+    });
     if (ui.mute) ui.mute.addEventListener('click', toggleMute);
-    if (ui.menuOpen) ui.menuOpen.addEventListener('click', () => setMenuOpen(!sheetOpen));
-    if (ui.menuClose) ui.menuClose.addEventListener('click', () => setMenuOpen(false));
+    if (ui.menuOpen) ui.menuOpen.addEventListener('click', () => {
+        /* Pause icon: immediately pause the game AND open the menu sheet.
+           We set paused directly (not via pauseGame which pushes a full-screen
+           overlay) so the menu sheet is the visible UI. */
+        if (!sheetOpen) {
+            if (state.phase !== 'idle' && state.phase !== 'over') state.paused = true;
+            setMenuOpen(true);
+        } else {
+            setMenuOpen(false);
+        }
+    });
+    if (ui.menuClose) ui.menuClose.addEventListener('click', () => {
+        setMenuOpen(false);
+        /* Closing the menu resumes the game if it was paused via the pause icon. */
+        if (state.paused && (state.phase === 'play' || state.phase === 'plan')) state.paused = false;
+    });
     if (ui.scrim) ui.scrim.addEventListener('click', () => setMenuOpen(false));
     if (ui.menuRestart) ui.menuRestart.addEventListener('click', async () => {
         if (gameInProgress() && !(await confirmRestart())) return;
