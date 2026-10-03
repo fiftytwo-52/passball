@@ -4944,6 +4944,7 @@ body {
 .rondo-seg-t b { width: 4.5ch; color: var(--rh-yellow); }
 .rondo-seg-p b { width: 2.5ch; }
 .rondo-seg-m b { width: 4.5ch; color: #ff9cc9; }
+.rondo-seg-ping b { width: 3.5ch; }
 .rondo-seg-m i {
     width: 10px; height: 10px; border-radius: 50%;
     background: var(--rh-pink);

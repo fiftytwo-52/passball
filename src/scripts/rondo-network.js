@@ -39,6 +39,9 @@ export class RondoNet extends EventTarget {
         this.connected = false;
         this._seen = new Set();        // dedupe connection ids
         this._lobbyPlayers = null;     // host-side provider for the full lobby list (humans + CPUs)
+        this.pings = new Map();        // peerId -> last RTT ms
+        this.myPing = 0;               // this client's RTT to the host (guests)
+        this.pingTimer = null;
     }
 
     /** Host: register a function returning the full lobby player list, so guests
@@ -65,6 +68,7 @@ export class RondoNet extends EventTarget {
     }
 
     cleanup() {
+        this.stopPing();
         try { if (this.hostConn) this.hostConn.close(); } catch (e) {}
         for (const g of this.guests.values()) {
             try { g.conn.close(); } catch (e) {}
@@ -128,6 +132,19 @@ export class RondoNet extends EventTarget {
 
         conn.on('data', (data) => {
             if (!data || typeof data !== 'object') return;
+            if (data.type === 'RONDO_PING') {
+                try { conn.send({ type: 'RONDO_PONG', t: data.t }); } catch (e) {}
+                return;
+            }
+            if (data.type === 'RONDO_PONG') {
+                const guest = this._guestByConn(conn);
+                const ms = Math.round(performance.now() - data.t);
+                if (guest) {
+                    this.pings.set(guest.id, ms);
+                    this.emit('ping', { peer: guest.id, ms, pings: new Map(this.pings) });
+                }
+                return;
+            }
             if (data.type === 'RONDO_JOIN') {
                 this._admitGuest(conn, String(data.name || 'Player').slice(0, 16) || 'Player', String(data.id || ''));
             } else if (data.type && typeof data.type === 'string' && data.type.startsWith('RONDO_')) {
@@ -243,6 +260,15 @@ export class RondoNet extends EventTarget {
 
                 conn.on('data', (data) => {
                     if (!data || typeof data !== 'object') return;
+                    if (data.type === 'RONDO_PING') {
+                        try { conn.send({ type: 'RONDO_PONG', t: data.t }); } catch (e) {}
+                        return;
+                    }
+                    if (data.type === 'RONDO_PONG') {
+                        this.myPing = Math.round(performance.now() - data.t);
+                        this.emit('ping', { peer: 'host', ms: this.myPing });
+                        return;
+                    }
                     if (data.type === 'RONDO_WELCOME') {
                         if (settled) return;
                         settled = true;
@@ -275,6 +301,28 @@ export class RondoNet extends EventTarget {
 
             setTimeout(() => { if (!settled) fail('Join timed out. Check the code.'); }, 12000);
         });
+    }
+
+    /** Start periodic RTT probes (2s). Guests ping the host; the host pings
+        every guest. Emits 'ping' with { peer, ms }. */
+    startPing() {
+        this.stopPing();
+        this.pingTimer = setInterval(() => {
+            const t = performance.now();
+            try {
+                if (this.isHost) {
+                    for (const g of this.guests.values()) {
+                        try { g.conn.send({ type: 'RONDO_PING', t }); } catch (e) {}
+                    }
+                } else if (this.hostConn) {
+                    this.hostConn.send({ type: 'RONDO_PING', t });
+                }
+            } catch (e) {}
+        }, 2000);
+    }
+
+    stopPing() {
+        if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     }
 
     /** Guest -> host. */

@@ -9312,7 +9312,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             }
             if (best && rondo.circle.includes(best)) return best;
         }
-        return rondo.circle[Math.floor(Math.random() * rondo.circle.length)];
+        const cands = rondo.circle.filter(id => id !== possessor);
+        return cands[Math.floor(Math.random() * cands.length)];
     }
 
     /** Guest (or host-local) pass/guess packets land here on the host. */
@@ -9722,7 +9723,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     const RONDO_WORLD_R = 15.5;
     const RONDO_RX = RONDO_WORLD_R / KX;        // ~23.9 grid units
     const RONDO_RY = RONDO_WORLD_R / ZSTRETCH;  // ~12.85 grid units
-    const RONDO_PLAYER_MAX_LEAD = 7;           // Circle players can roam a real zone around their seat
+    const RONDO_PLAYER_MAX_LEAD = 4;           // Small free zone around the seat (360 deg)
 
     function rondoCpuEmote(emoji, senderId) {
         const name = senderId ? rondoPlayerName(senderId) : 'CPU';
@@ -9754,6 +9755,25 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         // Zoom camera in rondo mode for a close-up keep-away framing
         view.zoom = 1.65;
         fitView();
+        /* Ping badge: show live RTT while playing. Guests see RTT to host;
+           the host sees the worst guest RTT. */
+        if (rondoNet && !rondoNet._pingWired) {
+            rondoNet._pingWired = true;
+            rondoNet.on('ping', ({ peer, ms, pings }) => {
+                const el = document.getElementById('rondo-ping');
+                if (!el) return;
+                let show = ms;
+                if (rondoNet.isHost && pings && pings.size) {
+                    show = Math.max(...pings.values());
+                } else if (rondoNet.isHost) {
+                    el.textContent = 'HOST';
+                    return;
+                }
+                el.textContent = show;
+                el.style.color = show < 100 ? '#7dff9b' : show < 250 ? '#ffd257' : '#ff7d7d';
+            });
+        }
+        if (rondoNet) rondoNet.startPing();
         // Leave the lobby screen, show the pitch with the rondo HUD.
         hideRondoOver();
         while (topScreen()) popScreen();
@@ -10664,11 +10684,14 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const isDead = res.isDeadBall || !res.target || closestDist > 4.6;
 
             if (isDead) {
-                rondoHandleDeadBall(res.passer, rondo.middle, endGx, endGy);
+                /* Host decides and broadcasts; guests wait for RONDO_SWAP. */
+                if (rondoNet && rondoNet.isHost) {
+                    rondoHandleDeadBall(res.passer, rondo.middle, endGx, endGy);
+                }
                 return;
             }
 
-            // Ball completed to receiver
+            // Ball completed to receiver (host advances; guests wait for RONDO_PASS_DONE)
             const receiverId = res.target || closestId;
             playRondoWhistle(true);
             if (turnEl) turnEl.textContent = 'PASS COMPLETED';
@@ -10705,7 +10728,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 }, 400);
             }
         }, {
-            canTouch: true,
+            /* Only the host judges the touch: guests fly the same ball as a
+               pure visual and take the host's RONDO_SWAP / RONDO_PASS_DONE
+               as the authoritative outcome. */
+            canTouch: !!(rondoNet && rondoNet.isHost),
             passer: res.passer,
             target: res.target,
             onTouch: () => {
