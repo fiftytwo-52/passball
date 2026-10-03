@@ -987,6 +987,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
         rect(-W, -GL, W, GL);                   // touchlines
         line(-W, 0, W, 0);                      // halfway
+        circle(0, 0, 9.15, 0, Math.PI * 2);     // centre circle
+        spot(0, 0);                             // centre spot
 
         /* both penalty areas + goal areas. The small box is exactly as wide as
            the goal mouth — 2 × GOAL_HALF_M metres, centred on x = 50 — so the
