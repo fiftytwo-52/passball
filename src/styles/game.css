@@ -5099,11 +5099,13 @@ body {
 /* SWAP! splash */
 .rondo-swap {
     position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
+    top: calc(max(10px, env(safe-area-inset-top)) + 58px);
+    left: 0; right: 0;
+    display: flex;
+    justify-content: center;
     pointer-events: none;
     opacity: 0;
+    z-index: 25;
 }
 .rondo-swap.show { animation: rondo-splash 1.5s ease both; }
 .rondo-swap-card {
