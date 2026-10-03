@@ -2091,7 +2091,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     /** Drop every stacked move, and every line that was drawn for them. Called
         whenever a window opens, closes, or a ball spills loose. */
     function clearIntents() {
-        allPlayers.forEach(p => { p.queued = null; });
+        allPlayers.forEach(p => { p.queued = null; p.userMove = false; });
         hideQueueMarkers();
         aimReset();
     }
@@ -6381,8 +6381,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     if (lockedReceiver && PLAY) {
                         PLAY.receiver = lockedReceiver;
                         lockedReceiver.duty = 'receiver';
-                        // Queue the locked receiver to run to the pass target
-                        setIntent(lockedReceiver, landed.end);
+                        /* Don't overwrite a user-drawn move: if they deliberately
+                           drew a line for this player, that line wins over the
+                           auto run-to-pass-target. */
+                        if (!lockedReceiver.userMove) {
+                            setIntent(lockedReceiver, landed.end);
+                        }
                     }
 
                     /* §12.f — THE DRAWN LINE IS ALWAYS THE QUEUED BALL.
@@ -6463,7 +6467,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 /* §17.b — a run is *stacked*, never started: the ring appears where
                    this player will end up, and the step itself waits for the
                    window to close so it fires alongside everybody else's. */
-                setIntent(player, dest);
+                setIntent(player, dest, true);
                 if (pvpActive && pvpRole === 'guest') {
                     pvp.sendInput({
                         type: 'intent',
@@ -6708,9 +6712,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     }
 
     /** Stack a run. Nothing moves until the window closes. */
-    function setIntent(p, dest) {
+    function setIntent(p, dest, isUserDrawn) {
         if (!p || !dest) return;
         p.queued = { x: clamp(dest.x, 5, 95), y: clamp(dest.y, 5, 95) };
+        /* A user-drawn move takes precedence: a later pass locking onto this
+           player must not overwrite the line they deliberately drew. */
+        if (isUserDrawn) p.userMove = true;
         bus.emit('plan-markers');
     }
 
