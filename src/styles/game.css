@@ -5523,9 +5523,20 @@ body {
 #hud-pens {
     position: absolute;
     inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    transform: none;
     z-index: 5;
     pointer-events: none;
     font-family: Barlow, system-ui, sans-serif;
+    display: block;
+    max-width: none;
+    gap: 0;
+    justify-content: normal;
+    align-items: normal;
+    flex-wrap: nowrap;
 }
 #hud-pens[hidden] { display: none; }
 .pens-app {
