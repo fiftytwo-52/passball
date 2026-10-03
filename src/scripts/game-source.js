@@ -5546,8 +5546,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             Sfx.bounce();
             if (vTeam(kicker) === 'you') Sfx.goal(); else Sfx.concede();
             shake(.5);
-            fireGoalFx(kicker);
-            /* Old text banner suppressed — pens-flash shows GOAL! instead */
+            /* 3D pitch burst only — the old "⚽ GOAL! 🎉" splashWord is
+               suppressed, pens-flash shows GOAL! instead */
+            if (typeof goalBurst !== 'undefined') {
+                const vt = vTeam(kicker);
+                goalBurst.material.color.set(vt === 'you' ? COL.you : COL.cpu);
+            }
+            if (typeof FIRE !== 'undefined') FIRE.goal = 1e-4;
         } else if (SO.result.outcome === 'SAVED') {
             const k = soDefKeeper();
             Sfx.save(); shake(.25);
