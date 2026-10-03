@@ -3673,6 +3673,15 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     const diffMul = isWorld ? 1.62 : (isPro ? 1.5 : (isExtreme ? 1.4 : (isHard ? 1.28 : 1.18)));
                     keeperReach *= diffMul;
                     keeperDiveSpeed *= (KEEPER_SCALE * diffMul);
+                    /* Exceptional saves: on Pro/World Class, occasionally (15%/25%)
+                       the keeper finds an extra yard — a spectacular full-stretch
+                       dive. The dive target extends visibly, so the save still
+                       corresponds to the keeper's rendered movement. */
+                    const exceptionalChance = isWorld ? 0.25 : (isPro ? 0.15 : 0);
+                    if (exceptionalChance > 0 && Math.random() < exceptionalChance) {
+                        keeperReach *= 1.35;
+                        keeperDiveSpeed *= 1.2;
+                    }
                 } else {
                     /* the human's keeper is faster and more assured too — a
                        modest flat boost, not the difficulty multiplier: he
