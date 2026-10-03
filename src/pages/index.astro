@@ -893,97 +893,108 @@ import '../styles/global.css';
     </div>
 
     <div class="screen" id="screen-rondo" hidden>
-        <div class="card card-pvp" role="dialog" aria-modal="true" aria-labelledby="rondo-title">
-            <div class="sheet-head pvp-sheet-head">
-                <div class="pvp-title-wrap">
+        <div class="rondo-dialog" role="dialog" aria-modal="true" aria-labelledby="rondo-title">
+            <header class="rondo-hero">
+                <div class="rondo-hero-top">
                     <h2 id="rondo-title">Rondo</h2>
-                    <span class="pvp-badge-live">LIVE</span>
+                    <span class="rondo-live"><i></i>LIVE</span>
+                    <button class="rondo-close" id="btn-rondo-close" type="button" aria-label="Close Rondo">✕</button>
                 </div>
-                <button type="button" class="btn btn-icon-xs" id="btn-rondo-close" aria-label="Close Rondo">✕</button>
-            </div>
+                <p class="rondo-lede">The <b>circle passes</b>. The <b>middle guesses</b> the receiver. Guess right and the passer takes your place.</p>
+            </header>
 
-            <p class="rondo-blurb">Circle keep-away, online. 4–10 players: the circle passes, the middle
-                guesses the receiver. Guess right and the passer takes your place.</p>
+            <div class="rondo-body">
+                <div class="rondo-name-tabs">
+                    <div>
+                        <label class="rondo-label" for="rondo-name">Your name</label>
+                        <div class="rondo-name-row">
+                            <input id="rondo-name" class="rondo-input" readonly maxlength="16" autocomplete="off" spellcheck="false" aria-readonly="true">
+                            <button class="rondo-sq" id="btn-rondo-shuffle" type="button" aria-label="Random name">🎲</button>
+                        </div>
+                    </div>
+                    <div class="rondo-tabs" id="rondo-tabs" role="tablist">
+                        <button class="rondo-tab" role="tab" id="tab-rondo-create" aria-selected="true" aria-controls="pane-rondo-create">Create room</button>
+                        <button class="rondo-tab" role="tab" id="tab-rondo-join" aria-selected="false" aria-controls="pane-rondo-join">Join room</button>
+                    </div>
+                </div>
 
-            <!-- Identity: every seat needs a name before it can host or join. -->
-            <div class="pvp-section" id="rondo-identity">
-                <span class="pvp-section-title">Your Name</span>
-                <input type="text" id="rondo-name" class="pvp-input" placeholder="e.g. Striker99"
-                    maxlength="16" autocomplete="nickname" />
-            </div>
-
-            <div class="pvp-tabs" id="rondo-tabs" role="tablist">
-                <button type="button" class="pvp-tab active" id="tab-rondo-create" role="tab" aria-selected="true">Create Room</button>
-                <button type="button" class="pvp-tab" id="tab-rondo-join" role="tab" aria-selected="false">Join Room</button>
-            </div>
-
-            <!-- Create pane -->
-            <div class="pvp-pane" id="pane-rondo-create">
-                <div class="pvp-section">
-                    <span class="pvp-section-title">Host a Rondo Room</span>
+                <!-- Create pane -->
+                <section class="rondo-panel" id="pane-rondo-create" role="tabpanel" aria-labelledby="tab-rondo-create">
                     <div id="rondo-create-idle">
-                        <button type="button" class="btn btn-primary btn-block" id="btn-rondo-create">Create Room</button>
+                        <button type="button" class="rondo-btn rondo-kick rondo-block" id="btn-rondo-create">⚽ Create Room</button>
                     </div>
                     <div id="rondo-create-active" hidden>
-                        <div class="room-code-display">
-                            <span class="room-code-label">ROOM CODE</span>
-                            <span class="room-code-num" id="rondo-room-code-val">----</span>
-                        </div>
-                        <div class="pvp-share-row">
-                            <button type="button" class="btn btn-secondary btn-sm" id="btn-rondo-copy-code">Copy Code</button>
-                            <button type="button" class="btn btn-ghost-sm" id="btn-rondo-cancel-host">Cancel</button>
-                        </div>
-                        <div class="rondo-cpu-row">
-                            <span class="pvp-setting-label">Computer players</span>
-                            <div class="rondo-stepper">
-                                <button type="button" class="btn btn-ghost-sm" id="btn-rondo-cpu-minus" aria-label="Fewer computer players">−</button>
-                                <span class="rondo-cpu-count" id="rondo-cpu-count">0</span>
-                                <button type="button" class="btn btn-ghost-sm" id="btn-rondo-cpu-plus" aria-label="More computer players">+</button>
+                        <div class="rondo-board">
+                            <small>ROOM CODE</small>
+                            <div class="rondo-code" id="rondo-room-code-val" aria-label="Room code"></div>
+                            <div class="rondo-board-actions">
+                                <button class="rondo-btn rondo-on-dark" id="btn-rondo-copy-code" type="button">⧉ Copy</button>
+                                <button class="rondo-btn rondo-on-dark" id="btn-rondo-share" type="button">↗ Share</button>
                             </div>
                         </div>
-                        <p class="rondo-cpu-hint">No friends online? Add computers to reach 4–10 players. Computers always play at Extreme level.</p>
-                    </div>
-                </div>
-            </div>
 
-            <!-- Join pane -->
-            <div class="pvp-pane" id="pane-rondo-join" hidden>
-                <div class="pvp-section">
-                    <span class="pvp-section-title">Join with a Code</span>
-                    <div class="pvp-join-row">
-                        <input type="text" id="rondo-join-code" class="pvp-input pvp-code-input"
-                            placeholder="CODE" maxlength="4" autocomplete="off"
-                            style="text-transform: uppercase;" />
-                        <button type="button" class="btn btn-primary" id="btn-rondo-join">Join</button>
+                        <div class="rondo-bots">
+                            <div>
+                                <strong>Computer players</strong>
+                                <span class="rondo-sub">No friends online? Fill the circle with bots (always Extreme level).</span>
+                            </div>
+                            <div class="rondo-stepper">
+                                <button class="rondo-step" id="btn-rondo-cpu-minus" type="button" aria-label="Fewer computer players">−</button>
+                                <output id="rondo-cpu-count" aria-live="polite">0</output>
+                                <button class="rondo-step" id="btn-rondo-cpu-plus" type="button" aria-label="More computer players">+</button>
+                            </div>
+                        </div>
                     </div>
-                    <div id="rondo-join-active" hidden>
-                        <div class="pvp-share-row">
-                            <button type="button" class="btn btn-ghost-sm" id="btn-rondo-leave">Leave Room</button>
+                </section>
+
+                <!-- Join pane -->
+                <section class="rondo-panel" id="pane-rondo-join" role="tabpanel" aria-labelledby="tab-rondo-join" hidden>
+                    <label class="rondo-label" for="rondo-join-code">Room code</label>
+                    <input class="rondo-join-input" id="rondo-join-code" maxlength="4" placeholder="····" autocomplete="off" spellcheck="false">
+                    <p class="rondo-hint">Ask the host for their 4-letter code.</p>
+                    <div class="rondo-foot">
+                        <div class="rondo-actions">
+                            <button class="rondo-btn rondo-ghost-red" id="btn-rondo-leave" type="button">Cancel</button>
+                            <button class="rondo-btn rondo-kick" id="btn-rondo-join" type="button" disabled>⚽ Join match</button>
+                        </div>
+                    </div>
+                    <div id="rondo-join-active" hidden></div>
+                </section>
+
+                <!-- Shared roster: lineup shirts, host controls / guest wait -->
+                <div id="rondo-roster-box" hidden>
+                    <div class="rondo-lineup-head">
+                        <span class="rondo-label" style="margin:0">Starting lineup</span>
+                        <span class="rondo-count"><b id="rondo-player-count-num">1</b>/10 · min 4</span>
+                    </div>
+                    <div class="rondo-pitch"><div class="rondo-team" id="rondo-player-list"></div></div>
+                    <div class="rondo-legend">
+                        <span><i style="background:#fff;border:1px solid #bbb"></i>You</span>
+                        <span><i style="background:#2f80ed"></i>Friends</span>
+                        <span><i style="background:#ffd23f"></i>Bots</span>
+                    </div>
+                    <p class="rondo-hint" id="rondo-roster-hint">Need at least 4 players to start.</p>
+                    <div class="rondo-foot">
+                        <div class="rondo-actions">
+                            <button class="rondo-btn rondo-ghost-red" id="btn-rondo-cancel-host" type="button">Cancel</button>
+                            <span id="rondo-host-controls" hidden>
+                                <button class="rondo-btn rondo-kick rondo-block" id="btn-rondo-start" type="button" disabled>⚽ Kick off</button>
+                            </span>
+                        </div>
+                        <div id="rondo-guest-wait" hidden>
+                            <div class="rondo-wait-box">
+                                <span class="rondo-spinner"></span>
+                                <span>Waiting for the host to start...</span>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- The roster: who is in, and whether the room can start. -->
-            <div class="pvp-section" id="rondo-roster-box" hidden>
-                <span class="pvp-section-title">Players <span id="rondo-player-count" class="pvp-count">(0/10)</span></span>
-                <div class="rondo-player-list" id="rondo-player-list"></div>
-                <p class="rondo-hint" id="rondo-roster-hint">Need at least 4 players to start.</p>
-                <div id="rondo-host-controls" hidden>
-                    <button type="button" class="btn btn-primary btn-block" id="btn-rondo-start" disabled>START RONDO</button>
+                <!-- Network Status Bar -->
+                <div class="rondo-statusbar">
+                    <span class="rondo-status-dot" id="rondo-status-dot"></span>
+                    <span id="rondo-status-msg">Ready</span>
                 </div>
-                <div id="rondo-guest-wait" hidden>
-                    <div class="pvp-wait-box">
-                        <span class="pvp-spinner"></span>
-                        <span>Waiting for the host to start...</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Network Status Bar -->
-            <div class="pvp-status-bar">
-                <span class="status-dot" id="rondo-status-dot"></span>
-                <span id="rondo-status-msg">Ready</span>
             </div>
         </div>
     </div>

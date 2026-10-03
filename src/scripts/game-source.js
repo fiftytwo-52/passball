@@ -597,7 +597,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        It is now plain Lambert white, scaled up a touch, wearing a dark rim so it
        cannot vanish against the paint, with a beacon ring on the turf under it.
        All three are light-independent on purpose — see the material's comment. */
-    const BALL_VIS = 1.16;        // drawn this much larger than it is, to be findable
+    const BALL_VIS = 0.98;        // drawn slightly larger than it is, to be findable
     const BALL_PING = 1.25;       // seconds per beacon ring
     /* Six attacking lanes, one per outfielder. Slot `i` sits LANE_OFFSETS[i]
        across the pitch, LANE_DEPTHS[i] of the way back towards the side's own
@@ -8240,6 +8240,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     let rondoLobby = null;      // { isHost, code } while in the lobby
     let rondoMeshes = {};       // playerId -> { group, label }
     let rondoBallAnim = null;   // { from, to, t, dur, onDone }
+
     const rondoRaycaster = new THREE.Raycaster();
 
     const RONDO_GAME_SECONDS = 180;
@@ -8281,11 +8282,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     }
 
     function openRondoLobby() {
+        /* The handle is dealt fresh every visit — the field is read-only. */
         const input = document.getElementById('rondo-name');
-        if (input && (!input.value || !input.value.trim() || input.value === 'Player')) {
-            input.value = generateTactikName();
-        }
-        pushScreen('rondo', { focus: '#rondo-name' });
+        if (input) input.value = generateTactikName();
+        pushScreen('rondo', {});
         setupRondoUI();
     }
 
@@ -8364,10 +8364,33 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (btnCopy) btnCopy.addEventListener('click', () => {
             const codeEl = document.getElementById('rondo-room-code-val');
             const code = codeEl ? codeEl.textContent.trim() : '';
-            if (code && code !== '----' && navigator.clipboard) {
+            if (code && navigator.clipboard) {
                 navigator.clipboard.writeText(code).catch(() => {});
                 rondoSetStatus('Code copied.');
             }
+        });
+
+        /* Share the invite link: native share sheet where available, else copy. */
+        const btnShare = document.getElementById('btn-rondo-share');
+        if (btnShare) btnShare.addEventListener('click', async () => {
+            const code = (rondoLobby && rondoLobby.code) || '';
+            const url = location.origin + location.pathname + '?room=' + code;
+            if (navigator.share) {
+                try { await navigator.share({ title: 'Join my Rondo', text: `Rondo room ${code}`, url }); } catch (e) {}
+                return;
+            }
+            if (navigator.clipboard) {
+                try { await navigator.clipboard.writeText(url); } catch (e) {}
+                rondoSetStatus('Invite link copied.');
+            }
+        });
+
+        /* The name is dealt, not typed: a random tactik handle on open, and
+           the dice re-deals it. */
+        const btnShuffle = document.getElementById('btn-rondo-shuffle');
+        if (btnShuffle) btnShuffle.addEventListener('click', () => {
+            const input = document.getElementById('rondo-name');
+            if (input) input.value = generateTactikName();
         });
 
         /* Cancel, Leave Room and the in-game Leave all give something up: the
@@ -8425,7 +8448,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     function rondoRenderRoster(players) {
         const box = document.getElementById('rondo-roster-box');
         const list = document.getElementById('rondo-player-list');
-        const count = document.getElementById('rondo-player-count');
+        const countNum = document.getElementById('rondo-player-count-num');
         const hint = document.getElementById('rondo-roster-hint');
         const hostCtl = document.getElementById('rondo-host-controls');
         const guestWait = document.getElementById('rondo-guest-wait');
@@ -8433,29 +8456,35 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (!box || !list) return;
 
         box.hidden = false;
-        list.innerHTML = '';
-        players.forEach((p, i) => {
-            const row = document.createElement('div');
-            row.className = 'rondo-player-row'
-                + (rondoNet && p.id === rondoNet.myId ? ' me' : '')
-                + (p.cpu ? ' cpu' : '');
-            const dot = document.createElement('span');
-            dot.className = 'rondo-player-dot';
-            dot.style.background = '#' + new THREE.Color(rondoKitColor(i)).getHexString();
-            const nm = document.createElement('span');
-            nm.className = 'rondo-player-name';
-            nm.textContent = p.name + (p.host ? ' (host)' : '') + (p.cpu ? ' 🤖' : '');
-            row.appendChild(dot);
-            row.appendChild(nm);
-            list.appendChild(row);
-        });
+        /* Lineup shirts on the pitch: you, friends, bots, then open slots. */
+        const SHIRT = 'M21 6 L8 13 L2 30 L14 34 L16 28 L16 58 L48 58 L48 28 L50 34 L62 30 L56 13 L43 6 C41 11 37 14 32 14 C27 14 23 11 21 6 Z';
+        const meId = rondoNet && rondoNet.myId;
+        let html = '';
+        for (let i = 0; i < RONDO_MAX_PLAYERS; i++) {
+            const p = players[i];
+            let cls = 'rondo-p rondo-open', fill = 'none', num = i + 1, tag = 'Open';
+            let stroke = '#fff', dash = ' stroke-dasharray="5 4"';
+            if (p) {
+                const isMe = p.id === meId;
+                cls = 'rondo-p' + (isMe ? ' rondo-you' : p.cpu ? ' rondo-cpu' : ' rondo-human');
+                fill = isMe ? '#ffffff' : p.cpu ? '#ffd23f' : '#2f80ed';
+                tag = (p.name || ('P' + (i + 1))).toUpperCase();
+                stroke = 'rgba(0,0,0,.18)'; dash = '';
+            }
+            const numColor = fill === '#ffffff' ? '#0f6a33' : fill === '#ffd23f' ? '#3a2c00' : '#fff';
+            html += `<div class="${cls}"><div class="rondo-shirt">`
+                + `<svg viewBox="0 0 64 64"><path d="${SHIRT}" fill="${fill}" stroke="${stroke}" stroke-width="2"${dash}/></svg>`
+                + `<b style="color:${numColor}">${num}</b></div>`
+                + `<span class="rondo-tag">${tag}</span></div>`;
+        }
+        list.innerHTML = html;
 
         const n = players.length;
-        if (count) count.textContent = `(${n}/${RONDO_MAX_PLAYERS})`;
+        if (countNum) countNum.textContent = n;
         const canStart = n >= RONDO_MIN_PLAYERS;
         if (hint) {
             hint.textContent = canStart
-                ? (rondoLobby && rondoLobby.isHost ? 'Ready — press START RONDO.' : 'The host can start the game.')
+                ? (rondoLobby && rondoLobby.isHost ? 'Squad ready — kick off when you like!' : 'The host can start the game.')
                 : `Need at least ${RONDO_MIN_PLAYERS} players to start (${n}/${RONDO_MIN_PLAYERS}).`;
         }
         const isHost = !!(rondoLobby && rondoLobby.isHost);
@@ -8550,7 +8579,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         try {
             const code = await rondoNet.hostRoom(name);
             rondoLobby = { isHost: true, code };
-            document.getElementById('rondo-room-code-val').textContent = code;
+            const codeEl = document.getElementById('rondo-room-code-val');
+            if (codeEl) codeEl.innerHTML = [...code].map(c => `<span>${c}</span>`).join('');
             document.getElementById('rondo-create-idle').hidden = true;
             document.getElementById('rondo-create-active').hidden = false;
             rondoSetStatus(`Room ${code} open — share the code.`, true);
@@ -9255,8 +9285,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     /** Build the rondo scene: N-1 in a circle, one in the middle. */
     function rondoBeginLocal(players, circle, middle, possessor, timeLeft) {
-        // Zoom camera slightly in rondo mode for optimal close-up keep-away framing
-        view.zoom = 1.35;
+        // Zoom camera in rondo mode for a close-up keep-away framing
+        view.zoom = 1.65;
         fitView();
         // Leave the lobby screen, show the pitch with the rondo HUD.
         hideRondoOver();
@@ -9519,14 +9549,16 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
         /* The winner collects the ball with a smooth flight from the touch
            point to their feet (it tracks them while they walk to their new
-           seat) instead of the ball teleporting there in a blink. */
+           seat) instead of the ball teleporting there in a blink. A low,
+           quick settle reads as a natural control, not a new pass. */
         const winnerMesh = rondoMeshes[prevMiddle];
         if (winnerMesh && typeof ballMesh !== 'undefined' && ballMesh && typeof THREE !== 'undefined') {
             rondoBallAnim = {
                 from: ballMesh.position.clone(),
                 to: new THREE.Vector3(worldX(winnerMesh.gx), 0.62, worldZ(winnerMesh.gy)),
                 t: 0,
-                dur: 0.5,
+                dur: 0.35,
+                arcH: 0.55,
                 onDone: null,
                 canTouch: false,
                 touched: false,
@@ -9663,7 +9695,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 if (fm) an.to.set(worldX(fm.gx), 0.62, worldZ(fm.gy));
             }
             ballMesh.position.lerpVectors(an.from, an.to, e);
-            ballMesh.position.y = 0.62 + Math.sin(Math.PI * k) * 1.5;
+            ballMesh.position.y = 0.62 + Math.sin(Math.PI * k) * (an.arcH !== undefined ? an.arcH : 1.5);
 
             // SENSITIVE TOUCH DETECTION:
             const midMesh = rondoMeshes[rondo.middle];
@@ -9679,11 +9711,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                         { x: targetMesh.gx, y: targetMesh.gy }
                     );
                     const ballT = Math.min(1, Math.max(0, an.t));
-                    if (proj.dist < 4.0 && proj.t >= 0.05 && proj.t <= 0.95 && Math.abs(ballT - proj.t) < 0.28) {
+                    // Tight interception window: the hunter must genuinely be
+                    // on the lane, not fetching it from far away.
+                    if (proj.dist < 2.5 && proj.t >= 0.05 && proj.t <= 0.95 && Math.abs(ballT - proj.t) < 0.28) {
                         laneTouched = true;
                     }
                 }
-                if (dWorld < 4.8 || laneTouched) {
+                if (dWorld < 3.0 || laneTouched) {
                     an.touched = true;
                     midMesh.lunge = 0.45;
                     playRondoWhistle(false);
@@ -9738,7 +9772,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     // Weave waypoints: alternate the lateral offset every beat
                     // so the path zigzags instead of beelining.
                     const now = performance.now() / 1000;
-                    if (now - (mm.weaveT || 0) > 1.3) {
+                    if (now - (mm.weaveT || 0) > 1.1) {
                         mm.weaveT = now;
                         mm.weaveSide = (mm.weaveSide || 1) * -1;
                     }
@@ -9747,10 +9781,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     const d = Math.hypot(dx, dy) || 1;
                     const lean = Math.min(6, d);
                     const px = -dy / d, py = dx / d;
-                    const lat = (mm.weaveSide || 1) * 3.6;
+                    const lat = (mm.weaveSide || 1) * 3.8;
                     mm.targetGx = 50 + (dx / d) * lean + px * lat;
                     mm.targetGy = 50 + (dy / d) * lean + py * lat;
-                    mm.speed = 2.6;
+                    mm.speed = 5;
                 }
             }
         }
@@ -9774,11 +9808,16 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const dist = Math.hypot(dx, dy);
             const isMoving = dist > 0.15;
 
-            if (isMoving) {
-                const step = Math.min(dist, (m.speed || 14) * dt);
+            // Natural locomotion: ease up to speed and brake into the stop
+            // instead of teleporting between velocities.
+            const desired = isMoving ? (m.speed || 14) * Math.min(1, dist / 3) : 0;
+            m.vel = (m.vel || 0) + (desired - (m.vel || 0)) * Math.min(1, dt * 6);
+            const gliding = m.vel > 0.4 && dist > 0.05;
+            if (gliding) {
+                const step = Math.min(dist, m.vel * dt);
                 m.gx += (dx / dist) * step;
                 m.gy += (dy / dist) * step;
-                m.walk = (m.walk || 0) + (m.speed || 14) * dt * 0.28;
+                m.walk = (m.walk || 0) + m.vel * dt * 0.28;
             }
 
             m.group.position.x = worldX(m.gx);
@@ -9823,8 +9862,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     limbs.armL.rotation.x = 0.9;
                     limbs.armR.rotation.x = -0.9;
                     m.group.position.y = -0.15;
-                } else if (isMoving) {
-                    const pace = Math.min(1.4, (m.speed || 14) / 14);
+                } else if (gliding) {
+                    const pace = Math.min(1.4, (m.vel || 14) / 14);
                     const s = Math.sin(m.walk * 7) * 0.85 * pace;
                     limbs.legL.rotation.x = s;
                     limbs.legR.rotation.x = -s;
