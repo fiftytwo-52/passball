@@ -9717,8 +9717,15 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const targetMesh = rondoMeshes[an.target];
             if (midMesh && an.canTouch && !an.touched) {
                 const dWorld = midMesh.group.position.distanceTo(ballMesh.position);
+                /* Once the ball is at the receiver's feet the pass is done —
+                   the middle must win it in the lane, never by wireless pull
+                   after arrival. */
+                const distToTarget = targetMesh
+                    ? targetMesh.group.position.distanceTo(ballMesh.position)
+                    : 999;
+                const arrived = distToTarget < 4.5;
                 let laneTouched = false;
-                if (passerMesh && targetMesh) {
+                if (passerMesh && targetMesh && !arrived) {
                     const proj = projectOnSegment(
                         { x: midMesh.gx, y: midMesh.gy },
                         { x: passerMesh.gx, y: passerMesh.gy },
@@ -9731,7 +9738,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                         laneTouched = true;
                     }
                 }
-                if (dWorld < 3.0 || laneTouched) {
+                if (!arrived && (dWorld < 3.0 || laneTouched)) {
                     an.touched = true;
                     midMesh.lunge = 0.45;
                     playRondoWhistle(false);
