@@ -597,7 +597,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        It is now plain Lambert white, scaled up a touch, wearing a dark rim so it
        cannot vanish against the paint, with a beacon ring on the turf under it.
        All three are light-independent on purpose — see the material's comment. */
-    const BALL_VIS = 0.98;        // drawn slightly larger than it is, to be findable
+    const BALL_VIS = 0.80;        // compact ball that sits naturally at the feet
     const BALL_PING = 1.25;       // seconds per beacon ring
     /* Six attacking lanes, one per outfielder. Slot `i` sits LANE_OFFSETS[i]
        across the pitch, LANE_DEPTHS[i] of the way back towards the side's own
@@ -8240,6 +8240,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     let rondoLobby = null;      // { isHost, code } while in the lobby
     let rondoMeshes = {};       // playerId -> { group, label }
     let rondoBallAnim = null;   // { from, to, t, dur, onDone }
+    let rondoCircleLine = null; // the standing-circle pitch marking
 
     const rondoRaycaster = new THREE.Raycaster();
 
@@ -9333,8 +9334,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     function rondoRecoverCirclePlayers(excludeId) {
         if (!rondo) return;
+        const me = rondoMyId();
         rondo.circle.forEach(id => {
             if (id === excludeId) return;
+            /* The human player never auto-walks: they move only on their own
+               commands (draw / WASD). Computers re-seat themselves. */
+            if (id === me) return;
             const m = rondoMeshes[id];
             if (m && m.homeGx !== undefined) {
                 m.targetGx = m.homeGx;
@@ -9419,6 +9424,26 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             };
         });
 
+        /* The standing circle: a pitch marking showing where the ring stands. */
+        if (rondoCircleLine) {
+            world.remove(rondoCircleLine);
+            rondoCircleLine.geometry.dispose();
+            rondoCircleLine.material.dispose();
+        }
+        {
+            const pts = [];
+            const segs = 64;
+            const cx = worldX(50), cz = worldZ(50);
+            for (let i = 0; i <= segs; i++) {
+                const a = (i / segs) * Math.PI * 2;
+                pts.push(new THREE.Vector3(cx + Math.cos(a) * RONDO_WORLD_R, 0.06, cz + Math.sin(a) * RONDO_WORLD_R));
+            }
+            const geo = new THREE.BufferGeometry().setFromPoints(pts);
+            const mat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
+            rondoCircleLine = new THREE.Line(geo, mat);
+            world.add(rondoCircleLine);
+        }
+
         rondoLayout();
         rondoUpdateClock(timeLeft);
         rondoOnTurn(0, possessor, middle);
@@ -9466,16 +9491,21 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             }
         }
         const n = rondo.circle.length;
+        const me = rondoMyId();
         rondo.circle.forEach((id, i) => {
             const m = rondoMeshes[id];
             if (!m) return;
             const a = (i / n) * Math.PI * 2 - Math.PI / 2;
             m.homeGx = 50 + Math.cos(a) * RONDO_RX;
             m.homeGy = 50 + Math.sin(a) * RONDO_RY;
-            m.targetGx = m.homeGx;
-            m.targetGy = m.homeGy;
+            /* Human circle players hold their ground — only their own commands
+               move them. Computers walk to their seats. */
+            if (id !== me) {
+                m.targetGx = m.homeGx;
+                m.targetGy = m.homeGy;
+                m.speed = 10;
+            }
             m.isMiddle = false;
-            m.speed = 10;
             // Circle kit: preserve player's own unique kit color!
             const c = m.color || rondoKitColor(i);
             m.kitMat.color.setHex(c);
@@ -9562,6 +9592,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         }
         rondoMeshes = {};
         rondoBallAnim = null;
+        if (rondoCircleLine) {
+            world.remove(rondoCircleLine);
+            rondoCircleLine.geometry.dispose();
+            rondoCircleLine.material.dispose();
+            rondoCircleLine = null;
+        }
         if (rondoPassAimLine) rondoPassAimLine.visible = false;
         if (rondoDefAimLine) rondoDefAimLine.visible = false;
         if (rondoMoveAimLine) rondoMoveAimLine.visible = false;

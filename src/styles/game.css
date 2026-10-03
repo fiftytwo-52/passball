@@ -5485,15 +5485,17 @@ body {
     display: inline-flex;
     justify-content: center;
     font-variant-numeric: tabular-nums;
-    min-width: 2ch;
+    font-feature-settings: "tnum" 1;
 }
-.rondo-seg-t b { color: var(--rh-yellow); }
+/* Fixed widths: the pill never resizes as numbers tick. */
+.rondo-seg-t b { width: 4.5ch; color: var(--rh-yellow); }
+.rondo-seg-p b { width: 2.5ch; }
+.rondo-seg-m b { width: 4.5ch; color: #ff9cc9; }
 .rondo-seg-m i {
     width: 10px; height: 10px; border-radius: 50%;
     background: var(--rh-pink);
     box-shadow: 0 0 0 3px rgba(255, 45, 138, 0.35);
 }
-.rondo-seg-m b { color: #ff9cc9; }
 .rondo-seg small {
     font: 700 11px/1 var(--rh-display);
     letter-spacing: 0.14em;
