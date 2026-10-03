@@ -10145,12 +10145,14 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.circle[seat] = prevMiddle;
             rondo.middle = passer;
             rondo.possessor = prevMiddle;
-            /* New middle heads to center first before the press resumes */
+            /* New middle heads to center first before the press resumes.
+               Clear any stale defensive run so it can't pull them off course. */
+            rondo.defPick = null;
             rondo.middleCentering = true;
             rondo.centeringSince = Date.now();
             /* If the new middle is human, prompt them to move to center manually. */
             if (rondo.middle === rondoMyId()) {
-                rondoBanner('mid', '🎯', "You're in the middle", 'Move to the center to resume play', true);
+                rondoBanner('mid', '🎯', "You're in the middle", 'Heading to the center…', true);
             }
         }
         /* Streak resets, new middle's clock starts. */
@@ -10235,12 +10237,14 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.circle[seat] = prevMiddle;
             rondo.middle = passer;
             rondo.possessor = prevMiddle;
-            /* New middle heads to center first before the press resumes */
+            /* New middle heads to center first before the press resumes.
+               Clear any stale defensive run so it can't pull them off course. */
+            rondo.defPick = null;
             rondo.middleCentering = true;
             rondo.centeringSince = Date.now();
             /* If the new middle is human, prompt them to move to center manually. */
             if (rondo.middle === rondoMyId()) {
-                rondoBanner('mid', '🎯', "You're in the middle", 'Move to the center to resume play', true);
+                rondoBanner('mid', '🎯', "You're in the middle", 'Heading to the center…', true);
             }
         }
 
@@ -10332,22 +10336,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 if (dc < 3 || timedOut) {
                     rondo.middleCentering = false;
                 } else {
-                    const cHuman = rondo.middle === rondoMyId();
-                    if (!cHuman) {
-                        /* CPU walks to centre on its own. */
-                        cmm.targetGx = 50;
-                        cmm.targetGy = 50;
-                        cmm.speed = 12;
-                    } else if (rondo.defPick && typeof rondo.defPick.targetGx === 'number') {
-                        /* Human drew a run line — honour it (they may walk to
-                           the centre manually). */
-                        cmm.targetGx = rondo.defPick.targetGx;
-                        cmm.targetGy = rondo.defPick.targetGy;
-                        cmm.speed = 12;
-                    }
-                    /* Human without a line holds position (prompted by banner
-                       to move to the centre manually). Failsafe above prevents
-                       a permanent freeze. */
+                    /* The new middle walks to the centre first — human or CPU.
+                       The match does not restart until they arrive. */
+                    cmm.targetGx = 50;
+                    cmm.targetGy = 50;
+                    cmm.speed = 12;
                 }
             } else {
                 rondo.middleCentering = false;
