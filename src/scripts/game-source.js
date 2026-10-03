@@ -1191,7 +1191,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const gw = PITCH.goalW * KX;
         const half = gw / 2, H = 3.0, depth = 2.2;
         const post = (x, z) => {
-            const m = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, H, 10), white);
+            const m = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, H, 12), white);
             m.position.set(x, H / 2, z);
             grp.add(m);
         };
@@ -1217,6 +1217,40 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             m.rotation.x = Math.atan2(depth * ZSTRETCH, H * .38);
             grp.add(m);
         });
+        /* Net: transparent grid so the ball stays visible through it.
+           Uses a canvas texture with a fine mesh pattern. */
+        const netCanvas = document.createElement('canvas');
+        netCanvas.width = netCanvas.height = 64;
+        const ng = netCanvas.getContext('2d');
+        ng.strokeStyle = 'rgba(255,255,255,0.55)';
+        ng.lineWidth = 1.5;
+        for (let i = 0; i <= 64; i += 8) {
+            ng.beginPath(); ng.moveTo(i, 0); ng.lineTo(i, 64); ng.stroke();
+            ng.beginPath(); ng.moveTo(0, i); ng.lineTo(64, i); ng.stroke();
+        }
+        const netTex = new THREE.CanvasTexture(netCanvas);
+        netTex.wrapS = netTex.wrapT = THREE.RepeatWrapping;
+        netTex.repeat.set(12, 3);
+        const netMat = new THREE.MeshBasicMaterial({
+            map: netTex, transparent: true, opacity: 0.35,
+            side: THREE.DoubleSide, depthWrite: false
+        });
+        /* Back net */
+        const backNet = new THREE.Mesh(new THREE.PlaneGeometry(gw, H), netMat);
+        backNet.position.set(0, H / 2, zBack);
+        grp.add(backNet);
+        /* Side nets */
+        [-1, 1].forEach(s => {
+            const sideNet = new THREE.Mesh(new THREE.PlaneGeometry(Math.abs(zBack - zLine), H), netMat);
+            sideNet.rotation.y = Math.PI / 2;
+            sideNet.position.set(s * half, H / 2, (zLine + zBack) / 2);
+            grp.add(sideNet);
+        });
+        /* Top net */
+        const topNet = new THREE.Mesh(new THREE.PlaneGeometry(gw, Math.abs(zBack - zLine)), netMat);
+        topNet.rotation.x = Math.PI / 2;
+        topNet.position.set(0, H, (zLine + zBack) / 2);
+        grp.add(topNet);
         world.add(grp);
         return grp;
     }
