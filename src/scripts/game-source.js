@@ -10095,6 +10095,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.possessor = prevMiddle;
             /* New middle heads to center first before the press resumes */
             rondo.middleCentering = true;
+            rondo.centeringSince = Date.now();
             /* If the new middle is human, prompt them to move to center manually. */
             if (rondo.middle === rondoMyId()) {
                 rondoBanner('mid', '🎯', "You're in the middle", 'Move to the center to resume play', true);
@@ -10184,6 +10185,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.possessor = prevMiddle;
             /* New middle heads to center first before the press resumes */
             rondo.middleCentering = true;
+            rondo.centeringSince = Date.now();
             /* If the new middle is human, prompt them to move to center manually. */
             if (rondo.middle === rondoMyId()) {
                 rondoBanner('mid', '🎯', "You're in the middle", 'Move to the center to resume play', true);
@@ -10264,6 +10266,39 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             }
             if (rondoNet && rondoNet.isHost && rondo.planTime <= 0) {
                 rondoHostResolveTurn();
+            }
+        }
+
+        // 0b. Centering: after a swap the new middle must reach the centre
+        // before the next turn. Checked per-frame (rondoLayout is not
+        // per-frame, so a check there alone deadlocks the game).
+        if (rondo.middleCentering) {
+            const cmm = rondoMeshes[rondo.middle];
+            if (cmm) {
+                const dc = Math.hypot((cmm.gx || 50) - 50, (cmm.gy || 50) - 50);
+                const timedOut = rondo.centeringSince && (Date.now() - rondo.centeringSince > 10000);
+                if (dc < 3 || timedOut) {
+                    rondo.middleCentering = false;
+                } else {
+                    const cHuman = rondo.middle === rondoMyId();
+                    if (!cHuman) {
+                        /* CPU walks to centre on its own. */
+                        cmm.targetGx = 50;
+                        cmm.targetGy = 50;
+                        cmm.speed = 12;
+                    } else if (rondo.defPick && typeof rondo.defPick.targetGx === 'number') {
+                        /* Human drew a run line — honour it (they may walk to
+                           the centre manually). */
+                        cmm.targetGx = rondo.defPick.targetGx;
+                        cmm.targetGy = rondo.defPick.targetGy;
+                        cmm.speed = 12;
+                    }
+                    /* Human without a line holds position (prompted by banner
+                       to move to the centre manually). Failsafe above prevents
+                       a permanent freeze. */
+                }
+            } else {
+                rondo.middleCentering = false;
             }
         }
 

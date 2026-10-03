@@ -3819,10 +3819,8 @@ body {
     width: 76px;
     height: 76px;
     object-fit: contain;
-    /* GIFs have black backgrounds baked in — screen blend makes black
-       transparent for the SENT sticker only. Selection buttons keep
-       their normal background. */
-    mix-blend-mode: screen;
+    /* Stickers are genuine transparent GIFs (background flood-filled to
+       transparent at build time), so no blend hack is needed. */
 }
 /* Cooldown sweep: a conic ring showing the 2s resend delay around the button. */
 .btn-emoji,
@@ -5081,19 +5079,21 @@ body {
 
 /* Rondo combined emoji+sticker popup (single button) */
 .rondo-combined {
-    position: absolute;
-    right: 0;
-    bottom: 62px;
+    /* Fixed overlay: never participates in page layout, so the pitch can
+       never be squeezed by the popup. Anchored above the trigger button. */
+    position: fixed;
+    right: 12px;
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 80px);
     display: flex;
     flex-direction: column;
     gap: 6px;
     padding: 8px;
     border-radius: 16px;
     background: #fff;
-    box-shadow: 0 4px 0 rgba(0, 40, 15, 0.28);
-    max-height: 280px;
+    box-shadow: 0 4px 0 rgba(0, 40, 15, 0.28), 0 12px 32px rgba(0, 0, 0, 0.35);
+    max-height: min(300px, 42dvh);
     overflow-y: auto;
-    z-index: 30;
+    z-index: 60;
 }
 .rondo-combined[hidden] { display: none; }
 .rondo-combined .rondo-rlist {
