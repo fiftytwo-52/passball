@@ -9027,8 +9027,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
         rondoNet.on('lobby', (players) => {
             rondoRenderRoster(players);
+            /* Belt-and-braces: force the guest count to match the roster. */
             const n = (players || []).length;
             const bots = (players || []).filter(p => p.cpu).length;
+            const countEl = document.getElementById('rondo-guest-count-num');
+            if (countEl) countEl.textContent = String(n);
             rondoSetStatus(`Squad updated — ${n} players${bots ? ` (${bots} bots)` : ''}.`, true);
         });
         rondoNet.on('status', (msg) => rondoSetStatus(msg, true));
