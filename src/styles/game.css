@@ -5869,3 +5869,322 @@ body {
     .pens-card h2 { font-size: 48px; }
     .pens-card { padding: 20px 22px; }
 }
+
+/* ===================== PVP LOBBY (Tactik redesign, responsive) ===================== */
+#screen-pvp .card-pvp {
+    width: min(480px, 94vw);
+    max-height: 92dvh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--tk-bg, #e8efe1);
+    color: var(--tk-tx, #0a2a1c);
+    border: 1.5px solid var(--tk-line, rgba(10,42,28,.22));
+    border-radius: 0;
+    box-shadow: 0 20px 48px rgba(0,0,0,.25);
+    padding: 0;
+    font-family: Barlow, system-ui, sans-serif;
+}
+/* Header */
+#screen-pvp .pvp-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px 10px;
+    margin: 0;
+    border-bottom: 1.5px solid var(--tk-line, rgba(10,42,28,.22));
+}
+#screen-pvp .pvp-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+#screen-pvp #pvp-title {
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 900;
+    font-size: 28px;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+    margin: 0;
+    color: var(--tk-tx, #0a2a1c);
+}
+#screen-pvp .pvp-badge-live {
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: .12em;
+    background: #d63a3a;
+    color: #fff;
+    padding: 3px 10px;
+    transform: skewX(-10deg);
+}
+#screen-pvp #btn-pvp-close {
+    all: unset;
+    cursor: pointer;
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border: 1.5px solid var(--tk-line, rgba(10,42,28,.22));
+    background: var(--tk-panel, rgba(255,255,255,.78));
+    color: var(--tk-tx, #0a2a1c);
+    font-size: 18px;
+    transform: skewX(-10deg);
+    box-sizing: border-box;
+}
+#screen-pvp #btn-pvp-close:focus-visible {
+    outline: 3px solid var(--tk-or, #f08c00);
+    outline-offset: 2px;
+}
+/* Tabs */
+#screen-pvp .pvp-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    padding: 12px 18px 0;
+}
+#screen-pvp .pvp-tab {
+    all: unset;
+    cursor: pointer;
+    padding: 10px;
+    text-align: center;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 800;
+    font-size: 18px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--tk-mute, #4d6b5b);
+    border-bottom: 3px solid transparent;
+    box-sizing: border-box;
+}
+#screen-pvp .pvp-tab.active {
+    color: var(--tk-tx, #0a2a1c);
+    border-bottom-color: var(--tk-or, #f08c00);
+}
+#screen-pvp .pvp-tab:focus-visible {
+    outline: 3px solid var(--tk-or, #f08c00);
+    outline-offset: -3px;
+}
+/* Panes */
+#screen-pvp .pvp-pane { padding: 14px 18px 18px; }
+#screen-pvp .pvp-section { margin-bottom: 14px; }
+#screen-pvp .pvp-section-title {
+    display: block;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 800;
+    font-size: 20px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    margin-bottom: 10px;
+    color: var(--tk-tx, #0a2a1c);
+}
+/* Settings */
+#screen-pvp .pvp-room-settings {
+    background: var(--tk-panel, rgba(255,255,255,.78));
+    border: 1.5px solid var(--tk-line, rgba(10,42,28,.22));
+    padding: 12px;
+    margin-bottom: 12px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+#screen-pvp .pvp-settings-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+#screen-pvp .pvp-setting-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--tk-mute, #4d6b5b);
+    margin-bottom: 6px;
+}
+#screen-pvp .pvp-setting-label svg { width: 14px; height: 14px; }
+#screen-pvp .setting-select,
+#screen-pvp .pvp-input {
+    width: 100%;
+    padding: 10px 12px;
+    font: 500 15px Barlow, system-ui, sans-serif;
+    color: var(--tk-tx, #0a2a1c);
+    background: var(--tk-bg, #e8efe1);
+    border: 1.5px solid var(--tk-line, rgba(10,42,28,.22));
+    border-radius: 0;
+    box-sizing: border-box;
+}
+#screen-pvp .setting-select:focus,
+#screen-pvp .pvp-input:focus {
+    outline: 3px solid var(--tk-or, #f08c00);
+    outline-offset: 1px;
+    border-color: var(--tk-or, #f08c00);
+}
+/* Buttons */
+#screen-pvp .btn-primary {
+    all: unset;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 52px;
+    padding: 12px;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 900;
+    font-size: 24px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    background: var(--tk-or, #f08c00);
+    color: #2a1500;
+    clip-path: polygon(14px 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
+    box-sizing: border-box;
+    text-align: center;
+}
+#screen-pvp .btn-primary:hover { transform: translateY(-1px); }
+#screen-pvp .btn-primary:focus-visible {
+    outline: 3px solid var(--tk-tx, #0a2a1c);
+    outline-offset: 2px;
+}
+#screen-pvp .btn-secondary,
+#screen-pvp .btn-ghost-sm {
+    all: unset;
+    cursor: pointer;
+    padding: 10px 18px;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 800;
+    font-size: 18px;
+    text-transform: uppercase;
+    border: 1.5px solid var(--tk-line, rgba(10,42,28,.22));
+    background: var(--tk-panel, rgba(255,255,255,.78));
+    color: var(--tk-tx, #0a2a1c);
+    box-sizing: border-box;
+    text-align: center;
+}
+#screen-pvp .btn-secondary:focus-visible,
+#screen-pvp .btn-ghost-sm:focus-visible {
+    outline: 3px solid var(--tk-or, #f08c00);
+    outline-offset: 2px;
+}
+/* Room code display */
+#screen-pvp .room-code-display {
+    text-align: center;
+    padding: 16px;
+    background: var(--tk-panel, rgba(255,255,255,.78));
+    border: 1.5px solid var(--tk-line, rgba(10,42,28,.22));
+    margin-bottom: 12px;
+}
+#screen-pvp .room-code-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--tk-mute, #4d6b5b);
+    margin-bottom: 6px;
+}
+#screen-pvp .room-code-num {
+    display: block;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 900;
+    font-size: 44px;
+    letter-spacing: .18em;
+    color: var(--tk-or, #f08c00);
+    margin-bottom: 8px;
+}
+#screen-pvp .pvp-summary-chip {
+    display: inline-block;
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--tk-line, rgba(10,42,28,.22));
+    padding: 4px 12px;
+    border-radius: 20px;
+}
+#screen-pvp .pvp-share-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+#screen-pvp .pvp-wait-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 14px;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 18px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--tk-mute, #4d6b5b);
+}
+#screen-pvp .pvp-spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid var(--tk-line, rgba(10,42,28,.22));
+    border-top-color: var(--tk-or, #f08c00);
+    border-radius: 50%;
+    animation: pvp-spin 0.8s linear infinite;
+}
+@keyframes pvp-spin { to { transform: rotate(360deg); } }
+/* Divider */
+#screen-pvp .pvp-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 800;
+    font-size: 16px;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--tk-mute, #4d6b5b);
+}
+#screen-pvp .pvp-divider::before,
+#screen-pvp .pvp-divider::after {
+    content: '';
+    flex: 1;
+    height: 1.5px;
+    background: var(--tk-line, rgba(10,42,28,.22));
+}
+#screen-pvp .pvp-divider span { padding: 0 4px; }
+/* Join form */
+#screen-pvp .pvp-join-form {
+    display: grid;
+    gap: 10px;
+}
+#screen-pvp .pvp-join-form .btn-primary { margin-top: 2px; }
+/* Quick match list */
+#screen-pvp .pvp-open-list {
+    display: grid;
+    gap: 8px;
+    max-height: 40dvh;
+    overflow-y: auto;
+}
+/* Mobile */
+@media (max-width: 480px) {
+    #screen-pvp .card-pvp { width: 94vw; max-height: 94dvh; }
+    #screen-pvp .pvp-sheet-head { padding: 12px 14px 8px; }
+    #screen-pvp #pvp-title { font-size: 24px; }
+    #screen-pvp .pvp-tabs { padding: 10px 14px 0; }
+    #screen-pvp .pvp-tab { font-size: 16px; padding: 8px; }
+    #screen-pvp .pvp-pane { padding: 12px 14px 14px; }
+    #screen-pvp .pvp-settings-row { grid-template-columns: 1fr; }
+    #screen-pvp .room-code-num { font-size: 36px; }
+    #screen-pvp .btn-primary { font-size: 20px; min-height: 48px; }
+    #screen-pvp .pvp-share-row { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+    #screen-pvp .pvp-spinner { animation: none; }
+    #screen-pvp .btn-primary:hover { transform: none; }
+}
