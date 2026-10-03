@@ -3031,6 +3031,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         over.setAttribute('aria-labelledby', 'confirm-title');
         over.setAttribute('aria-describedby', 'confirm-msg');
         over.innerHTML = `<div class="confirm-card">`
+            + `<div class="confirm-icon" aria-hidden="true">`
+            + `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`
+            + `</div>`
             + `<h2 class="confirm-title" id="confirm-title"></h2>`
             + `<p class="confirm-msg" id="confirm-msg"></p>`
             + `<div class="confirm-actions">`
@@ -3045,6 +3048,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         over.addEventListener('click', (e) => { if (e.target === over) settleConfirm(false); });
         confirmSheet = {
             over,
+            icon: over.querySelector('.confirm-icon'),
             title: over.querySelector('.confirm-title'),
             msg: over.querySelector('.confirm-msg'),
             cancel: over.querySelector('.confirm-cancel'),
@@ -3068,6 +3072,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         /* `danger: false` is for the rare prompt that is not throwing a game
            away — it keeps the neutral fill instead of the red one. */
         els.ok.classList.toggle('is-quiet', o.danger === false);
+        if (els.icon) els.icon.classList.toggle('is-quiet', o.danger === false);
         els.over.hidden = false;
         return new Promise(resolve => {
             confirmResolve = resolve;
@@ -9512,7 +9517,24 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (passerIsCpu) rondoCpuEmote('😱', passer);
         if (midIsCpu) setTimeout(() => rondoCpuEmote('🧤', prevMiddle), 350);
 
-        rondoBallAnim = null;
+        /* The winner collects the ball with a smooth flight from the touch
+           point to their feet (it tracks them while they walk to their new
+           seat) instead of the ball teleporting there in a blink. */
+        const winnerMesh = rondoMeshes[prevMiddle];
+        if (winnerMesh && typeof ballMesh !== 'undefined' && ballMesh && typeof THREE !== 'undefined') {
+            rondoBallAnim = {
+                from: ballMesh.position.clone(),
+                to: new THREE.Vector3(worldX(winnerMesh.gx), 0.62, worldZ(winnerMesh.gy)),
+                t: 0,
+                dur: 0.5,
+                onDone: null,
+                canTouch: false,
+                touched: false,
+                followId: prevMiddle
+            };
+        } else {
+            rondoBallAnim = null;
+        }
         rondoRecoverCirclePlayers(rondo.possessor);
         rondoLayout();
 
@@ -9635,6 +9657,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             an.t += dt / an.dur;
             const k = Math.min(1, an.t);
             const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+            // A collect-flight homes in on its moving winner while they walk.
+            if (an.followId) {
+                const fm = rondoMeshes[an.followId];
+                if (fm) an.to.set(worldX(fm.gx), 0.62, worldZ(fm.gy));
+            }
             ballMesh.position.lerpVectors(an.from, an.to, e);
             ballMesh.position.y = 0.62 + Math.sin(Math.PI * k) * 1.5;
 
@@ -9687,29 +9714,43 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         }
 
         // 2. Step and animate all rondo players
-        // 2a. The hunter in the middle leans very slowly toward the ball-holder
-        // while everyone plans. Two stages: first they walk all the way inside
-        // (rondoLayout's walk-in runs unimpeded), then the lean latches on and
-        // follows the holder, never far from the centre, so the circle keeps
-        // its advantage. The latch resets when a new hunter goes in.
+        // 2a. The hunter in the middle shuffles toward the ball-holder while
+        // everyone plans: a zigzag weave, like a defender on their toes, never
+        // far from the centre so the circle keeps its advantage. Two stages:
+        // first they walk all the way inside (rondoLayout's walk-in runs
+        // unimpeded), then the shuffle latches on. The latch resets when a new
+        // hunter goes in. Human hunters are never auto-moved — they draw and
+        // steer their own run.
         if (rondo.phase === 'plan') {
             const mm = rondoMeshes[rondo.middle];
             const pm = rondoMeshes[rondo.possessor];
-            if (mm && pm) {
+            const midIsCpu = rondo.players.some(p => p.id === rondo.middle && p.cpu);
+            if (mm && pm && midIsCpu) {
                 if (rondo._creepMid !== rondo.middle) {
                     rondo._creepMid = rondo.middle;
                     mm.creepOn = false;
+                    mm.weaveT = 0;
+                    mm.weaveSide = 1;
                 }
                 const dHome = Math.hypot(mm.gx - 50, mm.gy - 50);
                 if (dHome <= 2.5) mm.creepOn = true;
                 if (mm.creepOn) {
+                    // Weave waypoints: alternate the lateral offset every beat
+                    // so the path zigzags instead of beelining.
+                    const now = performance.now() / 1000;
+                    if (now - (mm.weaveT || 0) > 1.3) {
+                        mm.weaveT = now;
+                        mm.weaveSide = (mm.weaveSide || 1) * -1;
+                    }
                     const dx = pm.gx - mm.gx;
                     const dy = pm.gy - mm.gy;
                     const d = Math.hypot(dx, dy) || 1;
-                    const lean = Math.min(5, d);
-                    mm.targetGx = 50 + (dx / d) * lean;
-                    mm.targetGy = 50 + (dy / d) * lean;
-                    mm.speed = 1.4;
+                    const lean = Math.min(6, d);
+                    const px = -dy / d, py = dx / d;
+                    const lat = (mm.weaveSide || 1) * 3.6;
+                    mm.targetGx = 50 + (dx / d) * lean + px * lat;
+                    mm.targetGy = 50 + (dy / d) * lean + py * lat;
+                    mm.speed = 2.6;
                 }
             }
         }
@@ -9891,7 +9932,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         // Middle defender sprints along their chosen direction
         midMesh.targetGx = res.defTargetGx;
         midMesh.targetGy = res.defTargetGy;
-        midMesh.speed = 26; // High sprint speed
+        midMesh.speed = 16; // Committed sprint, but readable — not a blur
 
         // Receiver steps forward slightly to receive the ball
         let targetMesh = res.target ? rondoMeshes[res.target] : null;

@@ -4633,6 +4633,12 @@ body {
     flex-direction: column;
     gap: 4px;
     margin-bottom: 6px;
+    /* The roster scrolls instead of stretching the dialog: adding computers
+       never moves the popup or its buttons. */
+    max-height: 168px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
 }
 
 .rondo-player-list:empty {
@@ -4683,10 +4689,12 @@ body {
 }
 
 .rondo-cpu-count {
-    min-width: 22px;
+    width: 30px;
+    flex: none;
     text-align: center;
     font-weight: 700;
     font-size: 15px;
+    font-variant-numeric: tabular-nums;
     color: #ffb020;
 }
 
@@ -4972,13 +4980,32 @@ body {
     border: 1px solid var(--c-hairline);
     border-radius: var(--r-lg);
     box-shadow: var(--e-2);
-    padding: clamp(18px, 3.2vmin, 26px);
-    animation: confirm-pop 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+    padding: clamp(20px, 3.4vmin, 28px);
+    animation: confirm-pop 0.18s cubic-bezier(0.2, 0.9, 0.25, 1.2);
+    text-align: center;
+}
+
+.confirm-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    margin: 0 auto 12px;
+    color: var(--c-error);
+    background: rgba(220, 60, 60, 0.12);
+    border: 1px solid rgba(220, 60, 60, 0.25);
+}
+
+.confirm-icon.is-quiet {
+    color: var(--c-primary);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--c-hairline);
 }
 
 .confirm-title {
     margin: 0 0 8px;
-    font-size: clamp(1.05rem, 2.6vmin, 1.25rem);
+    font-size: clamp(1.1rem, 2.8vmin, 1.3rem);
     font-weight: 800;
     letter-spacing: -0.01em;
     line-height: 1.2;
@@ -4990,6 +5017,7 @@ body {
     font-size: var(--t-body-md-size);
     line-height: var(--t-body-md-leading);
     color: var(--c-body);
+    opacity: 0.85;
 }
 
 .confirm-msg[hidden] {
@@ -4999,15 +5027,20 @@ body {
 .confirm-actions {
     display: flex;
     gap: 10px;
-    margin-top: 18px;
+    margin-top: 20px;
 }
 
 .confirm-actions .btn {
     flex: 1 1 0;
-    height: 44px;
+    height: 46px;
     border-radius: var(--r-pill);
     font-size: var(--t-button-lg-size);
     font-weight: var(--t-button-lg-weight);
+    transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.confirm-actions .btn:active {
+    transform: scale(0.97);
 }
 
 /* The red one: the button that actually ends the game. */
