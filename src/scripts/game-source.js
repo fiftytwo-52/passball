@@ -10131,10 +10131,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (winnerMesh && typeof ballMesh !== 'undefined' && ballMesh && typeof THREE !== 'undefined') {
             rondoBallAnim = {
                 from: ballMesh.position.clone(),
-                to: new THREE.Vector3(worldX(winnerMesh.gx), 0.62, worldZ(winnerMesh.gy)),
+                to: new THREE.Vector3(worldX(winnerMesh.gx), 0.45, worldZ(winnerMesh.gy)),
                 t: 0,
                 dur: 0.35,
-                arcH: 0.25,
+                arcH: 0.05,
                 onDone: null,
                 canTouch: false,
                 touched: false,
@@ -10229,13 +10229,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         carrierMark.visible = false;
         carrierMarkScale = 0;
         rondoBallAnim = {
-            from: new THREE.Vector3(worldX(fromGx), 0.62, worldZ(fromGy)),
-            to: new THREE.Vector3(worldX(toGx), 0.62, worldZ(toGy)),
+            from: new THREE.Vector3(worldX(fromGx), 0.45, worldZ(fromGy)),
+            to: new THREE.Vector3(worldX(toGx), 0.45, worldZ(toGy)),
             t: 0,
             dur: dur || 0.65,
-            /* Low arc: a driven ground pass, not a lob. The ball stays near
-               the turf instead of flying. */
-            arcH: 0.22,
+            /* Ground pass: the ball rolls on the turf like real football,
+               not a lob. Tiny lift so the motion still reads. */
+            arcH: 0.05,
             onDone,
             canTouch: !!o.canTouch,
             passer: o.passer,
@@ -10311,10 +10311,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             // A collect-flight homes in on its moving winner while they walk.
             if (an.followId) {
                 const fm = rondoMeshes[an.followId];
-                if (fm) an.to.set(worldX(fm.gx), 0.62, worldZ(fm.gy));
+                if (fm) an.to.set(worldX(fm.gx), 0.45, worldZ(fm.gy));
             }
             ballMesh.position.lerpVectors(an.from, an.to, e);
-            ballMesh.position.y = 0.62 + Math.sin(Math.PI * k) * (an.arcH !== undefined ? an.arcH : 0.22);
+            ballMesh.position.y = 0.45 + Math.sin(Math.PI * k) * (an.arcH !== undefined ? an.arcH : 0.05);
 
             // SENSITIVE TOUCH DETECTION:
             const midMesh = rondoMeshes[rondo.middle];
@@ -10369,7 +10369,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 const uy = (50 - pm.gy) / RONDO_RY;
                 const bx = pm.gx + ux * 1.5;
                 const by = pm.gy + uy * 1.5;
-                ballMesh.position.set(worldX(bx), 0.62, worldZ(by));
+                ballMesh.position.set(worldX(bx), 0.45, worldZ(by));
         updateBallScale();
             }
         }
