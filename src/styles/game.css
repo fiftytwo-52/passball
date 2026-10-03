@@ -5503,7 +5503,7 @@ body {
         gap: 14px;
         /* Nudge down to align with the pitch's visual center
            (the title above the pitch pushes the optical center down) */
-        margin-top: 12dvh;
+        margin-top: 20dvh;
     }
     #screen-menu .tk-chips { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
     #screen-menu .tk-chip { padding: 8px 12px; height: auto; min-height: 56px; }
