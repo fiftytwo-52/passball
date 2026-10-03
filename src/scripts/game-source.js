@@ -10182,6 +10182,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.winnerSeating = true;
             rondo.winnerSeatId = prevMiddle;
             rondo.seatingSince = Date.now();
+            /* The new middle holds the center through the first pass — no
+               immediate chase. They hunt only after the circle restarts. */
+            rondo.holdCenter = true;
             /* If the new middle is human, prompt them to move to center manually. */
             if (rondo.middle === rondoMyId()) {
                 rondoBanner('mid', '🎯', "You're in the middle", 'Heading to the center…', true);
@@ -10279,6 +10282,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.winnerSeating = true;
             rondo.winnerSeatId = prevMiddle;
             rondo.seatingSince = Date.now();
+            /* The new middle holds the center through the first pass — no
+               immediate chase. They hunt only after the circle restarts. */
+            rondo.holdCenter = true;
             /* If the new middle is human, prompt them to move to center manually. */
             if (rondo.middle === rondoMyId()) {
                 rondoBanner('mid', '🎯', "You're in the middle", 'Heading to the center…', true);
@@ -10519,7 +10525,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const mm = rondoMeshes[rondo.middle];
             const pm = rondoMeshes[rondo.possessor];
             const midIsCpu = rondo.players.some(p => p.id === rondo.middle && p.cpu);
-            if (mm && pm && midIsCpu) {
+            if (mm && pm && midIsCpu && !rondo.holdCenter) {
                 if (rondo._creepMid !== rondo.middle) {
                     rondo._creepMid = rondo.middle;
                     mm.creepOn = false;
@@ -10739,10 +10745,17 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         passerMesh.kick = 0.28;
         if (typeof Sfx !== 'undefined' && Sfx.pass) Sfx.pass();
 
-        // Middle defender sprints along their chosen direction
-        midMesh.targetGx = res.defTargetGx;
-        midMesh.targetGy = res.defTargetGy;
-        midMesh.speed = 16; // Committed sprint, but readable — not a blur
+        // Middle defender sprints along their chosen direction — unless this
+        // is the first pass after a swap, when they hold the center.
+        if (rondo.holdCenter) {
+            midMesh.targetGx = 50;
+            midMesh.targetGy = 50;
+            midMesh.speed = 10;
+        } else {
+            midMesh.targetGx = res.defTargetGx;
+            midMesh.targetGy = res.defTargetGy;
+            midMesh.speed = 16; // Committed sprint, but readable — not a blur
+        }
 
         // Receiver steps forward slightly to receive the ball — but never
         // overwrite a human's deliberately drawn position.
@@ -10802,6 +10815,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.scores[res.passer] = rondo.scores[res.passer] || { passes: 0, interceptions: 0, middleTimes: 0 };
             rondo.scores[res.passer].passes++;
             rondo.passStreak = (rondo.passStreak || 0) + 1;
+            /* First pass after a swap is done — the middle may now hunt. */
+            rondo.holdCenter = false;
             rondo.possessor = receiverId;
             rondoPill();
             rondoBanner('good', '✅', 'Pass complete',
@@ -10834,7 +10849,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             /* Only the host judges the touch: guests fly the same ball as a
                pure visual and take the host's RONDO_SWAP / RONDO_PASS_DONE
                as the authoritative outcome. */
-            canTouch: !!(rondoNet && rondoNet.isHost),
+            canTouch: !!(rondoNet && rondoNet.isHost) && !rondo.holdCenter,
             passer: res.passer,
             target: res.target,
             onTouch: () => {
@@ -11026,6 +11041,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         drag.rondoMovingPlayer = null;
 
         if (me === rondo.middle) {
+            if (rondo.holdCenter) {
+                rondoBanner('info', '⏸️', 'Hold the center',
+                    'Wait for the first pass, then hunt', false);
+                return;
+            }
             // User is the middle defender: aim sprint/intercept run
             const mm = myMesh;
             const tx = clamp(pt.x, 50 - RONDO_RX * 0.95, 50 + RONDO_RX * 0.95);
