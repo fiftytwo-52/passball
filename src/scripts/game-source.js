@@ -5159,6 +5159,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            the regulation log and instruction line would only be stale copy. */
         ui.pens.hidden = false;
         ui.roleStrip.hidden = true;
+        /* Hide the old top/bottom HUD bars — the penalty HUD replaces them */
+        ui.hudTop.hidden = true;
+        ui.hudBottom.hidden = true;
+        if (ui.matchLog) ui.matchLog.hidden = true;
         /* Reset penalty HUD extras */
         if (ui.pensLog) ui.pensLog.innerHTML = '';
         if (ui.pensEnd) ui.pensEnd.hidden = true;
@@ -5188,6 +5192,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         ui.pens.hidden = true;
         setPenaltyView(false);
         if (ui.pens) ui.pens.hidden = true;
+        /* Restore the old HUD bars */
+        ui.hudTop.hidden = false;
+        ui.hudBottom.hidden = false;
+        if (ui.matchLog) ui.matchLog.hidden = false;
         /* Hand the top-centre band back to the role strip — but never over a
            screen, so it mirrors #hud-top, the same show/hide gate. */
         ui.roleStrip.hidden = ui.hudTop.hidden;
@@ -5227,12 +5235,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const isOutfield = p.role === 'outfield';
             const squadIdx = isOutfield ? (parseInt(p.num) - 1) : -1;
             const inSquad = isOutfield && squadIdx >= 0 && squadIdx < 5;
-            /* Line-up spots: yours on the left, CPU's on the right */
+            /* Line-up spots: horizontal rows, yours on the left, CPU's on the right */
             let lx = 50, ly = 50;
             if (inSquad) {
                 const leftSide = p.team === 'you';
-                lx = leftSide ? 22 : 78;
-                ly = 68 + squadIdx * 4;
+                lx = (leftSide ? 12 : 56) + squadIdx * 5.5;
+                ly = 70;
             }
             if (isKicker || isKeeper || inSquad) {
                 if (p.mesh) p.mesh.visible = true;

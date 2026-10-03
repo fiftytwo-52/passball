@@ -5853,3 +5853,19 @@ body {
 :root[data-theme="dark"] .pens-log li {
     /* tokens already switch via --tk-* vars */
 }
+/* Penalty HUD: small-screen tightening */
+@media (max-width: 480px) {
+    .pens-app { padding: calc(8px + env(safe-area-inset-top, 0px)) 10px calc(10px + env(safe-area-inset-bottom, 0px)); gap: 6px; }
+    .pens-chip { font-size: 15px; padding: 3px 10px; }
+    .pens-ib { width: 40px; height: 40px; }
+    .pens-score { padding: 5px 10px; gap: 6px; }
+    .pens-side { font-size: 13px; }
+    .pens-pips { gap: 3px; }
+    .pens-pips i { width: 11px; height: 11px; }
+    .pens-big { font-size: 36px; }
+    .pens-prompt { font-size: 16px; gap: 8px; }
+    .pens-prompt b { font-size: 16px; min-width: 52px; padding: 2px 8px; }
+    .pens-shoot { height: 52px; font-size: 26px; }
+    .pens-card h2 { font-size: 48px; }
+    .pens-card { padding: 20px 22px; }
+}
