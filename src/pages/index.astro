@@ -204,28 +204,39 @@ import '../styles/global.css';
                  whose ball it is, who is in the middle, and what the local
                  player must do right now. -->
             <section id="hud-rondo" hidden aria-label="Rondo">
-                <span class="panel panel-rondo">
-                    <span class="hud-label">RONDO</span>
-                    <span class="rondo-clock" id="rondo-clock" aria-live="polite">3:00</span>
-                </span>
+                <header class="rondo-hud">
+                    <div class="rondo-score" role="group" aria-label="Match status">
+                        <div class="rondo-seg rondo-seg-t" aria-label="Match time"><b id="rondo-clock">3:00</b></div>
+                        <div class="rondo-seg" aria-label="Passes in a row"><b id="rondo-passes">0</b><small>passes</small></div>
+                        <div class="rondo-seg rondo-seg-m" aria-label="Time in the middle"><i></i><b id="rondo-midtime">0:00</b></div>
+                    </div>
+                    <button class="rondo-menu" id="btn-rondo-menu" type="button" aria-label="Menu">⋯</button>
+                </header>
 
-                <span class="panel panel-rondo">
-                    <span class="hud-label">Ball</span>
-                    <span id="rondo-ball-name" class="rondo-name">–</span>
-                </span>
+                <footer class="rondo-dock">
+                    <div class="rondo-banner rondo-k-wait" id="rondo-banner" role="status" aria-live="polite">
+                        <div class="rondo-ico" id="rondo-banner-ico">👀</div>
+                        <div><b id="rondo-banner-title">Watch the ball</b><span id="rondo-banner-sub"></span></div>
+                        <i class="rondo-bar" id="rondo-bar"></i>
+                    </div>
+                    <div class="rondo-react" id="rondo-react">
+                        <div class="rondo-rlist" id="rondo-rlist">
+                            <button type="button" data-emoji="⚽">⚽</button><button type="button" data-emoji="🔥">🔥</button>
+                            <button type="button" data-emoji="👏">👏</button><button type="button" data-emoji="😱">😱</button>
+                            <button type="button" data-emoji="😂">😂</button><button type="button" data-emoji="🧤">🧤</button>
+                        </div>
+                        <button class="rondo-rbtn" id="rondo-rbtn" type="button" aria-label="Reactions">😀</button>
+                    </div>
+                </footer>
 
-                <span class="panel panel-rondo">
-                    <span class="hud-label">Middle</span>
-                    <span id="rondo-middle-name" class="rondo-name rondo-middle">–</span>
-                </span>
+                <div class="rondo-swap" id="rondo-swap"><div class="rondo-swap-card"><b>SWAP!</b><span id="rondo-swap-txt"></span></div></div>
 
-                <span class="panel panel-rondo rondo-turn-group">
-                    <span id="rondo-turn" aria-live="polite">WAITING</span>
-                </span>
-
-                <span class="panel panel-rondo">
-                    <button type="button" class="btn btn-ghost-sm" id="btn-rondo-quit">Leave</button>
-                </span>
+                <!-- Hidden: legacy hooks the engine updates -->
+                <div hidden aria-hidden="true">
+                    <span id="rondo-turn">WAITING</span>
+                    <span id="rondo-ball-name">–</span>
+                    <span id="rondo-middle-name">–</span>
+                </div>
             </section>
 
             <!-- ============================== DECISION RING ==============================

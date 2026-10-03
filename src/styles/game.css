@@ -4732,57 +4732,6 @@ body {
 
 /* --- in-game strip ---------------------------------------------------------
    Sleek, compact, fixed at the top with high z-index to never push or stretch the field. */
-#hud-rondo {
-    position: absolute;
-    z-index: 100;
-    top: calc(var(--hud-pad) + var(--sa-t) + 6px);
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    justify-content: center;
-    width: calc(100% - 12px);
-    max-width: 880px;
-    box-sizing: border-box;
-    pointer-events: none;
-}
-
-#hud-rondo .panel-rondo,
-#hud-rondo button {
-    pointer-events: auto;
-}
-
-@media (max-width: 640px) {
-    #hud-rondo {
-        top: calc(var(--sa-t) + 4px);
-        gap: 4px;
-        max-width: calc(100% - 8px);
-    }
-    .panel-rondo {
-        padding: 2.5px 6px;
-        gap: 4px;
-    }
-    .panel-rondo .hud-label {
-        font-size: 0.60rem;
-    }
-    .rondo-clock {
-        font-size: 0.78rem;
-        min-width: 30px;
-    }
-    .rondo-name {
-        font-size: 0.72rem;
-        max-width: 72px;
-    }
-    #rondo-turn {
-        font-size: 0.72rem;
-        max-width: 140px;
-    }
-    #btn-rondo-quit {
-        padding: 3px 8px;
-        font-size: 0.72rem;
-    }
-}
 
 @media (max-width: 380px) {
     .panel-rondo {
@@ -5492,4 +5441,238 @@ body {
     .rondo-body { padding: 10px 26px 12px; }
     .rondo-name-tabs { margin-bottom: 8px; }
     .rondo-foot { margin-top: 8px; padding-top: 8px; }
+}
+
+/* ================= Rondo in-game HUD — score pill, banner dock, reactions ================= */
+#hud-rondo {
+    --rh-display: "Barlow Condensed", "Arial Narrow", Impact, system-ui, sans-serif;
+    --rh-body: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --rh-yellow: #ffd23f;
+    --rh-pink: #ff2d8a;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    pointer-events: none;
+    font-family: var(--rh-body);
+}
+#hud-rondo[hidden] { display: none; }
+#hud-rondo button { pointer-events: auto; }
+
+.rondo-hud {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    justify-content: center;
+    padding: max(10px, env(safe-area-inset-top)) 12px 0;
+}
+.rondo-score {
+    display: flex;
+    align-items: center;
+    height: 38px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: rgba(8, 40, 22, 0.84);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    box-shadow: 0 3px 0 rgba(0, 35, 12, 0.3);
+}
+.rondo-seg { display: flex; align-items: center; gap: 5px; padding: 0 13px; white-space: nowrap; }
+.rondo-seg + .rondo-seg { border-left: 1px solid rgba(255, 255, 255, 0.22); }
+.rondo-seg b {
+    font: 800 22px/1 var(--rh-display);
+    letter-spacing: 0.02em;
+    display: inline-flex;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+    min-width: 2ch;
+}
+.rondo-seg-t b { color: var(--rh-yellow); }
+.rondo-seg-m i {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--rh-pink);
+    box-shadow: 0 0 0 3px rgba(255, 45, 138, 0.35);
+}
+.rondo-seg-m b { color: #ff9cc9; }
+.rondo-seg small {
+    font: 700 11px/1 var(--rh-display);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #a9d9b9;
+    align-self: flex-end;
+    padding-bottom: 1px;
+}
+.rondo-menu {
+    position: absolute;
+    right: 12px;
+    top: max(10px, env(safe-area-inset-top));
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    border: 0;
+    background: rgba(255, 255, 255, 0.95);
+    font-size: 20px;
+    font-weight: 800;
+    color: #10261a;
+    box-shadow: 0 3px 0 rgba(0, 35, 12, 0.3);
+    line-height: 1;
+    display: grid;
+    place-items: center;
+    padding: 0;
+}
+
+/* Bottom dock banner */
+.rondo-dock {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    width: min(100%, 640px);
+    margin: 0 auto;
+    padding: 6px 12px max(12px, env(safe-area-inset-bottom));
+}
+.rondo-banner {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 70px;
+    padding: 10px 14px;
+    margin-right: 62px;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 4px 0 rgba(0, 40, 15, 0.28);
+    overflow: hidden;
+    transition: background 0.2s;
+    color: #10261a;
+}
+.rondo-banner .rondo-ico {
+    flex: none;
+    width: 46px; height: 46px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    font-size: 26px;
+    background: #edf2e6;
+}
+.rondo-banner b {
+    display: block;
+    font: 800 22px/1 var(--rh-display);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+.rondo-banner span {
+    display: block;
+    margin-top: 4px;
+    font-size: 14px;
+    line-height: 1.25;
+    font-weight: 600;
+    color: #4a6354;
+}
+.rondo-banner.rondo-k-act { background: var(--rh-yellow); }
+.rondo-banner.rondo-k-act .rondo-ico { background: rgba(0, 0, 0, 0.1); }
+.rondo-banner.rondo-k-act span { color: #5a4600; }
+.rondo-banner.rondo-k-mid { background: var(--rh-pink); color: #fff; }
+.rondo-banner.rondo-k-mid .rondo-ico { background: rgba(255, 255, 255, 0.22); }
+.rondo-banner.rondo-k-mid span { color: rgba(255, 255, 255, 0.95); }
+.rondo-banner.rondo-k-good { background: #d3f4dc; }
+.rondo-banner.rondo-k-bad { background: #ffdcec; }
+.rondo-banner.rondo-k-bad b { color: #b0105f; }
+.rondo-bar {
+    position: absolute;
+    left: 0; bottom: 0;
+    height: 6px; width: 100%;
+    background: rgba(0, 0, 0, 0.4);
+    transform-origin: left;
+    transform: scaleX(0);
+}
+.rondo-bar.run { animation: rondo-shrink linear forwards; }
+@keyframes rondo-shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+/* Reactions: expanding button */
+.rondo-react {
+    position: absolute;
+    right: 12px;
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 9px);
+}
+.rondo-rbtn {
+    width: 54px; height: 54px;
+    border-radius: 50%;
+    border: 0;
+    background: #fff;
+    font-size: 26px;
+    box-shadow: 0 4px 0 rgba(0, 40, 15, 0.28);
+}
+.rondo-rlist {
+    position: absolute;
+    right: 62px; bottom: 0;
+    display: none;
+    gap: 2px;
+    padding: 5px;
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 4px 0 rgba(0, 40, 15, 0.28);
+}
+.rondo-react.open .rondo-rlist { display: flex; }
+.rondo-rlist button {
+    width: 46px; height: 44px;
+    border: 0;
+    background: transparent;
+    border-radius: 50%;
+    font-size: 26px;
+}
+.rondo-rlist button:hover { background: #edf2e6; }
+
+/* SWAP! splash */
+.rondo-swap {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    opacity: 0;
+}
+.rondo-swap.show { animation: rondo-splash 1.5s ease both; }
+.rondo-swap-card {
+    transform: skewX(-8deg);
+    background: var(--rh-pink);
+    padding: 10px 34px 12px;
+    text-align: center;
+    box-shadow: 0 6px 0 rgba(120, 0, 60, 0.4);
+    border-radius: 10px;
+}
+.rondo-swap-card b {
+    display: block;
+    font: italic 800 clamp(44px, 13vw, 84px)/0.95 var(--rh-display);
+    color: #fff;
+    text-shadow: 0 4px 0 rgba(120, 0, 60, 0.45);
+}
+.rondo-swap-card span {
+    display: block;
+    font: 800 clamp(15px, 3.6vw, 22px)/1.2 var(--rh-display);
+    letter-spacing: 0.06em;
+    color: var(--rh-yellow);
+    text-transform: uppercase;
+}
+@keyframes rondo-splash {
+    0% { opacity: 0; transform: scale(0.6); }
+    15% { opacity: 1; transform: scale(1.05); }
+    25% { transform: scale(1); }
+    80% { opacity: 1; }
+    100% { opacity: 0; transform: scale(1.05); }
+}
+
+@media (max-width: 360px) {
+    .rondo-seg { padding: 0 7px; }
+    .rondo-seg b { font-size: 20px; }
+    .rondo-seg small { display: none; }
+    .rondo-banner b { font-size: 19px; }
+    .rondo-banner span { font-size: 13px; }
+}
+@media (max-height: 560px) {
+    .rondo-banner { min-height: 52px; padding: 6px 12px; }
+    .rondo-banner .rondo-ico { width: 36px; height: 36px; font-size: 20px; }
+    .rondo-banner span { display: none; }
+    .rondo-banner b { font-size: 18px; }
+    .rondo-rbtn { width: 46px; height: 46px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    #hud-rondo, #hud-rondo * { animation: none !important; transition: none !important; }
 }

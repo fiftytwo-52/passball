@@ -8281,6 +8281,52 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (!sticky) setStatus(msg);
     }
 
+    /* In-game banner (bottom dock): kind is k-act (your move), k-mid (you're
+       the hunter), k-good, k-bad, or k-wait. */
+    function rondoBanner(kind, ico, title, sub, withBar) {
+        const banner = document.getElementById('rondo-banner');
+        const icoEl = document.getElementById('rondo-banner-ico');
+        const titleEl = document.getElementById('rondo-banner-title');
+        const subEl = document.getElementById('rondo-banner-sub');
+        const bar = document.getElementById('rondo-bar');
+        if (!banner) return;
+        banner.className = 'rondo-banner rondo-k-' + kind;
+        if (icoEl) icoEl.textContent = ico || '';
+        if (titleEl) titleEl.textContent = title || '';
+        if (subEl) subEl.textContent = sub || '';
+        if (bar) {
+            bar.classList.remove('run');
+            void bar.offsetWidth;
+            if (withBar) {
+                const left = Math.max(300, (rondo && rondo.planTime || 5) * 1000);
+                bar.style.animationDuration = left + 'ms';
+                bar.classList.add('run');
+            }
+        }
+    }
+
+    /* Score pill: passes streak + time the current middle has been in. */
+    function rondoPill() {
+        const pEl = document.getElementById('rondo-passes');
+        const mEl = document.getElementById('rondo-midtime');
+        if (pEl && rondo) pEl.textContent = rondo.passStreak || 0;
+        if (mEl && rondo && rondo.middleSince) {
+            const s = Math.floor((Date.now() - rondo.middleSince) / 1000);
+            mEl.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+        }
+    }
+
+    /* SWAP! splash on interceptions. */
+    function rondoSwapSplash(txt) {
+        const s = document.getElementById('rondo-swap');
+        const t = document.getElementById('rondo-swap-txt');
+        if (!s) return;
+        if (t) t.textContent = txt || '';
+        s.classList.remove('show');
+        void s.offsetWidth;
+        s.classList.add('show');
+    }
+
     function openRondoLobby() {
         /* The handle is dealt fresh every visit — the field is read-only. */
         const input = document.getElementById('rondo-name');
@@ -8434,7 +8480,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (btnStart) btnStart.addEventListener('click', rondoHostStart);
 
         // Quit mid-game — the rondo goes with it, for everyone, so it asks.
-        const btnQuit = document.getElementById('btn-rondo-quit');
+        const btnQuit = document.getElementById('btn-rondo-menu');
         if (btnQuit) btnQuit.addEventListener('click', async () => {
             const hosting = !!(rondoNet && rondoNet.isHost);
             const ok = await confirmAction({
@@ -8695,6 +8741,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             scores: {},
             timeLeft: RONDO_GAME_SECONDS,
             clockTimer: null,
+            passStreak: 0,           // consecutive completed passes (score pill)
+            middleSince: Date.now(), // when the current hunter went in (pill)
         };
         players.forEach(p => { rondo.scores[p.id] = { passes: 0, interceptions: 0, middleTimes: p.id === middle ? 1 : 0 }; });
 
@@ -8726,6 +8774,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             // Broadcast the clock every 5s; clients count down locally between.
             if (rondo.timeLeft % 5 === 0) rondoNet.hostSend({ t: 'RONDO_CLOCK', timeLeft: rondo.timeLeft });
             rondoUpdateClock(rondo.timeLeft);
+            rondoPill();
         }, 1000);
         rondo.clockTimer = timer;
     }
@@ -9315,11 +9364,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         // On desktop the role strip is re-parented to #stage (outside #hud-top).
         const rs = document.getElementById('role-strip');
         if (rs) rs.hidden = true;
-        // Quick emoji reactions dock is unhidden during rondo
+        // Rondo uses its own expanding reactions in the HUD; the legacy dock
+        // stays parked for PvP.
         const emojiDock = document.getElementById('emoji-dock');
         if (emojiDock) {
-            emojiDock.hidden = false;
-            emojiDock.style.bottom = '24px';
+            emojiDock.hidden = true;
+            emojiDock.style.bottom = '';
         }
         // Park the match's players and ball out of sight; rondo owns the stage.
         rondoParkMatch();
@@ -9551,6 +9601,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.middle = passer;
             rondo.possessor = prevMiddle;
         }
+        /* Streak resets, new middle's clock starts. */
+        rondo.passStreak = 0;
+        rondo.middleSince = Date.now();
+        rondoPill();
         const ballName = document.getElementById('rondo-ball-name');
         const midName = document.getElementById('rondo-middle-name');
         if (ballName) ballName.textContent = rondoPlayerName(rondo.possessor);
@@ -9560,6 +9614,14 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const midIsCpu = rondo.players.some(p => p.id === prevMiddle && p.cpu);
         if (passerIsCpu) rondoCpuEmote('😱', passer);
         if (midIsCpu) setTimeout(() => rondoCpuEmote('🧤', prevMiddle), 350);
+
+        /* Banner + splash for the swap. */
+        const me = rondoMyId();
+        const iWon = prevMiddle === me, iLost = passer === me;
+        rondoBanner('bad', '✂️',
+            iWon ? 'You read it!' : iLost ? 'You got read!' : 'Intercepted!',
+            `${rondoPlayerName(prevMiddle)} takes ${rondoPlayerName(passer)}'s spot`);
+        rondoSwapSplash(`${rondoPlayerName(prevMiddle)} ⇄ ${rondoPlayerName(passer)}`);
 
         /* The winner collects the ball with a smooth flight from the touch
            point to their feet (it tracks them while they walk to their new
@@ -9959,6 +10021,16 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 turnEl.textContent = `PLANNING (${secs}s)`;
             }
         }
+
+        /* Bottom banner mirrors the turn state. */
+        if (me === possessor) {
+            rondoBanner('act', '⚽', 'You have the ball', 'Draw your pass to a teammate', true);
+        } else if (me === middle) {
+            rondoBanner('mid', '🧤', "You're in the middle", 'Draw where you\'ll sprint to intercept', true);
+        } else {
+            rondoBanner('wait', '👀', 'Watch the ball', rondoPlayerName(possessor) + ' is choosing a pass…', false);
+        }
+        rondoPill();
     }
 
     /** Simultaneous execution when 5-second timer expires. */
@@ -10041,7 +10113,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
             rondo.scores[res.passer] = rondo.scores[res.passer] || { passes: 0, interceptions: 0, middleTimes: 0 };
             rondo.scores[res.passer].passes++;
+            rondo.passStreak = (rondo.passStreak || 0) + 1;
             rondo.possessor = receiverId;
+            rondoPill();
+            rondoBanner('good', '✅', 'Pass complete',
+                `${rondoPlayerName(res.passer)} → ${rondoPlayerName(receiverId)}`);
 
             // Occasional CPU clap on nice pass
             if (rondo.scores[res.passer].passes % 4 === 0) {
@@ -10666,27 +10742,42 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (btnClose) btnClose.addEventListener('click', closePvpLobby);
 
         // Quick emoji reactions — 2s cooldown per player so nobody can spam.
+        // Covers both the legacy PvP dock (.btn-emoji) and Rondo's expanding
+        // reactions (#rondo-rlist buttons).
         let lastEmojiSentAt = 0;
-        const emojiButtons = document.querySelectorAll('.btn-emoji');
-        emojiButtons.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const now = Date.now();
-                if (now - lastEmojiSentAt < 2000) return;
-                lastEmojiSentAt = now;
-                const emoji = btn.getAttribute('data-emoji');
-                if (!emoji) return;
-                const myName = (state.phase === 'rondo' && rondoNet) ? rondoPlayerName(rondoMyId()) : 'You';
-                spawnFloatingEmoji(emoji, true, myName);
-                if (pvpActive) {
-                    pvp.sendEmoji(emoji);
-                } else if (state.phase === 'rondo' && rondoNet) {
-                    if (rondoNet.isHost) {
-                        rondoNet.hostSend({ t: 'RONDO_EMOJI', from: rondoNet.myId, name: myName, emoji });
-                    } else {
-                        rondoNet.sendToHost({ type: 'RONDO_EMOJI', emoji });
-                    }
+        const sendEmoji = (emoji) => {
+            const now = Date.now();
+            if (now - lastEmojiSentAt < 2000) return;
+            lastEmojiSentAt = now;
+            const myName = (state.phase === 'rondo' && rondoNet) ? rondoPlayerName(rondoMyId()) : 'You';
+            spawnFloatingEmoji(emoji, true, myName);
+            if (pvpActive) {
+                pvp.sendEmoji(emoji);
+            } else if (state.phase === 'rondo' && rondoNet) {
+                if (rondoNet.isHost) {
+                    rondoNet.hostSend({ t: 'RONDO_EMOJI', from: rondoNet.myId, name: myName, emoji });
+                } else {
+                    rondoNet.sendToHost({ type: 'RONDO_EMOJI', emoji });
                 }
+            }
+        };
+        document.querySelectorAll('.btn-emoji').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const emoji = btn.getAttribute('data-emoji');
+                if (emoji) sendEmoji(emoji);
             });
+        });
+        /* Rondo's expanding reactions: toggle the list, send on pick. */
+        const rBtn = document.getElementById('rondo-rbtn');
+        const rReact = document.getElementById('rondo-react');
+        const rList = document.getElementById('rondo-rlist');
+        if (rBtn && rReact) rBtn.addEventListener('click', () => rReact.classList.toggle('open'));
+        if (rList) rList.addEventListener('click', (e) => {
+            const b = e.target.closest('button');
+            if (!b) return;
+            const emoji = b.getAttribute('data-emoji') || b.textContent;
+            if (rReact) rReact.classList.remove('open');
+            if (emoji) sendEmoji(emoji);
         });
 
         // PeerJS Network event listeners
