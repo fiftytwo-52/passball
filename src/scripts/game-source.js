@@ -7793,10 +7793,19 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const bubble = document.createElement('div');
         bubble.className = 'floating-emoji';
 
-        const charSpan = document.createElement('span');
-        charSpan.className = 'floating-emoji-char';
-        charSpan.textContent = emoji;
-        bubble.appendChild(charSpan);
+        /* Stickers arrive as "sticker:<path>" — render the GIF, not text. */
+        if (typeof emoji === 'string' && emoji.indexOf('sticker:') === 0) {
+            const img = document.createElement('img');
+            img.className = 'floating-emoji-sticker';
+            img.src = emoji.slice('sticker:'.length);
+            img.alt = 'sticker';
+            bubble.appendChild(img);
+        } else {
+            const charSpan = document.createElement('span');
+            charSpan.className = 'floating-emoji-char';
+            charSpan.textContent = emoji;
+            bubble.appendChild(charSpan);
+        }
 
         const nameToDisplay = senderName || (isSelf ? 'You' : '');
         if (nameToDisplay) {
@@ -10779,7 +10788,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
         // Quick emoji reactions — 2s cooldown per player so nobody can spam.
         // Covers both the legacy PvP dock (.btn-emoji) and Rondo's expanding
-        // reactions (#rondo-rlist buttons).
+        // reactions (#rondo-rlist buttons). Stickers ride the same path: the
+        // payload is "sticker:<relative-path>" and spawnFloatingEmoji renders
+        // it as an image on every client.
+        const STICKER_COUNT = 21;
+        const stickerId = (n) => 'sticker:stickers/gif-' + String(n).padStart(2, '0') + '.gif';
         let lastEmojiSentAt = 0;
         const sendEmoji = (emoji) => {
             const now = Date.now();
@@ -10797,6 +10810,44 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 }
             }
         };
+        /* Build the sticker grids (PvP dock + Rondo popup) from the GIF set. */
+        const buildStickerGrid = (container) => {
+            if (!container || container.dataset.built) return;
+            container.dataset.built = '1';
+            for (let n = 1; n <= STICKER_COUNT; n++) {
+                const id = stickerId(n);
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'sticker-btn';
+                btn.setAttribute('data-sticker', id);
+                btn.title = 'Sticker ' + n;
+                const img = document.createElement('img');
+                img.src = id.slice('sticker:'.length);
+                img.alt = 'sticker ' + n;
+                img.loading = 'lazy';
+                btn.appendChild(img);
+                container.appendChild(btn);
+            }
+            container.addEventListener('click', (e) => {
+                const b = e.target.closest('.sticker-btn');
+                if (!b) return;
+                const sid = b.getAttribute('data-sticker');
+                if (sid) sendEmoji(sid);
+            });
+        };
+        buildStickerGrid(document.getElementById('dock-stickers'));
+        buildStickerGrid(document.getElementById('rondo-slist'));
+        /* PvP dock tabs: emoji vs stickers. */
+        document.querySelectorAll('.dock-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.dock-tab').forEach(t => t.classList.toggle('active', t === tab));
+                const showStickers = tab.getAttribute('data-dtab') === 'stickers';
+                const emojiPane = document.getElementById('dock-emoji');
+                const stickerPane = document.getElementById('dock-stickers');
+                if (emojiPane) emojiPane.hidden = showStickers;
+                if (stickerPane) stickerPane.hidden = !showStickers;
+            });
+        });
         document.querySelectorAll('.btn-emoji').forEach(btn => {
             btn.addEventListener('click', () => {
                 const emoji = btn.getAttribute('data-emoji');
@@ -10815,6 +10866,14 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             if (rReact) rReact.classList.remove('open');
             if (emoji) sendEmoji(emoji);
         });
+        /* Rondo's sticker popup: toggle the grid; picking a sticker sends it. */
+        const rSbtn = document.getElementById('rondo-sbtn');
+        const rSlist = document.getElementById('rondo-slist');
+        if (rSbtn && rSlist) rSbtn.addEventListener('click', () => {
+            rSlist.hidden = !rSlist.hidden;
+            if (rReact) rReact.classList.remove('open');
+        });
+        if (rSlist) rSlist.addEventListener('click', () => { rSlist.hidden = true; });
 
         // PeerJS Network event listeners
         /* Both sockets up is not a match yet: it is the handshake. The lobby

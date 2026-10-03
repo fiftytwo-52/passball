@@ -225,6 +225,8 @@ import '../styles/global.css';
                             <button type="button" data-emoji="👏">👏</button><button type="button" data-emoji="😱">😱</button>
                             <button type="button" data-emoji="😂">😂</button><button type="button" data-emoji="🧤">🧤</button>
                         </div>
+                        <div class="rondo-slist" id="rondo-slist" hidden aria-label="Stickers"></div>
+                        <button class="rondo-rbtn" id="rondo-sbtn" type="button" aria-label="Stickers">🎞️</button>
                         <button class="rondo-rbtn" id="rondo-rbtn" type="button" aria-label="Reactions">😀</button>
                     </div>
                 </footer>
@@ -326,12 +328,19 @@ import '../styles/global.css';
 
             <!-- In-game Emoji Quick Reaction Dock -->
             <div id="emoji-dock" class="emoji-dock" hidden aria-label="Quick reactions">
-                <button type="button" class="btn-emoji" data-emoji="⚽" title="Ball">⚽</button>
-                <button type="button" class="btn-emoji" data-emoji="🔥" title="Fire">🔥</button>
-                <button type="button" class="btn-emoji" data-emoji="👏" title="Clap">👏</button>
-                <button type="button" class="btn-emoji" data-emoji="😱" title="Shock">😱</button>
-                <button type="button" class="btn-emoji" data-emoji="😂" title="Laugh">😂</button>
-                <button type="button" class="btn-emoji" data-emoji="🧤" title="Save">🧤</button>
+                <div class="dock-tabs" role="tablist" aria-label="Reactions and stickers">
+                    <button type="button" class="dock-tab active" data-dtab="emoji" title="Emoji">😀</button>
+                    <button type="button" class="dock-tab" data-dtab="stickers" title="Stickers">🎞️</button>
+                </div>
+                <div class="dock-emoji" id="dock-emoji" role="tabpanel">
+                    <button type="button" class="btn-emoji" data-emoji="⚽" title="Ball">⚽</button>
+                    <button type="button" class="btn-emoji" data-emoji="🔥" title="Fire">🔥</button>
+                    <button type="button" class="btn-emoji" data-emoji="👏" title="Clap">👏</button>
+                    <button type="button" class="btn-emoji" data-emoji="😱" title="Shock">😱</button>
+                    <button type="button" class="btn-emoji" data-emoji="😂" title="Laugh">😂</button>
+                    <button type="button" class="btn-emoji" data-emoji="🧤" title="Save">🧤</button>
+                </div>
+                <div class="dock-stickers" id="dock-stickers" role="tabpanel" hidden aria-label="Stickers"></div>
             </div>
 
             <!-- The floating menu sheet. Buttons only — the match keeps running
