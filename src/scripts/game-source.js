@@ -9734,23 +9734,43 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             mm.ring.visible = false; // middle defender has no target ring
             /* The interceptor walks in — but ONLY if they're CPU. The human
                middle moves solely by their own commands, never auto-chased.
-               CPU middles chase the ball holder so the press stays on. */
+               After a swap, the new middle goes to the center FIRST before
+               the press resumes (rondo.middleCentering flag). */
             const middleIsHuman = rondo.middle === rondoMyId();
             if (!middleIsHuman && (rondo.phase === 'reveal' || rondo.phase === 'turn' || rondo.phase === 'plan')) {
-                const pm = rondoMeshes[rondo.possessor];
-                if (pm) {
-                    mm.targetGx = pm.gx;
-                    mm.targetGy = pm.gy;
-                } else {
+                if (rondo.middleCentering) {
+                    /* Head to center first */
                     mm.targetGx = 50;
                     mm.targetGy = 50;
+                    mm.speed = 12;
+                    /* Arrived? Clear the flag so the press can resume */
+                    const dx = (mm.gx || 50) - 50, dy = (mm.gy || 50) - 50;
+                    if (Math.sqrt(dx * dx + dy * dy) < 3) {
+                        rondo.middleCentering = false;
+                    }
+                } else {
+                    const pm = rondoMeshes[rondo.possessor];
+                    if (pm) {
+                        mm.targetGx = pm.gx;
+                        mm.targetGy = pm.gy;
+                    } else {
+                        mm.targetGx = 50;
+                        mm.targetGy = 50;
+                    }
+                    mm.speed = 12;
                 }
-                mm.speed = 12;
             } else if (middleIsHuman) {
                 /* Human middle: hold position, don't auto-chase. Clear any
                    stale auto-target so they don't get stuck fighting it. */
                 mm.targetGx = mm.gx;
                 mm.targetGy = mm.gy;
+                /* If human reaches center, clear the centering flag */
+                if (rondo.middleCentering) {
+                    const dx = (mm.gx || 50) - 50, dy = (mm.gy || 50) - 50;
+                    if (Math.sqrt(dx * dx + dy * dy) < 3) {
+                        rondo.middleCentering = false;
+                    }
+                }
             }
         }
     }
@@ -9857,6 +9877,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.circle[seat] = prevMiddle;
             rondo.middle = passer;
             rondo.possessor = prevMiddle;
+            /* New middle heads to center first before the press resumes */
+            rondo.middleCentering = true;
         }
         /* Streak resets, new middle's clock starts. */
         rondo.passStreak = 0;
@@ -9940,6 +9962,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.circle[seat] = prevMiddle;
             rondo.middle = passer;
             rondo.possessor = prevMiddle;
+            /* New middle heads to center first before the press resumes */
+            rondo.middleCentering = true;
         }
 
         const ballName = document.getElementById('rondo-ball-name');
