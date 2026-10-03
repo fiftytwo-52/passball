@@ -9142,9 +9142,19 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         rondo.clockTimer = timer;
     }
 
-    /** Host: open a new 5-second planning pause — both players draw their direction. */
+    /** Host: open a new 5-second planning pause — both players draw their direction.
+        Blocked while the new middle is still centering: the pass phase must not
+        begin until the middle has reached the center. */
     function rondoHostNextTurn() {
         if (!rondo || rondo.phase === 'over') return;
+        if (rondo.middleCentering) {
+            /* Still centering — retry in 500ms. The middle's movement code
+               clears the flag on arrival. */
+            setTimeout(() => {
+                if (rondo && rondo.phase !== 'over') rondoHostNextTurn();
+            }, 500);
+            return;
+        }
         rondo.turn++;
         rondo.phase = 'plan';
         rondo.planTime = RONDO_PLAN_SECONDS;
@@ -9933,11 +9943,16 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     mm.speed = 12;
                 }
             } else if (middleIsHuman) {
-                /* Human middle: user-drawn line takes precedence. If they drew
-                   an interception target, go there. Otherwise, auto-chase the
-                   ball during planning/flight so they don't stand frozen. */
+                /* Human middle: during centering phase, do NOT auto-walk — the
+                   human must move to center manually (prompted via banner).
+                   Otherwise, user-drawn line takes precedence; if no line,
+                   auto-chase the ball during planning/flight. */
                 const hasUserLine = rondo.defPick && typeof rondo.defPick.targetGx === 'number';
-                if (hasUserLine) {
+                if (rondo.middleCentering && !hasUserLine) {
+                    /* Hold position during centering — human moves manually. */
+                    mm.targetGx = mm.gx;
+                    mm.targetGy = mm.gy;
+                } else if (hasUserLine) {
                     /* User's deliberate command wins over automatic movement. */
                     mm.targetGx = rondo.defPick.targetGx;
                     mm.targetGy = rondo.defPick.targetGy;
@@ -10080,6 +10095,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.possessor = prevMiddle;
             /* New middle heads to center first before the press resumes */
             rondo.middleCentering = true;
+            /* If the new middle is human, prompt them to move to center manually. */
+            if (rondo.middle === rondoMyId()) {
+                rondoBanner('mid', '🎯', "You're in the middle", 'Move to the center to resume play', true);
+            }
         }
         /* Streak resets, new middle's clock starts. */
         rondo.passStreak = 0;
@@ -10165,6 +10184,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.possessor = prevMiddle;
             /* New middle heads to center first before the press resumes */
             rondo.middleCentering = true;
+            /* If the new middle is human, prompt them to move to center manually. */
+            if (rondo.middle === rondoMyId()) {
+                rondoBanner('mid', '🎯', "You're in the middle", 'Move to the center to resume play', true);
+            }
         }
 
         const ballName = document.getElementById('rondo-ball-name');
