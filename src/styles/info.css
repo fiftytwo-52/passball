@@ -68,6 +68,14 @@
     border-bottom: 1.5px solid var(--tk-line);
 }
 
+/* Theme + burger grouped together on the right, never drifting to center. */
+.info-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
 .info-brand {
     display: flex;
     align-items: center;
