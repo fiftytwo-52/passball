@@ -9649,6 +9649,34 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 rondoRecoverCirclePlayers(rondo.possessor);
                 rondoLayout();
                 break;
+            case 'RONDO_SYNC': {
+                if (!rondo) break;
+                if (rondoNet && rondoNet.isHost) break; // host doesn't need its own sync
+                const me = rondoMyId();
+                for (const p of (packet.players || [])) {
+                    if (p.id === me) continue; // never override my own player
+                    const m = rondoMeshes[p.id];
+                    if (!m) continue;
+                    const drift = Math.hypot(m.gx - p.gx, m.gy - p.gy);
+                    if (drift > 4) {
+                        m.gx = p.gx; m.gy = p.gy; // snap if far off
+                        m.targetGx = p.gx; m.targetGy = p.gy;
+                    } else if (drift > 0.5) {
+                        m.targetGx = p.gx; m.targetGy = p.gy; // nudge if close
+                        m.speed = 14;
+                    }
+                }
+                /* Ball: only trust the host when it's at rest (not flying —
+                   the flight anim is deterministic from RONDO_EXECUTE). */
+                if (packet.ball && !packet.ball.flying && !rondoBallAnim) {
+                    const pm = rondoMeshes[rondo.possessor];
+                    if (pm) {
+                        pm.gx = (pm.gx + packet.ball.gx) / 2;
+                        pm.gy = (pm.gy + packet.ball.gy) / 2;
+                    }
+                }
+                break;
+            }
             case 'RONDO_MOVE':
                 if (!rondo) break;
                 if (packet.id && packet.id !== rondoMyId()) {
@@ -10370,6 +10398,39 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             }
             if (rondoNet && rondoNet.isHost && rondo.planTime <= 0) {
                 rondoHostResolveTurn();
+            }
+        }
+
+        // 0a. Authoritative sync: host broadcasts real positions every 400ms
+        // so guests never drift. Guests nudge toward these (snap if far off).
+        if (rondoNet && rondoNet.isHost && rondo && (rondo.phase === 'plan' || rondo.phase === 'action')) {
+            const nowS = Date.now();
+            if (!rondo._lastSync || nowS - rondo._lastSync > 400) {
+                rondo._lastSync = nowS;
+                const plist = [];
+                for (const pid of rondo.circle.concat([rondo.middle])) {
+                    const mm = rondoMeshes[pid];
+                    if (mm) plist.push({ id: pid, gx: +mm.gx.toFixed(2), gy: +mm.gy.toFixed(2) });
+                }
+                /* Ball logical grid pos: from the anim if flying, else possessor feet. */
+                let bgx = 50, bgy = 50, flying = false;
+                if (rondoBallAnim) {
+                    flying = true;
+                    const an = rondoBallAnim;
+                    const k = Math.min(1, an.t);
+                    const wx = an.from.x + (an.to.x - an.from.x) * k;
+                    const wz = an.from.z + (an.to.z - an.from.z) * k;
+                    bgx = +(wx / KX + 50).toFixed(2);
+                    bgy = +(50 - wz / ZSTRETCH).toFixed(2);
+                } else {
+                    const pm = rondoMeshes[rondo.possessor];
+                    if (pm) { bgx = +pm.gx.toFixed(2); bgy = +pm.gy.toFixed(2); }
+                }
+                rondoNet.hostSend({
+                    t: 'RONDO_SYNC', players: plist,
+                    ball: { gx: bgx, gy: bgy, flying },
+                    possessor: rondo.possessor, middle: rondo.middle,
+                });
             }
         }
 
