@@ -5207,9 +5207,9 @@ body {
 #screen-menu .tk-app {
     position: relative;
     z-index: 1;
+    width: 100%;
     min-height: 100dvh;
-    max-width: 1200px;
-    margin: 0 auto;
+    margin: 0;
     padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
     display: grid;
     gap: 10px;
