@@ -10622,6 +10622,160 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         while (topScreen()) popScreen();
         state.phase = 'idle';
         pushScreen('menu', { focus: '#btn-start' });
+        /* The opponent toggle reads Vs computer again after the lobby closes. */
+        const segBtns = document.querySelectorAll('#screen-menu .tk-seg button');
+        if (segBtns.length) segBtns.forEach((b, i) =>
+            b.setAttribute('aria-pressed', String(i === 0)));
+    }
+
+    /** Revamped main menu wiring: theme, hamburger, tap-to-cycle chips driving
+        the hidden engine selects, the Vs computer / PVP segmented toggle, and
+        the decorative animated pitch. The three mode buttons keep their engine
+        IDs (btn-start / btn-penalty / btn-rondo) so existing handlers attach. */
+    function initRevampedMenu() {
+        const root = document.documentElement;
+
+        /* --- Theme: OS default, manual toggle wins and persists as tk-theme. */
+        try {
+            const saved = localStorage.getItem('tk-theme');
+            if (saved === 'light' || saved === 'dark') root.dataset.theme = saved;
+        } catch (e) {}
+        const themeBtn = el('tk-theme');
+        if (themeBtn) themeBtn.addEventListener('click', () => {
+            const cur = root.dataset.theme ||
+                (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+            const next = cur === 'dark' ? 'light' : 'dark';
+            root.dataset.theme = next;
+            try { localStorage.setItem('tk-theme', next); } catch (e) {}
+        });
+
+        /* --- Hamburger (mobile nav). */
+        const menuBtn = el('tk-menuBtn');
+        const menu = el('tk-menu');
+        if (menuBtn && menu) menuBtn.addEventListener('click', () => {
+            const open = menu.classList.toggle('open');
+            menuBtn.setAttribute('aria-expanded', String(open));
+        });
+
+        /* --- Setting chips: tap to cycle, driving the hidden engine selects so
+               real values, storage keys and sync logic stay untouched. */
+        const chipDefs = [
+            { select: 'difficulty-start', label: 'Level',
+              short: { '0.35': 'Amateur', '1.85': 'Semi-Pro', '2.6': 'Pro', '3.4': 'World Class' } },
+            { select: 'plan-window-start', label: 'Timer',
+              short: { '3': '3s', '5': '5s', '10': '10s', '20': '20s' } },
+            { select: 'match-length-start', label: 'Match',
+              short: { '30': '1:00', '60': '2:00', '120': '4:00', '180': '6:00' } },
+            { select: 'sound-start', label: 'Sound',
+              short: { 'on': 'On', 'off': 'Off' } },
+        ];
+        const chipsBox = el('tk-chips');
+        if (chipsBox) {
+            chipDefs.forEach(def => {
+                const sel = el(def.select);
+                if (!sel) return;
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'tk-chip';
+                btn.setAttribute('aria-label', def.label + ', tap to change');
+                const render = () => {
+                    const v = sel.value;
+                    btn.innerHTML = '';
+                    const sm = document.createElement('small');
+                    sm.textContent = def.label;
+                    const sp = document.createElement('span');
+                    sp.textContent = def.short[v] || v;
+                    btn.appendChild(sm);
+                    btn.appendChild(sp);
+                };
+                btn.addEventListener('click', () => {
+                    const opts = Array.from(sel.options);
+                    const cur = opts.findIndex(o => o.value === sel.value);
+                    const next = opts[(cur + 1) % opts.length];
+                    sel.value = next.value;
+                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                    render();
+                });
+                /* Engine syncs (init, external changes) update the hidden select;
+                   reflect them on the chip. */
+                sel.addEventListener('change', render);
+                render();
+                chipsBox.appendChild(btn);
+            });
+        }
+
+        /* --- Opponent segmented toggle. Vs computer is the default visual
+               state; PVP is the doorway into the online lobby (as before). */
+        const segBtns = Array.from(document.querySelectorAll('#screen-menu .tk-seg button'));
+        const setSeg = (active) => segBtns.forEach(b =>
+            b.setAttribute('aria-pressed', String(b === active)));
+        segBtns.forEach(b => b.addEventListener('click', () => {
+            setSeg(b);
+            if (b.dataset.o === 'pvp') openPvpLobby('#btn-pvp-create');
+        }));
+
+        /* --- Animated pitch: decorative 2-3-1 passing move, ported from the
+               reference. Skipped for reduced-motion users. */
+        initMenuPitch();
+    }
+
+    /** Draws and loops the decorative pitch animation in #tk-pitch. */
+    function initMenuPitch() {
+        const svg = el('tk-pitch');
+        if (!svg || svg.dataset.done) return;
+        svg.dataset.done = '1';
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const NS = 'http://www.w3.org/2000/svg';
+        const g = (t, a, p) => {
+            const e = document.createElementNS(NS, t);
+            for (const k in a) e.setAttribute(k, a[k]);
+            (p || svg).appendChild(e);
+            return e;
+        };
+        g('rect', { x: 2, y: 2, width: 296, height: 326, rx: 6, fill: '#17894f', stroke: '#fff', 'stroke-width': 3 });
+        for (let i = 0; i < 6; i += 2) g('rect', { x: 2, y: 2 + i * 54.3, width: 296, height: 54.3, fill: 'rgba(0,0,0,.09)' });
+        const L = { stroke: 'rgba(255,255,255,.8)', 'stroke-width': 2.5, fill: 'none' };
+        g('line', { x1: 2, y1: 165, x2: 298, y2: 165, ...L });
+        g('circle', { cx: 150, cy: 165, r: 34, ...L });
+        g('rect', { x: 95, y: 2, width: 110, height: 42, ...L });
+        g('rect', { x: 95, y: 286, width: 110, height: 42, ...L });
+        const opp = [[150, 28], [95, 78], [205, 78], [60, 128], [150, 112], [240, 128]];
+        const me = [[100, 292], [200, 292], [55, 232], [150, 220], [245, 232], [150, 150]];
+        opp.forEach(([x, y]) => g('circle', { cx: x, cy: y, r: 10, fill: '#fff', stroke: 'rgba(0,0,0,.25)', 'stroke-width': 2 }));
+        const trail = g('line', { x1: 0, y1: 0, x2: 0, y2: 0, stroke: '#ff9f1c', 'stroke-width': 3, 'stroke-dasharray': '6 6', 'stroke-linecap': 'round', opacity: 0 });
+        me.forEach(([x, y]) => g('circle', { cx: x, cy: y, r: 11, fill: '#ff9f1c', stroke: '#2a1500', 'stroke-width': 2.5 }));
+        const ball = g('circle', { cx: 100, cy: 292, r: 6, fill: '#fff', stroke: '#111', 'stroke-width': 2 });
+        const seq = [0, 3, 2, 3, 5], goal = [150, 2];
+        let k = 0, raf = 0;
+        const mv = (a, b, ms, done) => {
+            const t0 = performance.now();
+            trail.setAttribute('x1', a[0]); trail.setAttribute('y1', a[1]);
+            trail.setAttribute('x2', b[0]); trail.setAttribute('y2', b[1]);
+            trail.setAttribute('opacity', .9);
+            const f = (t) => {
+                const p = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - p, 3);
+                ball.setAttribute('cx', a[0] + (b[0] - a[0]) * e);
+                ball.setAttribute('cy', a[1] + (b[1] - a[1]) * e);
+                if (p < 1) raf = requestAnimationFrame(f);
+                else { trail.setAttribute('opacity', 0); setTimeout(done, 350); }
+            };
+            raf = requestAnimationFrame(f);
+        };
+        const step = () => {
+            const a = k < seq.length ? me[seq[k]] : goal;
+            const from = [+ball.getAttribute('cx'), +ball.getAttribute('cy')];
+            if (k >= seq.length) {
+                mv(from, goal, 520, () => {
+                    k = 0;
+                    ball.setAttribute('cx', me[0][0]);
+                    ball.setAttribute('cy', me[0][1]);
+                    setTimeout(step, 500);
+                });
+                return;
+            }
+            mv(from, a, k ? 560 : 1, () => { k++; step(); });
+        };
+        step();
     }
 
     function setupPvpUI() {
@@ -11044,6 +11198,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     const modePvpBtn = el('btn-mode-pvp');
     if (modePvpBtn) modePvpBtn.addEventListener('click', () => openPvpLobby('#btn-pvp-create'));
     setupPvpUI();
+    initRevampedMenu();
     /* The tutorial lives on its own page now (/tutorial) — the menu links
        straight there, so there is no in-app tutorial screen to push. */
     /* Every row of the sheet does its one thing and then gets out of the way —

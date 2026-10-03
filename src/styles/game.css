@@ -80,55 +80,6 @@
 
     /* The menu's palette, hoisted to the root so the in-game capsule can be
        built from the same turf tokens the START SCREEN uses. They began life
-       scoped to #screen-menu; the HUD needs the identical ink, and `var()`
-       inside a declaration is all-or-nothing — an unresolved `--turf-line`
-       would silently drop the border to `currentColor` instead of failing
-       loudly. #screen-menu re-declares the same values, which is harmless. */
-    --turf-0: #081C13;
-    --turf-1: #0E2A1D;
-    --turf-2: #143824;
-    --turf-line: #2A4B37;
-    --chalk: #EEF1E6;
-    --sage: #8CA394;
-    --sage-dim: #5C7266;
-    --amber: #F2A63C;
-    --amber-ink: #40260A;
-
-    /* The capsule's fill densities. These are a *tint*, not a solid: the blur
-       behind them is what carries the legibility, so the alpha is free to stay
-       low and let the pitch read through the chrome. Three densities of one
-       colour, matching the menu's shell-then-nested-pill structure. */
-    --cap-fill: rgba(8, 20, 13, 0.42);
-    --cap-fill-2: rgba(8, 20, 13, 0.3);
-    --cap-fill-3: rgba(8, 20, 13, 0.62);
-
-    /* The decision ring is sized to the *painted* centre circle. The engine
-       measures it in `fitView()` from the camera fit and writes it here, so the
-       arc lands on the grass circle at every aspect ratio instead of being a
-       decorative ring floating near it. The fallback only matters for the first
-       paint, before the first `fitView()` runs. */
-    --ring-d: clamp(96px, 30vmin, 240px);
-
-    /* Dark-glass furniture: one recipe, three densities, so every overlay reads
-       as the same material. */
-    --glass: rgba(10, 20, 12, 0.32);
-    --glass-strong: rgba(10, 20, 12, 0.86);
-    /* `--glass-xthin` is the density reserved for *guiding* copy — the
-       instruction line and the two status pills. They sit over live play and are
-       read, never tapped, so they tint the grass instead of covering it: the
-       ball stays the brightest thing on the pitch. Legibility is carried by a
-       text-shadow rather than by the fill. */
-    --glass-xthin: rgba(10, 20, 12, 0.2);
-    --glass-line: rgba(255, 255, 255, 0.1);
-    --glass-line-soft: rgba(255, 255, 255, 0.055);
-    --on-glass: rgba(255, 255, 255, 0.94);
-    --on-glass-mute: rgba(255, 255, 255, 0.6);
-}
-
-html,
-body {
-    height: 100%;
-}
 
 body {
     overflow: hidden;
@@ -143,25 +94,6 @@ body {
 /* The shell's turf. The canvas over it now paints the ground edge to edge — the
    pitch plane and, behind it, the outfield grass in game-source.js — so this
    recipe is only ever the floor of last resort: the frame before the first WebGL
-   render. #screen-menu re-declares the same values for the start screen, which
-   has no canvas over it and is meant to read dark. */
-#app {
-    position: fixed;
-    inset: 0;
-    z-index: 10;
-    display: flex;
-    flex-direction: column;
-    /* The canvas fills this element edge to edge on every device; the CSS turf
-    recipe underneath is only ever the floor of last resort (first-frame / resize
-    gap). It uses the same mown-cut stripes and base tones the outfield plane
-    carries, so nothing flashes a different green when the renderer has not painted
-    yet. */
-    background:
-        radial-gradient(ellipse 620px 420px at 50% -8%, rgba(242, 166, 60, 0.16), transparent 66%),
-        repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 4px),
-        repeating-linear-gradient(115deg, var(--turf-1) 0 46px, var(--turf-2) 46px 92px),
-        var(--turf-0);
-}
 
 #stage {
     position: relative;
@@ -1729,45 +1661,6 @@ body {
    The menu is not a dialog floating over the app: it is the first thing anybody
    sees, so it is dressed as the pitch itself. Three zones — the nav capsule, the
    hero, and the settings strip with its kick-off — sit in one flex frame; the
-   turf is painted by `#screen-menu::before`, translucent over the looping menu
-   video, and weathered by two decorative layers on top of it.
-
-   Everything is a layout-flow length (clamp()/vmin or a percentage), so the same
-   three zones hold together on a 320px phone and on a 2560px display; at 860px
-   they simply flatten into rows (game-ui-ux: anchors + containers, never
-   absolute pixels).
-   ========================================================================= */
-
-#screen-menu {
-    --turf-0: #081C13;
-    --turf-1: #0E2A1D;
-    --turf-2: #143824;
-    --turf-line: #2A4B37;
-    --chalk: #EEF1E6;
-    --sage: #8CA394;
-    --sage-dim: #5C7266;
-    --amber: #F2A63C;
-    --amber-ink: #40260A;
-
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    height: 100dvh;
-    max-height: 100dvh;
-    /* The safe-area insets belong to the zones that carry a gutter, not here:
-       the frame stays full-bleed so the turf reaches every edge. */
-    padding: 0;
-    overflow: hidden;
-    font-family: 'Rajdhani', var(--f-sans);
-    color: var(--chalk);
-    /* The turf no longer paints here: it lives on ::before, ABOVE the menu
-       video, so the moving picture sits behind the texture and ghosts through
-       it. The element itself keeps only a solid fallback for the (impossible)
-       case where the pseudo never paints. */
-    background: var(--turf-0);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-}
 
 /* --- the turf, painted ABOVE the video ------------------------------------
    The looping video is the menu's moving light, full-bleed at the very back of
@@ -1775,18 +1668,6 @@ body {
    is translucent, so the video shows through it at roughly a fifth strength
    while the stripes still read as turf. Lower the alphas to let more video
    through; raise them to quiet the video again. */
-#screen-menu::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    pointer-events: none;
-    background:
-        radial-gradient(ellipse 620px 420px at 50% -8%, rgba(242, 166, 60, 0.16), transparent 66%),
-        repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 4px),
-        repeating-linear-gradient(115deg, rgba(14, 42, 29, 0.60) 0 46px, rgba(20, 56, 36, 0.60) 46px 92px),
-        rgba(8, 28, 19, 0.45);
-}
 
 /* `.screen[hidden]` is (0,2,0) and loses to the id rule above, so hiding has to
    be restated at that weight — without this the menu would never close. */
@@ -1805,296 +1686,56 @@ body {
    The vignette sits the turf down at its edges; the grain keeps the large flat
    fills from banding on a wide-gamut panel. Both are decorative, so neither may
    take a pointer event. */
-#screen-menu .vignette {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    pointer-events: none;
-    background: radial-gradient(ellipse 340px 600px at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.35) 100%);
-}
 
-#screen-menu .grain {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    pointer-events: none;
-    opacity: 0.5;
-    mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
-}
 
 /* `.grain` is also a generic helper in tokens.css, which draws its own ::after
    film for the light sheets. This layer paints its own, so the helper's is
    switched off here rather than restyled. */
-#screen-menu .grain::after {
-    content: none;
-    display: none;
-}
 
 /* The frame holds all three zones. `1 0 auto` lets it fill a tall viewport (so
    the hero can centre) while never squeezing the zones together — a short
    viewport scrolls instead. The frame's own max-width is relaxed to the full
    1120px measure at 860px, in global.css, which loads last.
 
-   The frame is therefore the scroller. `#screen-menu` is `overflow: hidden`
-   (full-bleed turf, nothing to rubber-band), so if the scroller lived any
-   higher a three-zone menu taller than the phone — which it is once the nav,
-   the settings strip and three kick-off buttons all stack — would simply have
-   its bottom CTA cut off with no way to reach it. On a tall screen nothing
-   changes: the frame is exactly the viewport and space-between still spreads
-   the zones. */
-.menu-frame {
-    position: relative;
-    z-index: 3;
-    display: flex;
-    flex: 1 1 0%;
-    min-height: 0;
-    height: 100%;
-    flex-direction: column;
-    justify-content: space-between;
-    width: 100%;
-    max-width: 560px;
-    margin-inline: auto;
-    overflow-y: auto;
-    overscroll-behavior-y: contain;
-}
 
 /* --- the two grouping capsules: one chrome, borrowed twice --------------- */
-#screen-menu .top-capsule,
-#screen-menu .settings-capsule {
-    background: rgba(8, 20, 13, 0.6);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid var(--turf-line);
-    border-radius: 26px;
-}
 
 /* Nav zone: the capsule owns the vertical rhythm, the zone owns the safe area. */
-#screen-menu .navbar {
-    position: relative;
-    flex: 0 0 auto;
-    width: 100%;
-    padding: calc(var(--sa-t) + 12px) calc(var(--sa-r) + 16px) 0 calc(var(--sa-l) + 16px);
-    box-sizing: border-box;
-}
 
-#screen-menu .top-capsule {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 8px 10px 8px 18px;
-    background: linear-gradient(135deg, rgba(12, 28, 19, 0.85), rgba(6, 17, 11, 0.92));
-    backdrop-filter: blur(16px) saturate(135%);
-    -webkit-backdrop-filter: blur(16px) saturate(135%);
-    border: 1px solid rgba(80, 227, 194, 0.22);
-    border-radius: 999px;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), 0 0 1px rgba(80, 227, 194, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    box-sizing: border-box;
-    width: 100%;
-    min-width: 0;
-}
 
-#screen-menu .brand-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
-}
 
-#screen-menu .brand-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 0;
-    flex-shrink: 0;
-}
 
-#screen-menu .brand-mark {
-    flex: none;
-    width: 22px;
-    height: 22px;
-    color: var(--amber);
-    filter: drop-shadow(0 0 8px rgba(242, 166, 60, 0.45));
-}
 
-#screen-menu .brand-name {
-    font-family: 'Anton', var(--f-sans);
-    font-size: 21px;
-    font-weight: 400;
-    letter-spacing: 0.04em;
-    line-height: 1;
-    color: var(--chalk);
-    text-transform: uppercase;
-}
 
-#screen-menu .brand-tag {
-    font-family: 'Rajdhani', var(--f-sans);
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.12em;
-    color: var(--amber);
-    background: rgba(242, 166, 60, 0.12);
-    border: 1px solid rgba(242, 166, 60, 0.32);
-    padding: 3px 8px;
-    border-radius: 5px;
-    line-height: 1;
-    text-transform: uppercase;
-    flex-shrink: 0;
-}
 
 /* Nav links pill container */
-#screen-menu .game-nav-links {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    background: rgba(0, 0, 0, 0.28);
-    border: 1px solid rgba(80, 227, 194, 0.12);
-    border-radius: 999px;
-    padding: 4px;
-    flex-shrink: 0;
-    box-sizing: border-box;
-}
 
-#screen-menu .game-nav-link {
-    position: relative;
-    font-family: 'Rajdhani', var(--f-sans);
-    font-size: 12.5px;
-    font-weight: 700;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    color: rgba(238, 241, 230, 0.78);
-    text-decoration: none;
-    padding: 6px 14px;
-    border-radius: 999px;
-    transition: color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
-    white-space: nowrap;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
 
-#screen-menu .game-nav-link:hover {
-    color: #ffffff;
-    background: rgba(80, 227, 194, 0.16);
-    text-shadow: 0 0 10px rgba(80, 227, 194, 0.55);
-    box-shadow: 0 0 12px rgba(80, 227, 194, 0.18);
-    transform: translateY(-1px);
-}
 
-#screen-menu .game-nav-link:active {
-    transform: translateY(0);
-    background: rgba(80, 227, 194, 0.25);
-}
 
 /* Text label switching between full and compact */
-#screen-menu .nav-text-full {
-    display: inline;
-}
 
-#screen-menu .nav-text-short {
-    display: none;
-}
 
 /* Tablet & medium screens: 641px - 899px (iPad Mini, iPad Air, iPad 10th gen) */
 @media (max-width: 899px) {
-    #screen-menu .nav-text-full {
-        display: none;
-    }
-    #screen-menu .nav-text-short {
-        display: inline;
-    }
-    #screen-menu .top-capsule {
-        padding: 7px 8px 7px 16px;
-        gap: 8px;
-    }
-    #screen-menu .game-nav-link {
-        font-size: 12px;
-        padding: 5px 11px;
-    }
 }
 
 /* Mobile phones: <= 640px (iPhone, Galaxy, Pixel, etc.) */
 @media (max-width: 640px) {
-    #screen-menu .navbar {
-        padding: calc(var(--sa-t) + 8px) calc(var(--sa-r) + 12px) 0 calc(var(--sa-l) + 12px);
-    }
 
-    #screen-menu .top-capsule {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 8px;
-        padding: 9px 12px 9px;
-        border-radius: 18px;
-    }
 
-    #screen-menu .brand-group {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        width: 100%;
-    }
 
-    #screen-menu .brand-mark {
-        width: 20px;
-        height: 20px;
-    }
 
-    #screen-menu .brand-name {
-        font-size: 19px;
-    }
 
-    #screen-menu .brand-tag {
-        font-size: 10.5px;
-        padding: 2.5px 7px;
-    }
 
-    #screen-menu .game-nav-links {
-        width: 100%;
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 4px;
-        border-radius: 12px;
-        padding: 3px;
-        box-sizing: border-box;
-        background: rgba(0, 0, 0, 0.32);
-        border: 1px solid rgba(80, 227, 194, 0.14);
-    }
 
-    #screen-menu .game-nav-link {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        width: 100%;
-        box-sizing: border-box;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        padding: 7px 2px;
-        border-radius: 8px;
-    }
 
-    #screen-menu .game-nav-link:hover {
-        transform: none;
-    }
 }
 
 /* Ultra-compact phones: <= 360px */
 @media (max-width: 360px) {
-    #screen-menu .navbar {
-        padding: calc(var(--sa-t) + 6px) calc(var(--sa-r) + 8px) 0 calc(var(--sa-l) + 8px);
-    }
 
-    #screen-menu .top-capsule {
-        padding: 8px 10px 8px;
-    }
 
-    #screen-menu .game-nav-link {
-        font-size: 10px;
-        letter-spacing: 0.02em;
-        padding: 6px 1px;
-    }
 }
 
 /* --- hero: the shape, drawn --------------------------------------------
@@ -2104,75 +1745,18 @@ body {
    NOT allowed to shrink — as `1 1 0%` with `min-height: 0` it collapsed into
    whatever the nav and the settings strip left over, and `overflow: hidden`
    then chopped the pitch and the title in half. */
-#screen-menu .hero {
-    position: relative;
-    display: flex;
-    flex: 1 0 auto;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 4px 16px;
-    text-align: center;
-    overflow: hidden;
-}
 
-#screen-menu .hero .vs {
-    margin-bottom: 2px;
-    font-size: clamp(9px, 1.8vmin, 11px);
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--sage-dim);
-}
 
-#screen-menu .hero .pitch {
-    flex: 0 1 auto;
-    max-height: min(150px, 22dvh);
-    width: auto;
-    aspect-ratio: 160 / 240;
-    margin-bottom: 4px;
-}
 
 /* Narrow: `.vs` already says the shape, so the copy's duplicate eyebrow stays
    down until the wide layout has room for it. */
-#screen-menu .hero-copy .eyebrow {
-    display: none;
-}
 
-#screen-menu #menu-title {
-    margin: 0;
-    font-family: 'Anton', var(--f-sans);
-    font-size: clamp(1.5rem, 5.5vmin, 2.4rem);
-    font-weight: 400;
-    line-height: 0.96;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--chalk);
-}
 
-#screen-menu .hero-copy p {
-    max-width: 40ch;
-    margin: 4px auto 0;
-    font-size: clamp(11px, 1.7vmin, 13.5px);
-    line-height: 1.35;
-    color: var(--sage);
-}
 
 /* --- the bottom zone: settings strip, then the kick-offs ----------------
    Stacked on a phone: the capsule, the CTAs, and the self-test well if it has
    anything to say. */
-#screen-menu .bottom-area {
-    position: relative;
-    flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 0 calc(var(--sa-r) + 16px) calc(var(--sa-b) + 10px) calc(var(--sa-l) + 16px);
-}
 
-#screen-menu .settings-capsule {
-    padding: 10px 12px 4px;
-}
 
 /* --- the mode pair -------------------------------------------------------
    A read-out, not a switch: the engine plays the CPU and has no second human
@@ -2182,352 +1766,62 @@ body {
    cell overflow instead of wrapping below the CPU pill on narrow phones, so
    both tracks are clamped to `minmax(0, 1fr)` and every cell keeps a zero
    minimum width (see `.mode` below). */
-#screen-menu .mode-switch {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 12px;
-}
 
-#screen-menu .mode {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
-    padding: 11px 8px;
-    border: 1px solid var(--turf-line);
-    border-radius: 12px;
-    background: rgba(0, 0, 0, 0.2);
-    font-size: 13.5px;
-    font-weight: 700;
-    line-height: 1;
-    color: var(--sage);
-    white-space: nowrap;
-}
 
-#screen-menu .mode .badge-live {
-    flex: none;
-}
 
-#screen-menu .mode svg {
-    flex: none;
-    width: 15px;
-    height: 15px;
-}
 
-#screen-menu .mode.active {
-    background: var(--amber);
-    border-color: var(--amber);
-    color: var(--amber-ink);
-}
 
-#screen-menu .mode .soon {
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.28);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--sage-dim);
-}
 
 /* --- the quick settings grid ---------------------------------------------
    A compact 2x2 grid (or 4-across on wider cards) of styled dropdown selects.
    No horizontal scrollbar, perfectly responsive and accessible. */
-#screen-menu .quick {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 10px;
-    padding-bottom: 8px;
-    width: 100%;
-}
 
 @media (min-width: 500px) {
-    #screen-menu .quick {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 8px;
-    }
 }
 
-#screen-menu .qchip {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    padding: 7px 10px 8px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 14px;
-    background: rgba(14, 26, 18, 0.7);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
-}
 
-#screen-menu .qchip:hover,
-#screen-menu .qchip:focus-within {
-    border-color: rgba(242, 166, 60, 0.45);
-    background: rgba(18, 32, 22, 0.88);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-}
 
-#screen-menu .qchip-label {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-family: 'Rajdhani', var(--f-sans);
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    color: var(--sage);
-    user-select: none;
-    cursor: pointer;
-}
 
-#screen-menu .qchip-icon {
-    flex: none;
-    width: 13px;
-    height: 13px;
-    color: var(--amber);
-    opacity: 0.9;
-}
 
-#screen-menu .select-wrapper {
-    position: relative;
-    display: flex;
-    align-items: center;
-    width: 100%;
-}
 
-#screen-menu .setting-select {
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    width: 100%;
-    min-height: 28px;
-    padding: 3px 22px 3px 8px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    font-family: 'Rajdhani', var(--f-sans);
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: var(--chalk);
-    cursor: pointer;
-    outline: none;
-    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
-}
 
-#screen-menu .setting-select:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.2);
-    color: #ffffff;
-}
 
-#screen-menu .setting-select:focus {
-    border-color: var(--amber);
-    background: rgba(242, 166, 60, 0.12);
-    box-shadow: 0 0 0 2px rgba(242, 166, 60, 0.25);
-    color: #ffffff;
-}
 
-#screen-menu .setting-select option {
-    background-color: #121f17;
-    color: #f2f7f3;
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    padding: 6px 10px;
-}
 
-#screen-menu .select-chevron {
-    position: absolute;
-    right: 8px;
-    pointer-events: none;
-    width: 10px;
-    height: 10px;
-    stroke: var(--amber);
-    transition: transform 0.2s ease;
-}
 
-#screen-menu .select-wrapper:hover .select-chevron {
-    transform: translateY(1px);
-}
 
 /* --- the kick-off CTA ---------------------------------------------------
    Three modes now (Vs Computer / Penalty / Rondo): a single-column grid on
    narrow screens, three equal tracks on wide. Every button is full-bleed in
    its track so the stack reads as one clean column. */
-#screen-menu .cta-stack {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 8px;
-}
 
-#screen-menu .kickoff,
-#screen-menu .kickoff-alt,
-#screen-menu .kickoff-rondo {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    width: 100%;
-    min-height: 48px;
-}
 
-#screen-menu .kickoff {
-    padding: 10px 14px 8px;
-    border: 0;
-    border-radius: 14px;
-    background: var(--amber);
-    font-family: 'Anton', var(--f-sans);
-    font-size: clamp(15px, 2.2vmin, 18px);
-    font-weight: 400;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    color: #3B2408;
-    transition: transform 0.16s ease-out, filter 0.16s ease;
-}
 
-#screen-menu .kickoff svg {
-    flex: none;
-    width: 18px;
-    height: 18px;
-}
 
-#screen-menu .kickoff:hover {
-    transform: translateY(-1px);
-    filter: brightness(1.06);
-}
 
-#screen-menu .kickoff:active {
-    transform: translateY(1px);
-}
 
 /* Penalty Shootout button — prominent, eye-catching action button */
-#screen-menu .kickoff-alt {
-    min-height: 48px;
-    padding: 12px 20px;
-    border: 1.5px solid rgba(80, 227, 194, 0.65);
-    border-radius: 14px;
-    background: linear-gradient(135deg, rgba(16, 42, 34, 0.9) 0%, rgba(13, 60, 52, 0.8) 100%);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 16px rgba(80, 227, 194, 0.16);
-    font-size: 14px;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #E6FFF6;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 9px;
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    backdrop-filter: blur(8px);
-}
 
-#screen-menu .kickoff-alt svg {
-    width: 19px;
-    height: 19px;
-    color: #50E3C2;
-    transition: transform 0.25s ease;
-}
 
-#screen-menu .kickoff-alt:hover {
-    border-color: #50E3C2;
-    background: linear-gradient(135deg, rgba(22, 60, 48, 0.95) 0%, rgba(18, 84, 72, 0.9) 100%);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), 0 0 24px rgba(80, 227, 194, 0.35);
-    color: #FFFFFF;
-    transform: translateY(-2px);
-}
 
-#screen-menu .kickoff-alt:hover svg {
-    transform: rotate(45deg) scale(1.12);
-}
 
-#screen-menu .kickoff-alt:active {
-    transform: translateY(1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
 
 /* Rondo button — the online keep-away mode. Same structural language as the
    Penalty button (outlined glow, 48px, 14px radius, 800 uppercase), but keyed
    to the team blue instead of teal so the two alt modes don't read as one. */
-#screen-menu .kickoff-rondo {
-    padding: 12px 20px;
-    border: 1.5px solid rgba(31, 107, 255, 0.65);
-    border-radius: 14px;
-    background: linear-gradient(135deg, rgba(16, 32, 64, 0.9) 0%, rgba(13, 38, 84, 0.8) 100%);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 16px rgba(31, 107, 255, 0.16);
-    font-size: 14px;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #E6EFFF;
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-}
 
-#screen-menu .kickoff-rondo svg {
-    flex: none;
-    width: 19px;
-    height: 19px;
-    color: var(--x-you);
-    transition: transform 0.25s ease;
-}
 
-#screen-menu .kickoff-rondo .badge-live {
-    flex: none;
-}
 
-#screen-menu .kickoff-rondo:hover {
-    border-color: var(--x-you);
-    background: linear-gradient(135deg, rgba(22, 44, 88, 0.95) 0%, rgba(18, 52, 112, 0.9) 100%);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), 0 0 24px rgba(31, 107, 255, 0.35);
-    color: #FFFFFF;
-    transform: translateY(-2px);
-}
 
-#screen-menu .kickoff-rondo:hover svg {
-    transform: rotate(45deg) scale(1.12);
-}
 
-#screen-menu .kickoff-rondo:active {
-    transform: translateY(1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
 
 /* --- focus + the self-test well ---------------------------------------- */
-#screen-menu :focus-visible {
-    outline: 2px solid var(--chalk);
-    outline-offset: 2px;
-    box-shadow: none;
-}
 
 /* On the amber fill a chalk ring would vanish, so the ring moves inside it. */
-#screen-menu .kickoff:focus-visible {
-    outline-color: #3B2408;
-    outline-offset: -4px;
-}
 
-#screen-menu .test-result {
-    margin-top: 0;
-    border-color: var(--turf-line);
-    background: rgba(0, 0, 0, 0.3);
-    color: var(--sage);
-}
 
 /* The phone's home-indicator stand-in. It exists only to give the bottom of a
    tall screen a floor, so it is hidden the moment the layout is a wide row. */
-#screen-menu .homebar {
-    display: none;
-}
 
 /* --- wide: the same three zones flatten into rows ----------------------
    Nothing here changes a component — it only relaxes the three zones onto one
@@ -2539,169 +1833,40 @@ body {
         max-width: 1020px;
     }
 
-    #screen-menu .navbar {
-        padding: calc(var(--sa-t) + 24px) clamp(24px, 4vw, 40px) 0;
-    }
 
     /* Nav: brand left, pills right, one capsule-shaped row. */
-    #screen-menu .top-capsule {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        padding: 8px 10px 8px 22px;
-        border-radius: 999px;
-    }
 
-    #screen-menu .brand-row {
-        flex: none;
-        margin-bottom: 0;
-    }
 
-    #screen-menu .game-nav-links {
-        gap: 5px;
-        padding: 4px 6px;
-    }
 
-    #screen-menu .game-nav-link {
-        font-size: 13px;
-        padding: 7px 15px;
-    }
 }
 
 @media (min-width: 1200px) {
-    #screen-menu .top-capsule {
-        padding: 10px 12px 10px 24px;
-        gap: 20px;
-    }
 
-    #screen-menu .brand-name {
-        font-size: 22px;
-    }
 
-    #screen-menu .brand-tag {
-        font-size: 11.5px;
-        padding: 3.5px 9px;
-    }
 
-    #screen-menu .game-nav-links {
-        gap: 6px;
-        padding: 5px 8px;
-    }
 
-    #screen-menu .game-nav-link {
-        font-size: 13.5px;
-        padding: 8px 18px;
-        letter-spacing: 0.08em;
-    }
 
     /* Hero: the drawing beside the copy, which can now be left-aligned. */
-    #screen-menu .hero {
-        flex-direction: row;
-        justify-content: center;
-        gap: clamp(32px, 5vw, 60px);
-        padding: 0 40px;
-        text-align: left;
-    }
 
-    #screen-menu .hero .vs {
-        display: none;
-    }
 
-    #screen-menu .hero .pitch {
-        width: min(300px, 30vw);
-        margin-bottom: 0;
-    }
 
-    #screen-menu .hero-copy {
-        max-width: 340px;
-    }
 
-    #screen-menu .hero-copy .eyebrow {
-        display: block;
-        margin-bottom: 8px;
-        font-family: 'Rajdhani', var(--f-sans);
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: 0.12em;
-        color: var(--sage-dim);
-    }
 
-    #screen-menu #menu-title {
-        margin: 0 0 14px;
-        font-size: clamp(2.4rem, 4.6vw, 2.9rem);
-        line-height: 0.95;
-    }
 
-    #screen-menu .hero-copy p {
-        max-width: 34ch;
-        margin: 0;
-    }
 
     /* Bottom: the settings strip and the kick-offs sit on one line. */
-    #screen-menu .bottom-area {
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: center;
-        gap: 16px;
-        padding: 0 40px calc(var(--sa-b) + 40px);
-    }
 
-    #screen-menu .settings-capsule {
-        display: flex;
-        flex: 1 1 auto;
-        align-items: center;
-        gap: 18px;
-        min-width: 0;
-        padding: 14px 18px;
-    }
 
-    #screen-menu .mode-switch {
-        flex: 0 0 auto;
-        width: 220px;
-        margin-bottom: 0;
-    }
 
-    #screen-menu .quick {
-        flex: 1 1 auto;
-        min-width: 0;
-        padding-bottom: 0;
-    }
 
     /* Bottom: the settings strip takes its row; the three kick-offs take the
        next as three equal tracks. */
-    #screen-menu .cta-stack {
-        flex: 1 1 100%;
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
-    }
 
-    #screen-menu .kickoff,
-    #screen-menu .kickoff-alt,
-    #screen-menu .kickoff-rondo {
-        width: 100%;
-        min-height: 48px;
-        border-radius: 14px;
-    }
 
-    #screen-menu .kickoff {
-        padding: 14px 0;
-    }
 
-    #screen-menu .kickoff-alt {
-        padding: 12px 16px;
-    }
 
     /* The self-test well is the only read-out; it takes a row of its own. */
-    #screen-menu .test-result {
-        flex: 1 1 100%;
-    }
 
-    #screen-menu .homebar {
-        display: none;
-    }
 }
 
 /* Portrait is the only mobile shape: the start screen's hero stacks on a
@@ -2710,19 +1875,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
 
-    #screen-menu .kickoff:hover,
-    #screen-menu .kickoff:active,
-    #screen-menu .kickoff-alt:hover,
-    #screen-menu .kickoff-alt:active,
-    #screen-menu .kickoff-rondo:hover,
-    #screen-menu .kickoff-rondo:active {
-        transform: none;
-    }
 
-    #screen-menu .kickoff-alt:hover svg,
-    #screen-menu .kickoff-rondo:hover svg {
-        transform: none;
-    }
 }
 
 .card>* {
@@ -5775,4 +4928,381 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
     #hud-rondo, #hud-rondo * { animation: none !important; transition: none !important; }
+}
+
+/* ============ Revamped main menu (takTIK) ============ */
+/* Tokens: light default, dark via OS setting or manual [data-theme] on <html>. */
+#screen-menu {
+    --tk-bg: #e8efe1;
+    --tk-ink: #0a2a1c;
+    --tk-mute: #4d6b5b;
+    --tk-panel: rgba(255,255,255,.72);
+    --tk-line: rgba(10,42,28,.22);
+    --tk-or: #f08c00;
+    --tk-orink: #2a1500;
+    --tk-mt: #0e9f6e;
+    --tk-bl: #2457e6;
+    --tk-shade: linear-gradient(180deg,rgba(232,239,225,.78),rgba(232,239,225,.28) 45%,rgba(232,239,225,.88));
+
+    display: block;
+    height: 100%;
+    max-height: 100%;
+    overflow: hidden;
+    padding: 0;
+    background: var(--tk-bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    color: var(--tk-ink);
+    font: 500 14px/1.3 Barlow, system-ui, sans-serif;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) #screen-menu {
+        --tk-bg: #04180f;
+        --tk-ink: #eef6ef;
+        --tk-mute: #9bb8a8;
+        --tk-panel: rgba(4,26,17,.8);
+        --tk-line: rgba(238,246,239,.2);
+        --tk-or: #ff9f1c;
+        --tk-mt: #19d98b;
+        --tk-bl: #4d82ff;
+        --tk-shade: linear-gradient(180deg,rgba(2,14,9,.72),rgba(2,14,9,.22) 45%,rgba(2,14,9,.88));
+    }
+}
+:root[data-theme="dark"] #screen-menu {
+    --tk-bg: #04180f;
+    --tk-ink: #eef6ef;
+    --tk-mute: #9bb8a8;
+    --tk-panel: rgba(4,26,17,.8);
+    --tk-line: rgba(238,246,239,.2);
+    --tk-or: #ff9f1c;
+    --tk-mt: #19d98b;
+    --tk-bl: #4d82ff;
+    --tk-shade: linear-gradient(180deg,rgba(2,14,9,.72),rgba(2,14,9,.22) 45%,rgba(2,14,9,.88));
+}
+#screen-menu .tk-d {
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+/* Video background layer */
+#screen-menu #bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+}
+#screen-menu #bg video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+#screen-menu #bg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--tk-shade);
+}
+#screen-menu .tk-app {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 10px 14px 12px;
+    display: grid;
+    gap: 10px;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    box-sizing: border-box;
+}
+#screen-menu .tk-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+}
+#screen-menu .tk-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 24px;
+}
+#screen-menu .tk-logo i {
+    width: 22px;
+    height: 22px;
+    background: var(--tk-or);
+    clip-path: polygon(30% 0, 100% 0, 70% 100%, 0 100%);
+}
+#screen-menu .tk-logo small {
+    font-size: 11px;
+    border: 1.5px solid var(--tk-ink);
+    padding: 0 7px;
+    transform: skewX(-12deg);
+    font-style: normal;
+}
+#screen-menu .tk-hd {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+#screen-menu .tk-nav {
+    display: none;
+    gap: 2px;
+}
+#screen-menu .tk-nav a,
+#screen-menu .tk-ib {
+    color: var(--tk-ink);
+    text-decoration: none;
+    font-size: 17px;
+}
+#screen-menu .tk-nav a {
+    padding: 4px 12px;
+    border-bottom: 3px solid transparent;
+}
+#screen-menu .tk-nav a:hover {
+    border-color: var(--tk-or);
+}
+#screen-menu .tk-ib {
+    all: unset;
+    cursor: pointer;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border: 1.5px solid var(--tk-line);
+    background: var(--tk-panel);
+    transform: skewX(-10deg);
+    box-sizing: border-box;
+}
+#screen-menu .tk-ib svg {
+    width: 18px;
+    height: 18px;
+    transform: skewX(10deg);
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+}
+#screen-menu .tk-ib:focus-visible,
+#screen-menu .tk-chip:focus-visible,
+#screen-menu .tk-mode:focus-visible,
+#screen-menu .tk-seg button:focus-visible,
+#screen-menu .tk-nav a:focus-visible {
+    outline: 3px solid var(--tk-or);
+    outline-offset: 2px;
+}
+#screen-menu .tk-menu {
+    position: absolute;
+    right: 0;
+    top: 52px;
+    z-index: 5;
+    display: none;
+    flex-direction: column;
+    background: var(--tk-panel);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--tk-line);
+    padding: 6px;
+}
+#screen-menu .tk-menu.open { display: flex; }
+#screen-menu .tk-menu a {
+    color: var(--tk-ink);
+    text-decoration: none;
+    font-size: 20px;
+    padding: 8px 18px;
+}
+#screen-menu .tk-stage {
+    position: relative;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+#screen-menu .tk-stage h1 {
+    font-size: min(23vw, 12dvh);
+    line-height: .85;
+    font-weight: 900;
+    text-align: center;
+    flex: none;
+    margin: 0;
+}
+#screen-menu .tk-stage h1 span {
+    color: transparent;
+    -webkit-text-stroke: 2px var(--tk-or);
+}
+#screen-menu .tk-tag {
+    display: none;
+    color: var(--tk-mute);
+    font-size: 17px;
+    max-width: 38ch;
+    text-align: center;
+    margin: 8px 0;
+}
+#screen-menu .tk-board {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    margin-top: 6px;
+}
+#screen-menu .tk-board svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+#screen-menu .tk-ctrl {
+    display: grid;
+    gap: 8px;
+}
+#screen-menu .tk-seg {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    transform: skewX(-10deg);
+    border: 1.5px solid var(--tk-line);
+    background: var(--tk-panel);
+}
+#screen-menu .tk-seg button {
+    all: unset;
+    cursor: pointer;
+    text-align: center;
+    padding: 7px 0;
+    font-size: 17px;
+    color: var(--tk-mute);
+    box-sizing: border-box;
+}
+#screen-menu .tk-seg button[aria-pressed="true"] {
+    background: var(--tk-ink);
+    color: var(--tk-bg);
+}
+#screen-menu .tk-seg b {
+    font: 700 10px Barlow, sans-serif;
+    background: var(--tk-mt);
+    color: #032;
+    padding: 1px 5px;
+    margin-left: 5px;
+    vertical-align: 2px;
+    font-style: normal;
+}
+#screen-menu .tk-chips {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+}
+#screen-menu .tk-chip {
+    all: unset;
+    cursor: pointer;
+    display: grid;
+    gap: 1px;
+    padding: 5px 8px 6px;
+    background: var(--tk-panel);
+    border: 1.5px solid var(--tk-line);
+    border-bottom: 3px solid var(--tk-or);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-sizing: border-box;
+}
+#screen-menu .tk-chip small {
+    font: 600 10px Barlow, sans-serif;
+    color: var(--tk-mute);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    font-style: normal;
+}
+#screen-menu .tk-chip span {
+    font-size: 17px;
+    line-height: 1.05;
+    white-space: nowrap;
+}
+#screen-menu .tk-modes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+#screen-menu .tk-mode {
+    all: unset;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 50px;
+    font-size: 23px;
+    clip-path: polygon(14px 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
+    transition: transform .15s;
+    box-sizing: border-box;
+}
+#screen-menu .tk-mode:hover { transform: translateY(-2px); }
+#screen-menu .tk-mode small {
+    display: none;
+    font: 600 13px Barlow, sans-serif;
+    text-transform: none;
+    font-style: normal;
+    letter-spacing: 0;
+    opacity: .85;
+}
+#screen-menu .tk-m1 {
+    grid-column: 1 / -1;
+    height: 56px;
+    font-size: 27px;
+    background: var(--tk-or);
+    color: var(--tk-orink);
+}
+#screen-menu .tk-m2 { background: var(--tk-mt); color: #03231a; }
+#screen-menu .tk-m3 { background: var(--tk-bl); color: #fff; }
+#screen-menu .tk-mode b {
+    font: 700 10px Barlow, sans-serif;
+    background: #fff;
+    color: #0a2a1c;
+    padding: 1px 6px;
+    font-style: normal;
+}
+/* Desktop: two columns */
+@media (min-width: 900px) {
+    #screen-menu .tk-app {
+        padding: 20px 32px 28px;
+        grid-template-columns: minmax(0, 1fr) 440px;
+        grid-template-rows: auto minmax(0, 1fr);
+        gap: 16px 40px;
+    }
+    #screen-menu .tk-header { grid-column: 1 / -1; }
+    #screen-menu .tk-nav { display: flex; }
+    #screen-menu .tk-menu,
+    #screen-menu #tk-menuBtn { display: none !important; }
+    #screen-menu .tk-stage { grid-row: 2; align-items: flex-start; }
+    #screen-menu .tk-stage h1 {
+        font-size: min(15vw, 22dvh);
+        text-align: left;
+        margin-left: -4px;
+    }
+    #screen-menu .tk-tag { display: block; text-align: left; margin: 6px 0 0; }
+    #screen-menu .tk-board { margin-top: 10px; }
+    #screen-menu .tk-ctrl {
+        grid-row: 2;
+        grid-column: 2;
+        align-self: center;
+        gap: 14px;
+    }
+    #screen-menu .tk-chips { grid-template-columns: 1fr 1fr; }
+    #screen-menu .tk-chip { padding: 8px 12px; }
+    #screen-menu .tk-chip span { font-size: 20px; }
+    #screen-menu .tk-modes { grid-template-columns: 1fr; gap: 12px; }
+    #screen-menu .tk-mode,
+    #screen-menu .tk-m1 {
+        height: 84px;
+        font-size: 36px;
+        justify-content: space-between;
+        padding: 0 34px;
+    }
+    #screen-menu .tk-mode small { display: block; }
+}
+@media (prefers-reduced-motion: reduce) {
+    #screen-menu .tk-mode { transition: none; }
 }

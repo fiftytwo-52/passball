@@ -34,9 +34,9 @@ import '../styles/global.css';
     <!-- Anton is the start screen's display face and Rajdhani its body face —
          the match-day-programme voice the landing surface speaks in. The rest of
          the app stays on Geist, so these two load alongside it rather than
-         replacing it. -->
+         replacing it. Barlow Condensed + Barlow power the revamped main menu. -->
     <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Anton&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Rajdhani:wght@500;600;700&display=swap">
+        href="https://fonts.googleapis.com/css2?family=Anton&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Rajdhani:wght@500;600;700&family=Barlow+Condensed:ital,wght@1,700;1,800;1,900&family=Barlow:wght@500;600&display=swap">
 </head>
 
 <body>
@@ -389,227 +389,85 @@ import '../styles/global.css';
          chips instead of four labelled rows: the engine still owns every pill and
          every aria-pressed, so there is no second copy of a setting to drift. -->
     <div class="screen" id="screen-menu">
-        <!-- The menu's background animation: a muted, looping video laid over the
-             turf at reduced opacity, so the landing surface reads as a moving
-             programme cover without ever competing with the frame above it. It is
-             decorative, so it takes no pointer events and is invisible to AT. -->
-        <video id="menu-bg-video" class="menu-bg-video" autoplay muted loop playsinline webkit-playsinline
-            preload="auto" aria-hidden="true" tabindex="-1">
-            <source src="/menu-bg.mp4" type="video/mp4" />
-        </video>
-        <!-- Weathering: a vignette to settle the turf at its edges, and fine grain so
-             the large flat fills do not band on a wide-gamut panel. Both are
-             decorative, so neither may take a pointer event. -->
-        <div class="vignette" aria-hidden="true"></div>
-        <div class="grain" aria-hidden="true"></div>
-
-        <div class="menu-frame" role="dialog" aria-modal="true" aria-labelledby="menu-title">
-            <div class="navbar">
-                <div class="top-capsule">
-                    <div class="brand-group">
-                        <div class="brand-row">
-                            <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="1.8" aria-hidden="true" focusable="false">
-                                <circle cx="12" cy="12" r="9" />
-                                <path d="M12 6l3.5 2.6-1.3 4h-4.4l-1.3-4z" />
-                            </svg>
-                            <span class="brand-name">tactik</span>
-                        </div>
-                        <span class="brand-tag">6-a-side</span>
-                    </div>
-
-                    <nav class="game-nav-links" aria-label="Game links">
-                        <a class="game-nav-link" href="/tutorial">Tutorial</a>
-                        <a class="game-nav-link" href="/about">
-                            <span class="nav-text-full">About us</span>
-                            <span class="nav-text-short">About</span>
-                        </a>
-                        <a class="game-nav-link" href="/contact">Contact</a>
-                        <a class="game-nav-link" href="/privacy">
-                            <span class="nav-text-full">Privacy policy</span>
-                            <span class="nav-text-short">Privacy</span>
-                        </a>
+        <!-- Video background: the existing menu-bg.mp4 stays, mounted in #bg
+             with the theme overlay on top so text stays readable. Decorative. -->
+        <div id="bg" aria-hidden="true">
+            <video id="menu-bg-video" autoplay muted loop playsinline webkit-playsinline
+                preload="auto" tabindex="-1">
+                <source src="/menu-bg.mp4" type="video/mp4" />
+            </video>
+        </div>
+        <div class="tk-app">
+            <header class="tk-header">
+                <div class="tk-logo tk-d"><i aria-hidden="true"></i>Tactik <small>6-a-side</small></div>
+                <div class="tk-hd">
+                    <nav class="tk-nav tk-d" aria-label="Main">
+                        <a href="/tutorial">Tutorial</a>
+                        <a href="/about">About us</a>
+                        <a href="/contact">Contact</a>
+                        <a href="/privacy">Privacy policy</a>
                     </nav>
+                    <button type="button" class="tk-ib" id="tk-theme" aria-label="Switch light or dark theme">
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+                    </button>
+                    <button type="button" class="tk-ib" id="tk-menuBtn" aria-label="Open menu" aria-expanded="false">
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                    </button>
                 </div>
-            </div>
+                <div class="tk-menu tk-d" id="tk-menu">
+                    <a href="/tutorial">Tutorial</a>
+                    <a href="/about">About us</a>
+                    <a href="/contact">Contact</a>
+                    <a href="/privacy">Privacy policy</a>
+                </div>
+            </header>
 
-            <section class="hero" aria-label="About the match">
-                <div class="vs">Your shape · 2 : 3 : 1</div>
+            <main class="tk-stage">
+                <h1 class="tk-d" id="menu-title">Tac<span>tik</span></h1>
+                <p class="tk-tag">Freeze the board on every change of possession, stack your moves, then watch both sides play them out.</p>
+                <div class="tk-board" role="img" aria-label="Animated 2-3-1 passing move on a pitch">
+                    <svg id="tk-pitch" viewBox="0 0 300 330" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false"></svg>
+                </div>
+            </main>
 
-                <!-- The shape the side actually lines up in: six amber outfielders
-                     in their own half, three sage opponents in theirs. -->
-                <svg class="pitch" viewBox="0 0 160 240" aria-hidden="true" focusable="false">
-                    <rect x="4" y="4" width="152" height="232" rx="8" fill="none" stroke="#3A5C46" stroke-width="2" />
-                    <line x1="4" y1="120" x2="156" y2="120" stroke="#3A5C46" stroke-width="2" />
-                    <circle cx="80" cy="120" r="22" fill="none" stroke="#3A5C46" stroke-width="2" />
-                    <rect x="45" y="4" width="70" height="28" fill="none" stroke="#3A5C46" stroke-width="2" />
-                    <rect x="45" y="208" width="70" height="28" fill="none" stroke="#3A5C46" stroke-width="2" />
-                    <circle cx="80" cy="205" r="6" fill="#F2A63C" />
-                    <circle cx="40" cy="170" r="6" fill="#F2A63C" />
-                    <circle cx="120" cy="170" r="6" fill="#F2A63C" />
-                    <circle cx="28" cy="132" r="6" fill="#F2A63C" />
-                    <circle cx="132" cy="132" r="6" fill="#F2A63C" />
-                    <circle cx="80" cy="142" r="6" fill="#F2A63C" />
-                    <circle cx="80" cy="34" r="6" fill="#8CA394" />
-                    <circle cx="45" cy="66" r="6" fill="#8CA394" />
-                    <circle cx="115" cy="66" r="6" fill="#8CA394" />
-                </svg>
-
-                <div class="hero-copy">
-                    <div class="eyebrow">Your shape · 2 : 3 : 1</div>
-                    <h1 id="menu-title">tactik</h1>
-                    <p>Freeze the board on every change of possession, stack your moves, then watch both sides play
-                        them out.</p>
+            <section class="tk-ctrl" aria-label="Match setup">
+                <div class="tk-seg tk-d" role="group" aria-label="Opponent">
+                    <button type="button" aria-pressed="true" data-o="computer">Vs computer</button>
+                    <button type="button" aria-pressed="false" data-o="pvp">PVP<b>LIVE</b></button>
+                </div>
+                <div class="tk-chips tk-d" id="tk-chips"></div>
+                <div class="tk-modes tk-d">
+                    <button type="button" class="tk-mode tk-m1" id="btn-start" title="Play 6-a-side match vs Computer">Kick off vs computer<small>Solo match</small></button>
+                    <button type="button" class="tk-mode tk-m2" id="btn-penalty" title="Direct penalty shootout mode">Penalties<small>Beat the keeper</small></button>
+                    <button type="button" class="tk-mode tk-m3" id="btn-rondo" title="Online rondo: 4-10 players, circle keep-away">Rondo <b>LIVE</b><small>Escape the press</small></button>
                 </div>
             </section>
-
-            <div class="bottom-area">
-                <section class="settings-capsule" aria-label="Match settings">
-                    <!-- Read-out, not a control. The engine plays the CPU and has no
-                         second human seat, so the pair reports which mode is live and
-                         marks PvP SOON rather than offering a switch that would do
-                         nothing when pressed. -->
-                    <div class="mode-switch">
-                        <button type="button" class="mode active" id="btn-mode-ai" aria-current="true" title="Vs computer match">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-                                aria-hidden="true" focusable="false">
-                                <rect x="4" y="4" width="16" height="12" rx="1.5" />
-                                <path d="M9 20h6M12 16v4" />
-                            </svg>
-                            Vs computer
-                        </button>
-                        <button type="button" class="mode mode-btn" id="btn-mode-pvp" title="Play online vs player">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-                                aria-hidden="true" focusable="false">
-                                <circle cx="8" cy="8" r="3" />
-                                <circle cx="16" cy="8" r="3" />
-                                <path d="M3 20c0-3 2.5-5 5-5s5 2 5 5M11 20c0-3 2.5-5 5-5s5 2 5 5" />
-                            </svg>
-                            PVP <span class="badge-live">LIVE</span>
-                        </button>
-                    </div>
-
-                    <!-- Match settings: organized as responsive dropdown selects without horizontal scroll -->
-                    <div class="quick">
-                        <div class="qchip">
-                            <label class="qchip-label" for="difficulty-start">
-                                <svg class="qchip-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
-                                    <path d="M8 2.5l5.5 3v4.5C13.5 13.5 8 15 8 15s-5.5-1.5-5.5-5V5.5l5.5-3z" />
-                                </svg>
-                                Difficulty
-                            </label>
-                            <div class="select-wrapper">
-                                <select class="setting-select" id="difficulty-start" aria-label="Difficulty">
-                                    <option value="0.35">LOW (Amateur)</option>
-                                    <option value="1.85" selected>MID (Semi-Pro)</option>
-                                    <option value="2.6">HARD (Pro)</option>
-                                    <option value="3.4">EXTREME (World Class)</option>
-                                </select>
-                                <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
-                                    <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
-                                </svg>
-                            </div>
-                        </div>
-
-                        <div class="qchip">
-                            <label class="qchip-label" for="plan-window-start">
-                                <svg class="qchip-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
-                                    <circle cx="8" cy="8" r="6.5" />
-                                    <polyline points="8 4.5 8 8 10.5 10" />
-                                </svg>
-                                Turn Timer
-                            </label>
-                            <div class="select-wrapper">
-                                <select class="setting-select" id="plan-window-start" aria-label="Move timer seconds">
-                                    <option value="3">3s (Speed)</option>
-                                    <option value="5" selected>5s (Rapid)</option>
-                                    <option value="10">10s (Standard)</option>
-                                    <option value="20">20s (Relaxed)</option>
-                                </select>
-                                <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
-                                    <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
-                                </svg>
-                            </div>
-                        </div>
-
-                        <div class="qchip">
-                            <label class="qchip-label" for="match-length-start">
-                                <svg class="qchip-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
-                                    <rect x="2.5" y="3.5" width="11" height="9" rx="1.5" />
-                                    <line x1="8" y1="3.5" x2="8" y2="12.5" />
-                                    <circle cx="8" cy="8" r="1.8" />
-                                </svg>
-                                Match Length
-                            </label>
-                            <div class="select-wrapper">
-                                <select class="setting-select" id="match-length-start" aria-label="Half length seconds">
-                                    <option value="30">1:00 min (Quick)</option>
-                                    <option value="60" selected>2:00 min (Short)</option>
-                                    <option value="120">4:00 min (Standard)</option>
-                                    <option value="180">6:00 min (Full)</option>
-                                </select>
-                                <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
-                                    <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
-                                </svg>
-                            </div>
-                        </div>
-
-                        <div class="qchip">
-                            <label class="qchip-label" for="sound-start">
-                                <svg class="qchip-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false">
-                                    <polygon points="2.5 6 5.5 6 8.5 3 8.5 13 5.5 10 2.5 10 2.5 6" />
-                                    <path d="M11 5.5a3.5 3.5 0 0 1 0 5" />
-                                    <path d="M12.8 3.8a6 6 0 0 1 0 8.4" />
-                                </svg>
-                                Sound
-                            </label>
-                            <div class="select-wrapper">
-                                <select class="setting-select" id="sound-start" aria-label="Sound">
-                                    <option value="on" selected>ON</option>
-                                    <option value="off">OFF</option>
-                                </select>
-                                <svg class="select-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
-                                    <path d="M2.5 4.5l3.5 3.5 3.5-3.5" />
-                                </svg>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <div class="cta-stack">
-                    <button type="button" class="btn kickoff" id="btn-start" title="Play 6-a-side match vs Computer">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"
-                            aria-hidden="true" focusable="false">
-                            <circle cx="12" cy="12" r="10" />
-                            <path d="M12 7l4 3-1.5 4.5h-5L8 10z" />
-                            <path d="M12 2v5M2.5 9l4 1.5M4 18l4-3M20 18l-4-3M21.5 9l-4 1.5" />
-                        </svg>
-                        Vs Computer
-                    </button>
-                    <button type="button" class="btn kickoff-alt" id="btn-penalty" title="Direct penalty shootout mode">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
-                            <circle cx="12" cy="12" r="9" />
-                            <circle cx="12" cy="12" r="4" />
-                            <circle cx="12" cy="12" r="1.2" fill="currentColor" />
-                            <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
-                        </svg>
-                        Penalty Shootout
-                    </button>
-                    <button type="button" class="btn kickoff-rondo" id="btn-rondo" title="Online rondo: 4–10 players, circle keep-away">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
-                            <circle cx="12" cy="12" r="8" />
-                            <circle cx="12" cy="12" r="1.6" fill="currentColor" />
-                            <circle cx="12" cy="4" r="1.4" fill="currentColor" />
-                            <circle cx="19" cy="12" r="1.4" fill="currentColor" />
-                            <circle cx="12" cy="20" r="1.4" fill="currentColor" />
-                            <circle cx="5" cy="12" r="1.4" fill="currentColor" />
-                        </svg>
-                        Rondo <span class="badge-live">LIVE</span>
-                    </button>
-                </div>
-
-                <div class="homebar" aria-hidden="true"></div>
-            </div>
+        </div>
+        <!-- Engine-owned selects (hidden): the chips drive these so every
+             setting keeps its real values, storage keys and sync logic. -->
+        <div hidden aria-hidden="true">
+            <select id="difficulty-start" tabindex="-1" aria-hidden="true">
+                <option value="0.35">LOW (Amateur)</option>
+                <option value="1.85" selected>MID (Semi-Pro)</option>
+                <option value="2.6">HARD (Pro)</option>
+                <option value="3.4">EXTREME (World Class)</option>
+            </select>
+            <select id="plan-window-start" tabindex="-1" aria-hidden="true">
+                <option value="3">3s (Speed)</option>
+                <option value="5" selected>5s (Rapid)</option>
+                <option value="10">10s (Standard)</option>
+                <option value="20">20s (Relaxed)</option>
+            </select>
+            <select id="match-length-start" tabindex="-1" aria-hidden="true">
+                <option value="30">1:00 min (Quick)</option>
+                <option value="60" selected>2:00 min (Short)</option>
+                <option value="120">4:00 min (Standard)</option>
+                <option value="180">6:00 min (Full)</option>
+            </select>
+            <select id="sound-start" tabindex="-1" aria-hidden="true">
+                <option value="on" selected>ON</option>
+                <option value="off">OFF</option>
+            </select>
         </div>
     </div>
 
