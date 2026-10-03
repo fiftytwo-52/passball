@@ -10853,12 +10853,53 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         hideRondoOver();
         if (rondoNet && rondoNet.isHost) {
             rondoHostStart();
-        } else if (rondoNet) {
+            return;
+        }
+        if (rondoNet) {
             rondoNet.sendToHost({ type: 'RONDO_REPLAY' });
             setStatus('Replay requested — waiting for host…', true);
+            /* Fallback: if the host never restarts (left/AFK), offer this
+               player a one-tap takeover as host of a fresh room. */
+            const netAtClick = rondoNet;
+            const phaseAtClick = rondo ? rondo.phase : null;
+            setTimeout(() => {
+                if (rondoNet !== netAtClick) return;          // already moved on
+                if (!rondo || rondo.phase !== phaseAtClick) return; // host restarted
+                if (state.phase === 'rondo' && rondo.phase !== 'over') return;
+                setStatus('Host not responding.', true);
+                rondoShowTakeoverBtn();
+            }, 6000);
         } else {
             rondoLeave(true);
         }
+    }
+
+    /* Show a "become host" button so a guest can start a fresh room when
+       the original host is gone. */
+    function rondoShowTakeoverBtn() {
+        let btn = document.getElementById('btn-rondo-takeover');
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.id = 'btn-rondo-takeover';
+            btn.type = 'button';
+            btn.className = 'btn btn-primary';
+            btn.textContent = 'START NEW ROOM AS HOST';
+            btn.style.cssText = 'margin:12px auto 0;display:block;';
+            btn.addEventListener('click', () => {
+                btn.remove();
+                hideRondoOver();
+                setStatus('Starting a new room as host…', true);
+                rondoLeave(false);
+                setTimeout(() => {
+                    const create = document.getElementById('btn-rondo-create');
+                    if (create) create.click();
+                }, 400);
+            });
+            const over = document.getElementById('rondo-over');
+            if (over) over.appendChild(btn);
+            else document.getElementById('app').appendChild(btn);
+        }
+        btn.style.display = 'block';
     }
 
     function hideRondoOver() {
