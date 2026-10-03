@@ -10754,7 +10754,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             (p || svg).appendChild(e);
             return e;
         };
-        g('rect', { x: 2, y: 2, width: 296, height: 326, rx: 6, fill: '#17894f', stroke: '#fff', 'stroke-width': 3 });
+        g('rect', { x: 2, y: 2, width: 296, height: 326, rx: 6, fill: '#17894f', 'fill-opacity': .88, stroke: '#fff', 'stroke-width': 3 });
         for (let i = 0; i < 6; i += 2) g('rect', { x: 2, y: 2 + i * 54.3, width: 296, height: 54.3, fill: 'rgba(0,0,0,.09)' });
         const L = { stroke: 'rgba(255,255,255,.8)', 'stroke-width': 2.5, fill: 'none' };
         g('line', { x1: 2, y1: 165, x2: 298, y2: 165, ...L });
@@ -10762,11 +10762,35 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         g('rect', { x: 95, y: 2, width: 110, height: 42, ...L });
         g('rect', { x: 95, y: 286, width: 110, height: 42, ...L });
         const opp = [[150, 28], [95, 78], [205, 78], [60, 128], [150, 112], [240, 128]];
-        const me = [[100, 292], [200, 292], [55, 232], [150, 220], [245, 232], [150, 150]];
+        /* Formations per difficulty: Amateur 3-2-1, Semi-Pro 2-3-1, Pro 2-2-2,
+           World Class 1-3-2. The "me" dots are stored so the Level chip can
+           re-shape the team live. */
+        const FORMATIONS = {
+            '0.35': [[80, 292], [150, 295], [220, 292], [110, 235], [190, 235], [150, 180]],
+            '1.85': [[100, 292], [200, 292], [55, 232], [150, 220], [245, 232], [150, 150]],
+            '2.6': [[100, 292], [200, 292], [90, 230], [210, 230], [110, 160], [190, 160]],
+            '3.4': [[150, 295], [70, 235], [150, 225], [230, 235], [110, 155], [190, 155]],
+        };
+        const me = FORMATIONS['1.85'];
         opp.forEach(([x, y]) => g('circle', { cx: x, cy: y, r: 10, fill: '#fff', stroke: 'rgba(0,0,0,.25)', 'stroke-width': 2 }));
         const trail = g('line', { x1: 0, y1: 0, x2: 0, y2: 0, stroke: '#ff9f1c', 'stroke-width': 3, 'stroke-dasharray': '6 6', 'stroke-linecap': 'round', opacity: 0 });
-        me.forEach(([x, y]) => g('circle', { cx: x, cy: y, r: 11, fill: '#ff9f1c', stroke: '#2a1500', 'stroke-width': 2.5 }));
+        const meDots = me.map(([x, y]) => g('circle', { cx: x, cy: y, r: 11, fill: '#ff9f1c', stroke: '#2a1500', 'stroke-width': 2.5 }));
         const ball = g('circle', { cx: 100, cy: 292, r: 6, fill: '#fff', stroke: '#111', 'stroke-width': 2 });
+        /* Re-shape the orange team when the Level changes. */
+        const setMenuFormation = (level) => {
+            const f = FORMATIONS[level] || FORMATIONS['1.85'];
+            meDots.forEach((dot, i) => {
+                dot.setAttribute('cx', f[i][0]);
+                dot.setAttribute('cy', f[i][1]);
+            });
+            ball.setAttribute('cx', f[0][0]);
+            ball.setAttribute('cy', f[0][1]);
+        };
+        const diffSel = el('difficulty-start');
+        if (diffSel) {
+            setMenuFormation(diffSel.value);
+            diffSel.addEventListener('change', () => setMenuFormation(diffSel.value));
+        }
         const seq = [0, 3, 2, 3, 5], goal = [150, 2];
         let k = 0, raf = 0;
         const mv = (a, b, ms, done) => {
@@ -10784,13 +10808,15 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             raf = requestAnimationFrame(f);
         };
         const step = () => {
-            const a = k < seq.length ? me[seq[k]] : goal;
+            const dotPos = (i) => [+meDots[i].getAttribute('cx'), +meDots[i].getAttribute('cy')];
+            const a = k < seq.length ? dotPos(seq[k]) : goal;
             const from = [+ball.getAttribute('cx'), +ball.getAttribute('cy')];
             if (k >= seq.length) {
                 mv(from, goal, 520, () => {
                     k = 0;
-                    ball.setAttribute('cx', me[0][0]);
-                    ball.setAttribute('cy', me[0][1]);
+                    const p0 = dotPos(0);
+                    ball.setAttribute('cx', p0[0]);
+                    ball.setAttribute('cy', p0[1]);
                     setTimeout(step, 500);
                 });
                 return;
