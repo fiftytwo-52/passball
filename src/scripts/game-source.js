@@ -5500,11 +5500,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const shotTarget = SO.aim || { x: soGoal().x, y: soGoal().y };
         const divePoint = SO.dive || (k ? { x: k.x, y: k.y } : { x: soGoal().x, y: soGoal().y });
 
-        // Player shot direction and dive direction same means saved, opposite direction means goal
+        // Physical contact: keeper must actually reach the ball. Same direction
+        // but too far (no touch) is a goal, not a save.
         SO.result = penaltyKickOutcome({
             shotTarget,
             divePoint,
-            byDirection: true,
             goalX: soGoal().x,
             goalHalfWidth: GOAL_HALF_WIDTH
         });

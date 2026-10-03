@@ -212,19 +212,21 @@ import '../styles/global.css';
                     </div>
                 </div>
 
-                <div id="pens-end" class="pens-end" role="dialog" aria-modal="true" aria-labelledby="pens-end-title" hidden>
-                    <div class="pens-card">
-                        <h2 id="pens-end-title"></h2>
-                        <p id="pens-end-sub"></p>
-                        <div class="pens-row">
-                            <button id="pens-rematch" type="button">Rematch</button>
-                            <button id="pens-tomenu" type="button">Menu</button>
-                        </div>
-                    </div>
-                </div>
                 <!-- Legacy IDs for existing JS hooks (hidden, kept for compatibility) -->
                 <span hidden><span id="so-title">PENALTIES</span><span id="so-score">0 – 0</span></span>
             </section>
+
+            <!-- Penalty result modal (outside hud-pens so it survives the HUD hide) -->
+            <div id="pens-end" class="pens-end" role="dialog" aria-modal="true" aria-labelledby="pens-end-title" hidden>
+                <div class="pens-card">
+                    <h2 id="pens-end-title"></h2>
+                    <p id="pens-end-sub"></p>
+                    <div class="pens-row">
+                        <button id="pens-rematch" type="button">Rematch</button>
+                        <button id="pens-tomenu" type="button">Menu</button>
+                    </div>
+                </div>
+            </div>
 
             <!-- ===================== HUD (RONDO STRIP) =====================
                  While a rondo is live the HUD swaps into this view: the clock,
