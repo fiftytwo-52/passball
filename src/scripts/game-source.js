@@ -5553,14 +5553,17 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const shotTarget = SO.aim || { x: soGoal().x, y: soGoal().y };
         const divePoint = SO.dive || (k ? { x: k.x, y: k.y } : { x: soGoal().x, y: soGoal().y });
 
-        // Keeper save: if the dive point is within reach of the shot target,
-        // it's a save. Reach of 6 covers the keeper's diving range.
+        /* Keeper save: the dive point is where the keeper's center ends up.
+           The keeper is 0.8 scale (~1.6 units tall); a diving keeper's body
+           plus outstretched arms covers ~2.2 units from center. If the ball
+           passes within this realistic body reach, it's a save — no arbitrary
+           6-unit circle. */
         SO.result = penaltyKickOutcome({
             shotTarget,
             divePoint,
             goalX: soGoal().x,
             goalHalfWidth: GOAL_HALF_WIDTH,
-            reach: 6.0
+            reach: 2.2
         });
 
         SO.from = { x: ball.x, y: ball.y };
