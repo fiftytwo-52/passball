@@ -6173,16 +6173,45 @@ body {
 }
 /* Mobile */
 @media (max-width: 480px) {
-    #screen-pvp .card-pvp { width: 94vw; max-height: 94dvh; }
-    #screen-pvp .pvp-sheet-head { padding: 12px 14px 8px; }
-    #screen-pvp #pvp-title { font-size: 24px; }
-    #screen-pvp .pvp-tabs { padding: 10px 14px 0; }
-    #screen-pvp .pvp-tab { font-size: 16px; padding: 8px; }
-    #screen-pvp .pvp-pane { padding: 12px 14px 14px; }
-    #screen-pvp .pvp-settings-row { grid-template-columns: 1fr; }
-    #screen-pvp .room-code-num { font-size: 36px; }
-    #screen-pvp .btn-primary { font-size: 20px; min-height: 48px; }
-    #screen-pvp .pvp-share-row { grid-template-columns: 1fr; }
+    #screen-pvp { padding: 0; place-items: stretch; }
+    #screen-pvp .card-pvp {
+        width: 100vw;
+        height: 100dvh;
+        max-height: 100dvh;
+        border: none;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    #screen-pvp .pvp-sheet-head { padding: 10px 12px 6px; flex-shrink: 0; }
+    #screen-pvp #pvp-title { font-size: 22px; }
+    #screen-pvp .pvp-badge-live { font-size: 11px; padding: 2px 8px; }
+    #screen-pvp #btn-pvp-close { width: 36px; height: 36px; font-size: 16px; }
+    #screen-pvp .pvp-tabs { padding: 8px 12px 0; flex-shrink: 0; }
+    #screen-pvp .pvp-tab { font-size: 15px; padding: 6px; }
+    #screen-pvp .pvp-pane {
+        padding: 10px 12px 12px;
+        overflow-y: auto;
+        flex: 1;
+        min-height: 0;
+    }
+    #screen-pvp .pvp-section { margin-bottom: 10px; }
+    #screen-pvp .pvp-section-title { font-size: 17px; margin-bottom: 6px; }
+    #screen-pvp .pvp-room-settings { padding: 8px; margin-bottom: 8px; }
+    #screen-pvp .pvp-settings-row { grid-template-columns: 1fr 1fr; gap: 8px; }
+    #screen-pvp .pvp-setting-label { font-size: 10px; margin-bottom: 4px; }
+    #screen-pvp .setting-select,
+    #screen-pvp .pvp-input { padding: 8px 10px; font-size: 14px; }
+    #screen-pvp .room-code-display { padding: 10px; margin-bottom: 8px; }
+    #screen-pvp .room-code-num { font-size: 32px; margin-bottom: 4px; }
+    #screen-pvp .btn-primary { font-size: 19px; min-height: 44px; padding: 8px; }
+    #screen-pvp .pvp-share-row { grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+    #screen-pvp .btn-secondary,
+    #screen-pvp .btn-ghost-sm { padding: 8px 12px; font-size: 15px; }
+    #screen-pvp .pvp-wait-box { padding: 8px; font-size: 15px; }
+    #screen-pvp .pvp-divider { margin: 10px 0; font-size: 14px; }
+    #screen-pvp .pvp-join-form { gap: 8px; }
+    #screen-pvp .pvp-open-list { max-height: none; }
 }
 @media (prefers-reduced-motion: reduce) {
     #screen-pvp .pvp-spinner { animation: none; }
