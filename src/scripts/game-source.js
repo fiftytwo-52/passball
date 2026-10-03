@@ -840,6 +840,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        pan (in game-y units) on top of the contain fit. */
     const view = { hw: reqHW, hh: reqHH, zoom: 1, panY: 50 };
 
+    /* Camera fly-out: cinematic zoom-out after the shootout ends.
+       {t, dur, fromZoom, toZoom, fromPan, toPan, onDone} — driven in placeCamera. */
+    let camFly = null;
+
     let renderer;
     try {
         /* alpha:true, with a transparent clear colour below: the ground covers
@@ -5652,31 +5656,42 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     function soFinished() {
         SO.active = false;
         state.phase = 'over';
-        setPenaltyView(false);
         /* View identity: the result reads from my side of the mirror. */
         const mine = pvpMirrored() ? 'cpu' : 'you';
         const myScore = SO[mine], opScore = SO[other(mine)];
         const won = myScore > opScore;
-        /* New Tactik result modal */
-        if (ui.pensEnd) {
-            if (ui.pensEndTitle) ui.pensEndTitle.textContent = won ? 'You win!' : (pvpActive ? 'You lose' : 'CPU wins');
-            if (ui.pensEndSub) ui.pensEndSub.textContent = myScore + '–' + opScore + ' after ' + SO.takenYou + ' kicks each';
-            ui.pensEnd.hidden = false;
-            /* Focus the rematch button for keyboard users */
-            if (ui.pensRematch) ui.pensRematch.focus();
-        } else {
-            /* Fallback to legacy over screen */
-            el('over-title').textContent = (won ? 'YOU WIN ' : oppWinsTitle()) + myScore + '–' + opScore + ' ON PENALTIES';
-            el('over-detail').textContent = 'Settled from the spot after ' + SO.takenYou + ' kicks each.';
-            const pens = el('btn-pens');
-            if (pens) pens.hidden = true;
+        /* Cinematic fly-out: pull back from the penalty close-up to the wide
+           view, then reveal the result. The modal waits for the camera. */
+        const showResult = () => {
+            /* New Tactik result modal */
+            if (ui.pensEnd) {
+                if (ui.pensEndTitle) ui.pensEndTitle.textContent = won ? 'You win!' : (pvpActive ? 'You lose' : 'CPU wins');
+                if (ui.pensEndSub) ui.pensEndSub.textContent = myScore + '–' + opScore + ' after ' + SO.takenYou + ' kicks each';
+                ui.pensEnd.hidden = false;
+                /* Focus the rematch button for keyboard users */
+                if (ui.pensRematch) ui.pensRematch.focus();
+            } else {
+                /* Fallback to legacy over screen */
+                el('over-title').textContent = (won ? 'YOU WIN ' : oppWinsTitle()) + myScore + '–' + opScore + ' ON PENALTIES';
+                el('over-detail').textContent = 'Settled from the spot after ' + SO.takenYou + ' kicks each.';
+                const pens = el('btn-pens');
+                if (pens) pens.hidden = true;
+                bus.emit('half');
+                Sfx.whistle();
+                pushScreen('over', { focus: '#btn-again' });
+            }
+            if (ui.pens) ui.pens.hidden = true;
             bus.emit('half');
             Sfx.whistle();
-            pushScreen('over', { focus: '#btn-again' });
+        };
+        /* If we're in the penalty close-up, fly out first; otherwise show now. */
+        const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (view.zoom > 1.1 && !reduced) {
+            startCamFlyOut(showResult);
+        } else {
+            setPenaltyView(false);
+            showResult();
         }
-        if (ui.pens) ui.pens.hidden = true;
-        bus.emit('half');
-        Sfx.whistle();
     }
 
     function soUpdate(dt) {
@@ -7573,10 +7588,38 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     /** Where the camera sits this frame. Fixed: the ground never moves. */
     function placeCamera() {
+        /* Camera fly-out animation: ease from penalty close-up to wide view. */
+        if (camFly) {
+            camFly.t += 1 / 60;
+            const k = Math.min(camFly.t / camFly.dur, 1);
+            /* ease-out cubic: fast pull-back, gentle settle */
+            const e = 1 - Math.pow(1 - k, 3);
+            view.zoom = camFly.fromZoom + (camFly.toZoom - camFly.fromZoom) * e;
+            view.panY = camFly.fromPan + (camFly.toPan - camFly.fromPan) * e;
+            fitView();
+            if (k >= 1) {
+                const cb = camFly.onDone;
+                camFly = null;
+                if (cb) cb();
+            }
+        }
         const pz = worldZ(view.panY);
         camera.position.set(0, 130 * Math.cos(TILT), pz + 130 * Math.sin(TILT));
         camera.rotation.z = 0;
         camera.lookAt(0, 0, pz);
+    }
+
+    /** Start the cinematic fly-out: from the penalty close-up to the wide view. */
+    function startCamFlyOut(onDone) {
+        camFly = {
+            t: 0,
+            dur: 1.8,
+            fromZoom: view.zoom,
+            toZoom: 1,
+            fromPan: view.panY,
+            toPan: 50,
+            onDone: onDone || null
+        };
     }
 
     /* --- pause handling --- */
