@@ -7704,7 +7704,18 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             }
         }
         const pz = worldZ(view.panY);
-        camera.position.set(0, 130 * Math.cos(TILT), pz + 130 * Math.sin(TILT));
+        /* Rondo perspective: swing the camera around the centre so the
+           viewer's own player is at the bottom of their screen. */
+        let camAz = 0;
+        if (state.phase === 'rondo' && rondo && typeof rondo.viewAz === 'number') {
+            camAz = rondo.viewAz;
+        }
+        const camR = 130 * Math.sin(TILT);
+        camera.position.set(
+            Math.sin(camAz) * camR,
+            130 * Math.cos(TILT),
+            pz + Math.cos(camAz) * camR
+        );
         camera.rotation.z = 0;
         camera.lookAt(0, 0, pz);
     }
@@ -9932,6 +9943,20 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             m.ring.material.color.setHex(c);
             m.ring.visible = true;
         });
+        /* Per-player perspective: this client's camera azimuth puts their own
+           seat at the bottom of the screen. Everyone sees the same game, but
+           from behind their own player. The middle keeps their last circle
+           perspective (no camera snap while hunting). */
+        if (me && rondo.circle.includes(me)) {
+            const sm = rondoMeshes[me];
+            if (sm && sm.homeGx !== undefined) {
+                const wx = (sm.homeGx - 50) * KX;
+                const wz = (50 - sm.homeGy) * ZSTRETCH;
+                if (Math.hypot(wx, wz) > 0.5) {
+                    rondo.viewAz = Math.atan2(wx, wz);
+                }
+            }
+        }
         const mm = rondoMeshes[rondo.middle];
         if (mm) {
             mm.isMiddle = true;
