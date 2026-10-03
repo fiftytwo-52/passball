@@ -9216,24 +9216,31 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 if (!rondo || rondo.phase !== 'plan' || rondo.passPick) return;
                 /* Track recent targets to avoid A-B-A-B patterns. */
                 if (!rondo.recentTargets) rondo.recentTargets = [];
-                const opts = rondo.circle.filter(id => {
-                    if (id === rondo.possessor) return false;
-                    if (rondo.recentTargets.includes(id)) return false;
-                    return true;
-                });
-                const pool = opts.length ? opts : rondo.circle.filter(id => id !== rondo.possessor);
+                const pool = rondo.circle.filter(id => id !== rondo.possessor);
                 if (!pool.length) return;
-                /* Score candidates: prefer targets far from the middle (safer passes),
-                   with some randomness to stay unpredictable. */
+                /* Score candidates by LANE safety: how far the middle is from
+                   the actual passer->target segment. A far target means nothing
+                   if the lane goes straight through the hunter. Soft penalty
+                   for recent targets keeps variety without hard exclusions
+                   that shrink the pool into a two-man cycle. */
                 const midMesh = rondoMeshes[rondo.middle];
-                let best = pool[0], bestScore = -1;
+                const passerMesh = rondoMeshes[rondo.possessor];
+                let best = pool[0], bestScore = -999;
                 for (const id of pool) {
                     const m = rondoMeshes[id];
-                    let score = Math.random() * 0.4; /* base randomness */
-                    if (m && midMesh) {
-                        const d = Math.hypot(m.gx - midMesh.gx, m.gy - midMesh.gy);
-                        score += Math.min(1, d / 20) * 0.6; /* farther from middle = safer */
+                    if (!m) continue;
+                    let score = Math.random() * 0.5; /* base unpredictability */
+                    if (midMesh && passerMesh) {
+                        const proj = projectOnSegment(
+                            { x: midMesh.gx, y: midMesh.gy },
+                            { x: passerMesh.gx, y: passerMesh.gy },
+                            { x: m.gx, y: m.gy }
+                        );
+                        /* Clear lane = safe pass. Lanes through the hunter score ~0. */
+                        score += Math.min(1, proj.dist / 12) * 1.4;
                     }
+                    const recIdx = rondo.recentTargets.indexOf(id);
+                    if (recIdx >= 0) score -= (rondo.recentTargets.length - recIdx) * 0.45;
                     if (score > bestScore) { bestScore = score; best = id; }
                 }
                 const target = best;
@@ -10328,7 +10335,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 const distToTarget = targetMesh
                     ? targetMesh.group.position.distanceTo(ballMesh.position)
                     : 999;
-                const arrived = distToTarget < 4.5;
+                const arrived = distToTarget < 6.0;
                 let laneTouched = false;
                 if (passerMesh && targetMesh && !arrived) {
                     const proj = projectOnSegment(
@@ -10343,7 +10350,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                         laneTouched = true;
                     }
                 }
-                if (!arrived && (dWorld < 3.0 || laneTouched)) {
+                /* Genuine contact only: the hunter must actually be at the
+                   ball (1.8), not fetching it from across the lane. The
+                   lane check above already covers real interceptions. */
+                if (!arrived && (dWorld < 1.8 || laneTouched)) {
                     an.touched = true;
                     midMesh.lunge = 0.45;
                     playRondoWhistle(false);
@@ -10807,21 +10817,18 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     let rondoDrawTarget = null;
 
-    /* Project a circle player's move target onto the outer ring: they
-       shuffle along the perimeter (real keep-away shape) instead of
-       drifting into the middle. Angle clamped to +/-28 deg from home. */
-    function rondoRingTarget(pm, pt) {
-        const cx = 50, cy = 50;
-        const homeR = Math.hypot(pm.homeGx - cx, pm.homeGy - cy);
-        const homeA = Math.atan2(pm.homeGy - cy, pm.homeGx - cx);
-        const dragA = Math.atan2(pt.y - cy, pt.x - cx);
-        let dA = dragA - homeA;
-        while (dA > Math.PI) dA -= Math.PI * 2;
-        while (dA < -Math.PI) dA += Math.PI * 2;
-        const maxA = 0.5;
-        dA = Math.max(-maxA, Math.min(maxA, dA));
-        const a = homeA + dA;
-        return { x: cx + Math.cos(a) * homeR, y: cy + Math.sin(a) * homeR };
+    /* Clamp a circle player's move target to a small free zone around
+       their seat: they can move in ANY direction (360 deg) to make
+       themselves available for a pass, but can't roam the whole pitch. */
+    function rondoFreeZoneTarget(pm, pt) {
+        const dx = pt.x - pm.homeGx;
+        const dy = pt.y - pm.homeGy;
+        const d = Math.hypot(dx, dy);
+        if (d <= RONDO_PLAYER_MAX_LEAD) return { x: pt.x, y: pt.y };
+        return {
+            x: pm.homeGx + (dx / d) * RONDO_PLAYER_MAX_LEAD,
+            y: pm.homeGy + (dy / d) * RONDO_PLAYER_MAX_LEAD
+        };
     }
 
     function rondoHandlePointerDown(e, pt) {
@@ -10860,7 +10867,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const distFromHome = Math.hypot(pt.x - pm.homeGx, pt.y - pm.homeGy);
             if (distFromMe <= 6.5 || distFromHome <= RONDO_PLAYER_MAX_LEAD * 2.8) {
                 drag.rondoMovingPlayer = me;
-                const rt = rondoRingTarget(pm, pt);
+                const rt = rondoFreeZoneTarget(pm, pt);
                 const nx = rt.x, ny = rt.y;
                 pm.targetGx = nx;
                 pm.targetGy = ny;
@@ -10960,10 +10967,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 }
             }
         } else {
-            // Circle player drags to shuffle along the outer ring - ONLY their own player!
+            // Circle player drags to move freely in their zone - ONLY their own player!
             const pm = myMesh;
             if (pm && pm.homeGx !== undefined) {
-                const rt = rondoRingTarget(pm, pt);
+                const rt = rondoFreeZoneTarget(pm, pt);
                 const nx = rt.x, ny = rt.y;
                 pm.targetGx = nx;
                 pm.targetGy = ny;
@@ -11046,8 +11053,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 const step = 0.85;
                 const curTx = pm.targetGx !== undefined ? pm.targetGx : pm.homeGx;
                 const curTy = pm.targetGy !== undefined ? pm.targetGy : pm.homeGy;
-                // Keyboard nudges also stay on the outer ring.
-                const rt = rondoRingTarget(pm, { x: curTx + dx * step, y: curTy + dy * step });
+                // Keyboard nudges also stay in the free zone.
+                const rt = rondoFreeZoneTarget(pm, { x: curTx + dx * step, y: curTy + dy * step });
                 const nx = rt.x, ny = rt.y;
                 pm.targetGx = nx;
                 pm.targetGy = ny;
