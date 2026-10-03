@@ -5503,13 +5503,15 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const shotTarget = SO.aim || { x: soGoal().x, y: soGoal().y };
         const divePoint = SO.dive || (k ? { x: k.x, y: k.y } : { x: soGoal().x, y: soGoal().y });
 
-        // Physical contact: keeper must actually reach the ball. Same direction
-        // but too far (no touch) is a goal, not a save.
+        // Physical contact: keeper must actually touch the ball. The keeper's
+        // body is ~2 units wide; if the dive point is further than that from
+        // the shot target, there's no touch — it's a goal.
         SO.result = penaltyKickOutcome({
             shotTarget,
             divePoint,
             goalX: soGoal().x,
-            goalHalfWidth: GOAL_HALF_WIDTH
+            goalHalfWidth: GOAL_HALF_WIDTH,
+            reach: 2.0
         });
 
         SO.from = { x: ball.x, y: ball.y };
