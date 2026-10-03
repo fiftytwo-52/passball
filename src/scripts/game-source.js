@@ -1316,13 +1316,18 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const vt = vTeam(team);
         const kit = role === 'keeper' ? (vt === 'you' ? MAT.gkYou : MAT.gkCpu) : (vt === 'you' ? MAT.you : MAT.cpu);
         const mesh = makeHuman(kit, role);
+        /* Players render slightly larger (1.15x) so they read better on screen.
+           Game logic uses world units, so visual scale doesn't affect gameplay. */
+        mesh.scale.set(1.15, 1.15, 1.15);
         const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
             color: vt === 'you' ? COL.you : COL.cpu,
             transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false
         }));
         ring.rotation.x = -Math.PI / 2;
         ring.position.y = 0.05;
+        ring.scale.set(1.15, 1.15, 1.15);
         const shadow = makeBlobShadow(1.15);
+        shadow.scale.set(1.15, 1.15, 1.15);
         world.add(mesh, ring, shadow);
 
         const p = {
@@ -5150,9 +5155,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         SO.active = false;
         /* Restore visibility and scale of all players, rings and shadows after shootout */
         allPlayers.forEach(p => {
-            if (p.mesh) { p.mesh.visible = true; p.mesh.scale.set(1.0, 1.0, 1.0); }
+            if (p.mesh) { p.mesh.visible = true; p.mesh.scale.set(1.15, 1.15, 1.15); }
             if (p.ring) p.ring.visible = true;
-            if (p.shadow) { p.shadow.visible = true; p.shadow.scale.set(1.0, 1.0, 1.0); }
+            if (p.shadow) { p.shadow.visible = true; p.shadow.scale.set(1.15, 1.15, 1.15); }
         });
         if (typeof soAimLine !== 'undefined') soAimLine.visible = false;
         if (typeof soDiveLine !== 'undefined') soDiveLine.visible = false;
