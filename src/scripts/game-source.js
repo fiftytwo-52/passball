@@ -2799,7 +2799,14 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         sheet: el('menu-sheet'), scrim: el('sheet-scrim'),
         goalFx: el('goal-fx'), goalWord: el('goal-fx-word'),
         soTitle: el('so-title'), soYou: el('so-you'), soCpu: el('so-cpu'),
-        soScore: el('so-score'), soTurn: el('so-turn'), soTimer: el('so-timer')
+        soScore: el('so-score'), soTurn: el('so-turn'), soTimer: el('so-timer'),
+        /* New Tactik-style penalty HUD elements */
+        soKickNum: el('so-kicknum'), soScoreYou: el('so-score-you'), soScoreCpu: el('so-score-cpu'),
+        pensShoot: el('pens-shoot'), pensFlash: el('pens-flash'), pensLog: el('pens-log'),
+        pensEnd: el('pens-end'), pensEndTitle: el('pens-end-title'), pensEndSub: el('pens-end-sub'),
+        pensRematch: el('pens-rematch'), pensToMenu: el('pens-tomenu'),
+        pensTheme: el('pens-theme'), pensMenuBtn: el('pens-menu-btn'), pensMenu: el('pens-menu'),
+        pensRestart: el('pens-restart'), pensQuit: el('pens-quit')
     };
 
     let lastClock = -1, lastBar = -1;
@@ -2816,6 +2823,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         LOG.lines.push({ text, cls });
         while (LOG.lines.length > LOG.max) LOG.lines.shift();
         renderMatchLog();
+        /* Penalty shootout log (desktop only, last 5) */
+        if (SO.active && ui.pensLog) {
+            const li = document.createElement('li');
+            li.textContent = text;
+            ui.pensLog.prepend(li);
+            while (ui.pensLog.children.length > 5) ui.pensLog.lastChild.remove();
+        }
     }
     const log = (text, cls) => bus.emit('log', { text, cls });
 
@@ -5145,6 +5159,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            the regulation log and instruction line would only be stale copy. */
         ui.pens.hidden = false;
         ui.roleStrip.hidden = true;
+        /* Reset penalty HUD extras */
+        if (ui.pensLog) ui.pensLog.innerHTML = '';
+        if (ui.pensEnd) ui.pensEnd.hidden = true;
+        if (ui.pensFlash) ui.pensFlash.className = 'pens-flash';
         bus.emit('half');
         soHudState();
         soSetupKick('you');
@@ -5201,13 +5219,45 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             p.dive = null;
             p.queuedDive = null;
             p.held = false;
-            /* Hide all players, their rings, and shadows except the active kicker and keeper */
+            /* Squad line-ups: 5 outfield players per side stand in lines to the
+               sides of the penalty area. The kicker and keeper take their
+               positions; everyone else stays in line. */
             const isKicker = p === kicker;
             const isKeeper = p === k;
-            const show = (isKicker || isKeeper);
-            if (p.mesh) p.mesh.visible = show;
-            if (p.shadow) p.shadow.visible = show;
-            if (p.ring) p.ring.visible = false; // Hide all standard ground rings in shootout
+            const isOutfield = p.role === 'outfield';
+            const squadIdx = isOutfield ? (parseInt(p.num) - 1) : -1;
+            const inSquad = isOutfield && squadIdx >= 0 && squadIdx < 5;
+            /* Line-up spots: yours on the left, CPU's on the right */
+            let lx = 50, ly = 50;
+            if (inSquad) {
+                const leftSide = p.team === 'you';
+                lx = leftSide ? 22 : 78;
+                ly = 68 + squadIdx * 4;
+            }
+            if (isKicker || isKeeper || inSquad) {
+                if (p.mesh) p.mesh.visible = true;
+                if (p.shadow) p.shadow.visible = true;
+                /* Reset any celebrate/flop transform from the previous kick */
+                if (p.mesh) {
+                    p.mesh.rotation.set(0, p.yaw || 0, 0);
+                    p.mesh.position.y = 0;
+                }
+            } else {
+                if (p.mesh) p.mesh.visible = false;
+                if (p.shadow) p.shadow.visible = false;
+            }
+            if (p.ring) p.ring.visible = false;
+            /* Park squad players at their line spots (kicker/keeper positioned below) */
+            if (inSquad && !isKicker) {
+                setPlayerPos(p, lx, ly);
+                p.mesh.position.set(worldX(lx), 0, worldZ(ly));
+            }
+            /* Stash the line spot for the walk-in choreography */
+            if (isKicker && inSquad) {
+                p.soLineX = lx; p.soLineY = ly;
+            } else if (isKicker) {
+                p.soLineX = (p.team === 'you' ? 22 : 78); p.soLineY = 76;
+            }
         });
 
         // Hide tactical queue markers
@@ -5220,7 +5270,15 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            your keeper when the CPU shoots. */
         if (kicker) {
             kicker.controlled = turn === 'you';
-            setPlayerPos(kicker, spot.x, spot.y);
+            /* Start at the line-up spot; the 'walk' phase moves them to the spot */
+            const sx = kicker.soLineX != null ? kicker.soLineX : 30;
+            const sy = kicker.soLineY != null ? kicker.soLineY : 76;
+            setPlayerPos(kicker, sx, sy);
+            kicker.mesh.position.set(worldX(sx), 0, worldZ(sy));
+            /* Stash walk endpoints for soUpdate */
+            SO.walkFrom = { x: sx, y: sy };
+            SO.walkTo = { x: spot.x, y: spot.y };
+            SO.walkKicker = kicker;
             // Both shooter and goalkeeper are scaled to the same compact size (0.8)
             if (kicker.mesh) kicker.mesh.scale.set(0.8, 0.8, 0.8);
             if (kicker.shadow) kicker.shadow.scale.set(0.8, 0.8, 0.8);
@@ -5244,31 +5302,42 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const taken = turn === 'you' ? SO.takenYou : SO.takenCpu;
         const isGkKick = (taken === 10);
 
-        if (turn === 'cpu') {
-            /* CPU is shooting: CPU precomputes aim immediately, and human controls keeper dive with 3s timer */
-            const rng = mulberry32(hashSeed(state.seed, 7, SO.takenYou + SO.takenCpu));
-            const isExtreme = state.difficulty >= 1.5;
-            const isHard = state.difficulty >= 1.0;
-            const isPro = state.difficulty >= 2.2;
-            const isWorld = state.difficulty >= 3.0;
-            const spread = GOAL_HALF_WIDTH * (isWorld ? 0.94 : (isPro ? 0.91 : (isExtreme ? 0.88 : (isHard ? 0.78 : (0.55 + 0.5 * state.difficulty)))));
-            const wild = rng() < 0.18 * Math.max(0, 1 - state.difficulty);
-            const aimX = wild
-                ? clamp(soGoal().x + (rng() < .5 ? -1 : 1) * (GOAL_HALF_WIDTH + randRange(rng, 1, 9)), 2, 98)
-                : (isExtreme
-                    ? clamp(soGoal().x + (rng() < .5 ? -1 : 1) * randRange(rng, spread * 0.85, spread), 2, 98)
-                    : clamp(soGoal().x + randRange(rng, -spread, spread), 2, 98));
-            SO.aim = { x: aimX, y: soGoal().y };
+        /* Stash the post-walk setup so soUpdate can transition when the
+           1.9s walk-in completes. */
+        SO.afterWalk = () => {
+            if (turn === 'cpu') {
+                /* CPU is shooting: CPU precomputes aim immediately, and human controls keeper dive */
+                const rng = mulberry32(hashSeed(state.seed, 7, SO.takenYou + SO.takenCpu));
+                const isExtreme = state.difficulty >= 1.5;
+                const isHard = state.difficulty >= 1.0;
+                const isPro = state.difficulty >= 2.2;
+                const isWorld = state.difficulty >= 3.0;
+                const spread = GOAL_HALF_WIDTH * (isWorld ? 0.94 : (isPro ? 0.91 : (isExtreme ? 0.88 : (isHard ? 0.78 : (0.55 + 0.5 * state.difficulty)))));
+                const wild = rng() < 0.18 * Math.max(0, 1 - state.difficulty);
+                const aimX = wild
+                    ? clamp(soGoal().x + (rng() < .5 ? -1 : 1) * (GOAL_HALF_WIDTH + randRange(rng, 1, 9)), 2, 98)
+                    : (isExtreme
+                        ? clamp(soGoal().x + (rng() < .5 ? -1 : 1) * randRange(rng, spread * 0.85, spread), 2, 98)
+                        : clamp(soGoal().x + randRange(rng, -spread, spread), 2, 98));
+                SO.aim = { x: aimX, y: soGoal().y };
 
-            SO.phase = 'dive';
-            SO.t = SO_DIVE_WINDOW;
-            log(isGkKick ? oppShort() + ' Goalkeeper shooting — dive to save! (3s)' : oppShort() + ' kicking — drag to choose your keeper dive! (3s)', '');
-        } else {
-            /* Human is shooting: 3s timer to drag direction line and release */
-            SO.phase = 'aim';
-            SO.t = SO_AIM_WINDOW;
-            log(isGkKick ? 'Your Goalkeeper takes the kick — drag to aim! (3s)' : 'Your kick — drag to aim and release! (3s)', '');
-        }
+                SO.phase = 'dive';
+                SO.t = SO_DIVE_WINDOW;
+                log(isGkKick ? oppShort() + ' Goalkeeper shooting — dive to save!' : oppShort() + ' kicking — drag to choose your keeper dive!', '');
+            } else {
+                /* Human is shooting: timer to drag direction line and release */
+                SO.phase = 'aim';
+                SO.t = SO_AIM_WINDOW;
+                log(isGkKick ? 'Your Goalkeeper takes the kick — drag to aim!' : 'Your kick — drag to aim and release!', '');
+            }
+            soHudState();
+        };
+        /* Walk phase: kicker strolls from the line-up to the spot (1.9s).
+           The aim/dive timer starts only when they arrive. */
+        SO.phase = 'walk';
+        SO.t = 1.9;
+        if (ui.pensShoot) ui.pensShoot.disabled = true;
+        soHudState();
     }
     /* §10 — the keeper works from the goal line, KEEPER_LINE out from it. */
     function PENALTY_LINE() { return SO_KEEPER_LINE; }
@@ -5484,10 +5553,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
         if (kicker === 'you') {
             SO.takenYou++;
-            SO.kicksYou.push(isGoal);
+            SO.kicksYou.push(SO.result.outcome);
         } else {
             SO.takenCpu++;
-            SO.kicksCpu.push(isGoal);
+            SO.kicksCpu.push(SO.result.outcome);
         }
 
         /* Runs on the host: the kicker's name follows who the human controls, and
@@ -5498,20 +5567,29 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     }
 
     function soHudState() {
-        if (!ui.soScore) return;
+        if (!ui.soScore && !ui.soScoreYou) return;
         /* View identity: my shootout score reads first. The guest's kicks are
            the world-team 'cpu' column, so their score, dots and turn text all
            swap to the friendly side of the mirror. */
         const mine = pvpMirrored() ? 'cpu' : 'you';
         const oppo = other(mine);
-        ui.soScore.textContent = SO[mine] + ' – ' + SO[oppo];
+        if (ui.soScore) ui.soScore.textContent = SO[mine] + ' – ' + SO[oppo];
+        if (ui.soScoreYou) ui.soScoreYou.textContent = SO[mine];
+        if (ui.soScoreCpu) ui.soScoreCpu.textContent = SO[oppo];
         if (ui.scoreYou) setText(ui.scoreYou, SO[mine]);
         if (ui.scoreCpu) setText(ui.scoreCpu, SO[oppo]);
 
-        if (ui.soTurn) ui.soTurn.textContent = SO.turn === myTeam()
-            ? 'YOUR KICK'
-            : (pvpActive ? 'OPPONENT KICK' : 'CPU KICK');
+        const isMyKick = SO.turn === myTeam();
+        if (ui.soTurn) ui.soTurn.textContent = isMyKick
+            ? (SO.turn === 'you' ? 'Your kick · drag in the goal to aim' : 'Your dive · drag to choose')
+            : (pvpActive ? 'Opponent kick · get ready' : 'CPU kick · drag to set your dive');
         const target = getShootoutTarget(SO.takenYou, SO.takenCpu, SO.you, SO.cpu);
+        /* Kick number for the header chip */
+        if (ui.soKickNum) {
+            const kickNo = Math.floor((SO.takenYou + SO.takenCpu) / 2) + 1;
+            const suddenDeath = target > 5 && (SO.takenYou >= 5 || SO.takenCpu >= 5);
+            ui.soKickNum.textContent = suddenDeath ? 'Sudden death' : 'Kick ' + kickNo;
+        }
         if (ui.soTitle) {
             if (target === 5) ui.soTitle.textContent = 'PENALTIES (5 SHOTS)';
             else if (target === 10) ui.soTitle.textContent = 'NEXT 5 SHOTS';
@@ -5521,12 +5599,17 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 ui.soTitle.textContent = 'TIEBREAKER: 3/3 (' + roundNum + ')';
             }
         }
+        /* Dots: green for goal, yellow for saved, red for wide/post/missed */
         const dots = (history, taken) => {
             let s = '';
-            for (let i = 0; i < target; i++) {
-                const isTaken = i < taken;
-                const isScored = isTaken && (history && history[i] === true);
-                s += '<i class="dot' + (isTaken ? ' taken' : '') + (isScored ? ' scored' : '') + '"></i>';
+            const n = Math.max(target, 5);
+            for (let i = 0; i < n; i++) {
+                let cls = '';
+                if (i < taken && history && history[i]) {
+                    const o = history[i];
+                    cls = o === 'GOAL' ? 'goal' : (o === 'SAVED' ? 'saved' : 'wide');
+                }
+                s += '<i class="' + cls + '"></i>';
             }
             return s;
         };
@@ -5537,7 +5620,14 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (ui.soTimer) {
             const rem = Math.max(0, SO.t);
             ui.soTimer.textContent = rem.toFixed(1) + 's';
-            ui.soTimer.classList.toggle('urgent', rem <= 1.0);
+            ui.soTimer.classList.toggle('low', rem <= 2.0);
+        }
+        /* SHOOT/DIVE button label follows whose turn it is */
+        if (ui.pensShoot) {
+            const shooting = SO.turn === 'you' ? (myTeam() === 'you') : (myTeam() === 'cpu');
+            /* Human shoots when it's their team's kick; otherwise they dive */
+            const humanShoots = SO.turn === myTeam();
+            ui.pensShoot.textContent = humanShoots ? 'Shoot' : 'Dive';
         }
     }
 
@@ -5554,27 +5644,84 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const mine = pvpMirrored() ? 'cpu' : 'you';
         const myScore = SO[mine], opScore = SO[other(mine)];
         const won = myScore > opScore;
-        el('over-title').textContent = (won ? 'YOU WIN ' : oppWinsTitle()) + myScore + '–' + opScore + ' ON PENALTIES';
-        el('over-detail').textContent = 'Settled from the spot after ' + SO.takenYou + ' kicks each.';
-        const pens = el('btn-pens');
-        if (pens) pens.hidden = true;
+        /* New Tactik result modal */
+        if (ui.pensEnd) {
+            if (ui.pensEndTitle) ui.pensEndTitle.textContent = won ? 'You win!' : (pvpActive ? 'You lose' : 'CPU wins');
+            if (ui.pensEndSub) ui.pensEndSub.textContent = myScore + '–' + opScore + ' after ' + SO.takenYou + ' kicks each';
+            ui.pensEnd.hidden = false;
+            /* Focus the rematch button for keyboard users */
+            if (ui.pensRematch) ui.pensRematch.focus();
+        } else {
+            /* Fallback to legacy over screen */
+            el('over-title').textContent = (won ? 'YOU WIN ' : oppWinsTitle()) + myScore + '–' + opScore + ' ON PENALTIES';
+            el('over-detail').textContent = 'Settled from the spot after ' + SO.takenYou + ' kicks each.';
+            const pens = el('btn-pens');
+            if (pens) pens.hidden = true;
+            bus.emit('half');
+            Sfx.whistle();
+            pushScreen('over', { focus: '#btn-again' });
+        }
+        if (ui.pens) ui.pens.hidden = true;
         bus.emit('half');
         Sfx.whistle();
-        pushScreen('over', { focus: '#btn-again' });
     }
 
     function soUpdate(dt) {
         SO.t -= dt;
 
+        /* Walk phase: kicker strolls from line-up to the spot with a small bob.
+           Timer display hidden; the aim/dive timer starts on arrival. */
+        if (SO.phase === 'walk') {
+            const kicker = SO.walkKicker;
+            if (kicker && SO.walkFrom && SO.walkTo) {
+                const total = 1.9;
+                const p = Math.min(1, Math.max(0, 1 - SO.t / total));
+                const e = p < .5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+                const x = SO.walkFrom.x + (SO.walkTo.x - SO.walkFrom.x) * e;
+                const y = SO.walkFrom.y + (SO.walkTo.y - SO.walkFrom.y) * e;
+                setPlayerPos(kicker, x, y);
+                /* Small step-bob, skipped for reduced motion */
+                const bob = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                    ? 0 : Math.abs(Math.sin(p * Math.PI * 8)) * 0.35;
+                kicker.mesh.position.set(worldX(x), bob, worldZ(y));
+                if (kicker.shadow) kicker.shadow.position.set(worldX(x), 0.03, worldZ(y));
+                /* Face the goal while walking */
+                kicker.mesh.rotation.y = Math.atan2(worldX(SO.walkTo.x) - worldX(x), worldZ(SO.walkTo.y) - worldZ(y));
+            }
+            if (ui.soTimer) ui.soTimer.style.display = 'none';
+            if (SO.t <= 0) {
+                /* Arrived: snap to spot, then start aim/dive */
+                if (kicker) {
+                    setPlayerPos(kicker, SO.walkTo.x, SO.walkTo.y);
+                    kicker.mesh.position.set(worldX(SO.walkTo.x), 0, worldZ(SO.walkTo.y));
+                    kicker.mesh.rotation.y = kicker.yaw || 0;
+                    if (kicker.shadow) kicker.shadow.position.set(worldX(SO.walkTo.x), 0.03, worldZ(SO.walkTo.y));
+                }
+                if (SO.afterWalk) { const f = SO.afterWalk; SO.afterWalk = null; f(); }
+            }
+            return;
+        }
+
         if (ui.soTimer) {
             if (SO.phase === 'aim' || SO.phase === 'dive') {
                 const rem = Math.max(0, SO.t);
                 ui.soTimer.textContent = rem.toFixed(1) + 's';
-                ui.soTimer.classList.toggle('urgent', rem <= 1.0);
+                ui.soTimer.classList.toggle('low', rem <= 2.0);
                 ui.soTimer.style.display = '';
             } else {
                 ui.soTimer.style.display = 'none';
             }
+        }
+
+        /* SHOOT/DIVE button: enabled when the human has an aim/dive to commit */
+        if (ui.pensShoot) {
+            const humanTurn = (SO.phase === 'aim' && SO.turn === myTeam()) ||
+                              (SO.phase === 'dive' && soDefTeam() === myTeam());
+            const hasInput = SO.phase === 'aim' ? !!SO.aim :
+                             (soDefKeeper() && (soDefKeeper().dive || soDefKeeper().queuedDive));
+            ui.pensShoot.disabled = !(humanTurn && (hasInput || SO.t <= 1.0));
+            /* Show button only during aim/dive phases */
+            ui.pensShoot.style.visibility = (SO.phase === 'aim' || SO.phase === 'dive') ? '' : 'hidden';
         }
 
         if (SO.phase === 'aim' && SO.t <= 0) {
@@ -5635,7 +5782,47 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 if (cb) cb();
             }
         } else if (SO.phase === 'result') {
-            if (SO.t <= 0) soNext();
+            /* Celebrate/flop choreography on the kicker's 3D model */
+            const kicker = SO.walkKicker;
+            if (kicker && kicker.mesh && SO.result) {
+                const total = SO_RESULT_PAUSE;
+                const p = Math.min(1, Math.max(0, 1 - SO.t / total));
+                const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                if (!reduced) {
+                    if (SO.result.outcome === 'GOAL') {
+                        /* Jump twice: bounce up with slight tilt */
+                        const jumps = Math.sin(p * Math.PI * 4);
+                        kicker.mesh.position.y = Math.max(0, jumps * 1.2);
+                        kicker.mesh.rotation.z = Math.sin(p * Math.PI * 2) * 0.15;
+                    } else {
+                        /* Flop: tip over to lie down */
+                        const flopP = Math.min(1, p * 1.5);
+                        kicker.mesh.rotation.x = -flopP * 1.35;
+                        kicker.mesh.position.y = flopP * 0.5;
+                    }
+                }
+            }
+            /* Flash text */
+            if (ui.pensFlash && SO.result && !SO.flashShown) {
+                SO.flashShown = true;
+                const o = SO.result.outcome;
+                const txt = o === 'GOAL' ? 'Goal!' : (o === 'SAVED' ? 'Saved!' : 'Wide!');
+                const cls = o === 'GOAL' ? 'goal' : (o === 'SAVED' ? 'saved' : 'wide');
+                ui.pensFlash.textContent = txt;
+                ui.pensFlash.className = 'pens-flash on ' + cls;
+                setTimeout(() => {
+                    if (ui.pensFlash) ui.pensFlash.className = 'pens-flash';
+                }, 1000);
+            }
+            if (SO.t <= 0) {
+                /* Reset kicker transform before next kick */
+                if (kicker && kicker.mesh) {
+                    kicker.mesh.rotation.set(0, kicker.yaw || 0, 0);
+                    kicker.mesh.position.y = 0;
+                }
+                SO.flashShown = false;
+                soNext();
+            }
         }
         /* during non-flight phases, keeper positions settle normally */
         const k = soDefKeeper();
@@ -11277,6 +11464,69 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         window.location.href = '/tutorial';
     });
     if (ui.shoot) ui.shoot.addEventListener('click', shootFromButton);
+    /* Penalty shootout HUD controls */
+    if (ui.pensShoot) ui.pensShoot.addEventListener('click', () => {
+        if (!SO.active) return;
+        if (SO.phase === 'aim' && SO.turn === myTeam()) {
+            /* Human shooting: commit the aim (or auto-aim if none) */
+            if (!SO.aim) {
+                const goal = soGoal();
+                SO.aim = { x: goal.x + (Math.random() - 0.5) * GOAL_HALF_WIDTH, y: goal.y };
+            }
+            soCommitAim();
+        } else if (SO.phase === 'dive' && soDefTeam() === myTeam()) {
+            /* Human diving: commit the dive (or hold line if none) */
+            const k = soDefKeeper();
+            if (k && (k.dive || k.queuedDive)) {
+                soCommitDive(k.dive || k.queuedDive);
+            } else {
+                soStrike();
+            }
+        }
+    });
+    /* Penalty theme toggle (persists like the menu) */
+    if (ui.pensTheme) ui.pensTheme.addEventListener('click', () => {
+        const root = document.documentElement;
+        const cur = root.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        const next = cur === 'dark' ? 'light' : 'dark';
+        root.dataset.theme = next;
+        try { localStorage.setItem('tk-theme', next); } catch (e) {}
+    });
+    /* Penalty menu dropdown */
+    if (ui.pensMenuBtn && ui.pensMenu) {
+        ui.pensMenuBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const open = ui.pensMenu.classList.toggle('open');
+            ui.pensMenuBtn.setAttribute('aria-expanded', open);
+        });
+        document.addEventListener('click', (e) => {
+            if (!ui.pensMenu.classList.contains('open')) return;
+            if (!ui.pensMenu.contains(e.target) && e.target !== ui.pensMenuBtn) {
+                ui.pensMenu.classList.remove('open');
+                ui.pensMenuBtn.setAttribute('aria-expanded', 'false');
+            }
+        });
+    }
+    if (ui.pensRestart) ui.pensRestart.addEventListener('click', () => {
+        if (ui.pensMenu) ui.pensMenu.classList.remove('open');
+        beginShootout(SO.fromMatch);
+    });
+    if (ui.pensQuit) ui.pensQuit.addEventListener('click', () => {
+        if (ui.pensMenu) ui.pensMenu.classList.remove('open');
+        document.dispatchEvent(new CustomEvent('tactik:quit'));
+        /* Fallback: go to menu screen */
+        if (typeof showScreen === 'function') showScreen('menu');
+    });
+    /* Penalty result modal */
+    if (ui.pensRematch) ui.pensRematch.addEventListener('click', () => {
+        if (ui.pensEnd) ui.pensEnd.hidden = true;
+        beginShootout(SO.fromMatch);
+    });
+    if (ui.pensToMenu) ui.pensToMenu.addEventListener('click', () => {
+        if (ui.pensEnd) ui.pensEnd.hidden = true;
+        document.dispatchEvent(new CustomEvent('tactik:quit'));
+        if (typeof showScreen === 'function') showScreen('menu');
+    });
     /* §17.b — the human's half of the decision window */
     if (ui.done) ui.done.addEventListener('click', humanDone);
     if (ui.pause) ui.pause.addEventListener('click', () => { setMenuOpen(false); pauseGame(); });

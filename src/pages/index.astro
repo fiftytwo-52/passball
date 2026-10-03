@@ -178,25 +178,52 @@ import '../styles/global.css';
                  kicker order, a separate shootout score, and whose turn it is.
                  It is pure read-out, so it stays a strip across the top centre. -->
             <section id="hud-pens" hidden aria-label="Penalty shootout">
-                <span class="panel panel-pens">
-                    <span class="hud-label" id="so-title">PENALTIES</span>
-                    <span class="pens-score" id="so-score" aria-live="polite">0 – 0</span>
-                </span>
+                <div class="pens-app">
+                    <header class="pens-header">
+                        <div class="pens-chip"><span>Penalties · <span id="so-kicknum">Kick 1</span></span></div>
+                        <div class="pens-hd">
+                            <button class="pens-ib" id="pens-theme" type="button" aria-label="Switch light or dark theme">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+                            </button>
+                            <button class="pens-ib" id="pens-menu-btn" type="button" aria-label="Menu" aria-expanded="false">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                            </button>
+                        </div>
+                        <div class="pens-menu" id="pens-menu">
+                            <button id="pens-restart" type="button">Restart</button>
+                            <button id="pens-quit" type="button">Quit to menu</button>
+                        </div>
+                    </header>
 
-                <span class="panel pens-order">
-                    <span class="hud-label">You</span>
-                    <span class="pens-dots" id="so-you"></span>
-                </span>
+                    <div class="pens-score" aria-live="polite">
+                        <div class="pens-side"><span class="pens-name">You</span><span class="pens-pips" id="so-you"></span></div>
+                        <div class="pens-big"><span id="so-score-you">0</span><em>–</em><span id="so-score-cpu">0</span></div>
+                        <div class="pens-side"><span class="pens-name">CPU</span><span class="pens-pips" id="so-cpu"></span></div>
+                    </div>
 
-                <span class="panel pens-order">
-                    <span class="hud-label">Cpu</span>
-                    <span class="pens-dots" id="so-cpu"></span>
-                </span>
+                    <div class="pens-stage">
+                        <ol id="pens-log" class="pens-log" aria-label="Match log"></ol>
+                        <div id="pens-flash" class="pens-flash" aria-hidden="true"></div>
+                    </div>
 
-                <span class="panel panel-pens pens-turn-group">
-                    <span id="so-turn">YOUR KICK</span>
-                    <span id="so-timer" class="so-countdown">3.0s</span>
-                </span>
+                    <div class="pens-foot">
+                        <div class="pens-prompt"><span id="so-turn" aria-live="polite"></span><b id="so-timer">5.0s</b></div>
+                        <button id="pens-shoot" class="pens-shoot" type="button" disabled>Shoot</button>
+                    </div>
+                </div>
+
+                <div id="pens-end" class="pens-end" role="dialog" aria-modal="true" aria-labelledby="pens-end-title" hidden>
+                    <div class="pens-card">
+                        <h2 id="pens-end-title"></h2>
+                        <p id="pens-end-sub"></p>
+                        <div class="pens-row">
+                            <button id="pens-rematch" type="button">Rematch</button>
+                            <button id="pens-tomenu" type="button">Menu</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Legacy IDs for existing JS hooks (hidden, kept for compatibility) -->
+                <span hidden><span id="so-title">PENALTIES</span><span id="so-score">0 – 0</span></span>
             </section>
 
             <!-- ===================== HUD (RONDO STRIP) =====================

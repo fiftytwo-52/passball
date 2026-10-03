@@ -5518,3 +5518,327 @@ body {
 @media (prefers-reduced-motion: reduce) {
     #screen-menu .tk-mode { transition: none; }
 }
+
+/* ===================== PENALTY SHOOTOUT HUD (Tactik style) ===================== */
+#hud-pens {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    font-family: Barlow, system-ui, sans-serif;
+}
+#hud-pens[hidden] { display: none; }
+.pens-app {
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 14px calc(12px + env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
+    pointer-events: none;
+}
+.pens-app button { pointer-events: auto; }
+.pens-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    pointer-events: none;
+}
+.pens-header .pens-hd,
+.pens-header .pens-menu { pointer-events: auto; }
+.pens-chip {
+    background: var(--tk-panel, rgba(255,255,255,.78));
+    border: 1.5px solid var(--tk-line, rgba(10,42,28,.22));
+    padding: 4px 14px;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 800;
+    font-size: 18px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    transform: skewX(-10deg);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: var(--tk-tx, #0a2a1c);
+}
+.pens-chip > span { display: inline-block; transform: skewX(10deg); }
+.pens-hd { display: flex; gap: 6px; }
+.pens-ib {
+    all: unset;
+    cursor: pointer;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border: 1.5px solid var(--tk-line, rgba(10,42,28,.22));
+    background: var(--tk-panel, rgba(255,255,255,.78));
+    transform: skewX(-10deg);
+    color: var(--tk-tx, #0a2a1c);
+    box-sizing: border-box;
+}
+.pens-ib svg {
+    width: 20px;
+    height: 20px;
+    transform: skewX(10deg);
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+}
+.pens-ib:focus-visible,
+.pens-menu button:focus-visible,
+.pens-shoot:focus-visible,
+.pens-card button:focus-visible {
+    outline: 3px solid var(--tk-or, #f08c00);
+    outline-offset: 2px;
+}
+.pens-menu {
+    position: absolute;
+    right: 0;
+    top: 50px;
+    z-index: 6;
+    display: none;
+    flex-direction: column;
+    background: var(--tk-panel, rgba(255,255,255,.78));
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--tk-line, rgba(10,42,28,.22));
+    padding: 6px;
+    min-width: 180px;
+}
+.pens-menu.open { display: flex; }
+.pens-menu button {
+    all: unset;
+    cursor: pointer;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 800;
+    font-size: 20px;
+    text-transform: uppercase;
+    padding: 10px 20px;
+    color: var(--tk-tx, #0a2a1c);
+    text-align: left;
+}
+.pens-menu button:hover { background: var(--tk-line, rgba(10,42,28,.22)); }
+.pens-score {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 10px;
+    background: var(--tk-panel, rgba(255,255,255,.78));
+    border: 1.5px solid var(--tk-line, rgba(10,42,28,.22));
+    padding: 6px 16px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 100%, 0 100%);
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--tk-tx, #0a2a1c);
+}
+.pens-side {
+    display: grid;
+    gap: 4px;
+    font-size: 16px;
+    letter-spacing: .04em;
+}
+.pens-side:last-child { justify-items: end; }
+.pens-pips { display: flex; gap: 5px; }
+.pens-pips i {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--tk-mute, #4d6b5b);
+    box-sizing: border-box;
+}
+.pens-pips i.goal { background: #0e9f6e; border-color: #0e9f6e; }
+.pens-pips i.saved { background: #f5c400; border-color: #f5c400; }
+.pens-pips i.wide { background: #d63a3a; border-color: #d63a3a; }
+.pens-big {
+    font-size: 46px;
+    line-height: .9;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.pens-big em { color: var(--tk-mute, #4d6b5b); font-style: normal; padding: 0 6px; font-size: .7em; }
+.pens-stage {
+    position: relative;
+    min-height: 0;
+    pointer-events: none;
+}
+.pens-log {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 240px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 14px;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 700;
+    text-transform: uppercase;
+    pointer-events: none;
+}
+.pens-log li {
+    background: var(--tk-panel, rgba(255,255,255,.78));
+    border-left: 4px solid var(--tk-or, #f08c00);
+    padding: 5px 12px;
+    margin-bottom: 6px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: var(--tk-tx, #0a2a1c);
+}
+.pens-flash {
+    position: absolute;
+    left: 50%;
+    top: 38%;
+    transform: translate(-50%, -50%) scale(.6) skewX(-10deg);
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 900;
+    font-size: min(22vw, 110px);
+    text-transform: uppercase;
+    opacity: 0;
+    pointer-events: none;
+    color: #fff;
+    text-shadow: 0 5px 0 rgba(0,0,0,.35);
+    transition: opacity .25s, transform .25s;
+    white-space: nowrap;
+}
+.pens-flash.on {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1) skewX(-10deg);
+}
+.pens-flash.goal { color: #0e9f6e; }
+.pens-flash.saved { color: #f5c400; }
+.pens-flash.wide { color: #d63a3a; }
+.pens-foot {
+    display: grid;
+    gap: 8px;
+    justify-items: center;
+    pointer-events: none;
+}
+.pens-foot .pens-shoot { pointer-events: auto; }
+.pens-prompt {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 800;
+    font-size: 20px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--tk-tx, #0a2a1c);
+    text-align: center;
+}
+.pens-prompt b {
+    background: var(--tk-tx, #0a2a1c);
+    color: var(--tk-bg, #e8efe1);
+    padding: 2px 12px;
+    transform: skewX(-10deg);
+    min-width: 64px;
+    text-align: center;
+    font-size: 20px;
+}
+.pens-prompt b.low { background: #d63a3a; color: #fff; }
+.pens-shoot {
+    all: unset;
+    cursor: pointer;
+    width: min(100%, 420px);
+    height: 58px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 900;
+    font-size: 32px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    background: var(--tk-or, #f08c00);
+    color: #2a1500;
+    clip-path: polygon(18px 0, 100% 0, calc(100% - 18px) 100%, 0 100%);
+    transition: transform .15s, opacity .15s;
+    box-sizing: border-box;
+}
+.pens-shoot:hover:not([disabled]) { transform: translateY(-2px); }
+.pens-shoot[disabled] { opacity: .4; cursor: default; }
+.pens-end {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+    display: grid;
+    place-items: center;
+    background: rgba(2,14,9,.7);
+    padding: 20px;
+    pointer-events: auto;
+}
+.pens-end[hidden] { display: none; }
+.pens-card {
+    background: var(--tk-bg, #e8efe1);
+    border: 2px solid var(--tk-or, #f08c00);
+    padding: 28px 32px;
+    text-align: center;
+    display: grid;
+    gap: 14px;
+    min-width: min(90vw, 360px);
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%);
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    color: var(--tk-tx, #0a2a1c);
+}
+.pens-card h2 {
+    font-size: 64px;
+    line-height: .9;
+    font-weight: 900;
+    text-transform: uppercase;
+    color: var(--tk-or, #f08c00);
+    margin: 0;
+}
+.pens-card p { font-size: 20px; font-weight: 700; margin: 0; }
+.pens-row { display: flex; gap: 10px; }
+.pens-card button {
+    all: unset;
+    cursor: pointer;
+    flex: 1;
+    padding: 14px;
+    font-family: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    font-style: italic;
+    font-weight: 800;
+    font-size: 22px;
+    text-transform: uppercase;
+    background: var(--tk-tx, #0a2a1c);
+    color: var(--tk-bg, #e8efe1);
+    text-align: center;
+    box-sizing: border-box;
+}
+.pens-card button:first-child {
+    background: var(--tk-or, #f08c00);
+    color: #2a1500;
+}
+@media (min-width: 900px) {
+    .pens-app { padding: calc(16px + env(safe-area-inset-top, 0px)) 28px calc(22px + env(safe-area-inset-bottom, 0px)); }
+    .pens-log { display: block; }
+    .pens-big { font-size: 58px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .pens-flash { transition: none; }
+    .pens-shoot { transition: none; }
+}
+/* Dark theme for penalty HUD (follows tk-theme like the menu) */
+:root[data-theme="dark"] .pens-chip,
+:root[data-theme="dark"] .pens-ib,
+:root[data-theme="dark"] .pens-menu,
+:root[data-theme="dark"] .pens-score,
+:root[data-theme="dark"] .pens-log li {
+    /* tokens already switch via --tk-* vars */
+}
