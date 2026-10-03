@@ -5207,10 +5207,10 @@ body {
 #screen-menu .tk-app {
     position: relative;
     z-index: 1;
-    height: 100%;
+    min-height: 100dvh;
     max-width: 1200px;
     margin: 0 auto;
-    padding: 10px 14px 12px;
+    padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
     display: grid;
     gap: 10px;
     grid-template-rows: auto minmax(0, 1fr) auto;
