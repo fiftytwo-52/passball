@@ -3036,9 +3036,9 @@ body {
         border-radius: 22px 22px 0 0;
         animation: pvp-sheet-up 0.28s cubic-bezier(0.2, 0.9, 0.3, 1);
     }
-    @keyframes pvp-sheet-up {
-        from { transform: translateY(40px); opacity: 0; }
-    }
+}
+@keyframes pvp-sheet-up {
+    from { transform: translateY(40px); opacity: 0; }
 }
 
 .card-pvp {
@@ -6015,12 +6015,13 @@ body {
     font-size: 18px;
     text-transform: uppercase;
     letter-spacing: .04em;
-    color: var(--tk-mute, #4d6b5b);
+    color: var(--tk-tx, #0a2a1c);
+    opacity: 0.55;
     border-bottom: 3px solid transparent;
     box-sizing: border-box;
 }
 #screen-pvp .pvp-tab.active {
-    color: var(--tk-tx, #0a2a1c);
+    opacity: 1;
     border-bottom-color: var(--tk-or, #f08c00);
 }
 #screen-pvp .pvp-tab:focus-visible {
@@ -6233,15 +6234,16 @@ body {
 }
 /* Mobile */
 @media (max-width: 480px) {
-    #screen-pvp { padding: 0; place-items: stretch; }
+    #screen-pvp { padding: 0; align-items: end; }
     #screen-pvp .card-pvp {
-        width: 100vw;
-        height: 100dvh;
-        max-height: 100dvh;
-        border: none;
-        overflow: hidden;
+        width: 100%;
+        max-height: 92dvh;
+        border-radius: 22px 22px 0 0;
+        overflow-y: auto;
+        overflow-x: hidden;
         display: flex;
         flex-direction: column;
+        animation: pvp-sheet-up 0.28s cubic-bezier(0.2, 0.9, 0.3, 1);
     }
     #screen-pvp .pvp-sheet-head { padding: 10px 12px 6px; flex-shrink: 0; }
     #screen-pvp #pvp-title { font-size: 22px; }
