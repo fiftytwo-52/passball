@@ -5162,6 +5162,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         /* Hide the old top/bottom HUD bars — the penalty HUD replaces them */
         ui.hudTop.hidden = true;
         ui.hudBottom.hidden = true;
+        if (ui.menuOpen) ui.menuOpen.hidden = true;
         if (ui.matchLog) ui.matchLog.hidden = true;
         /* Reset penalty HUD extras */
         if (ui.pensLog) ui.pensLog.innerHTML = '';
@@ -5195,6 +5196,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         /* Restore the old HUD bars */
         ui.hudTop.hidden = false;
         ui.hudBottom.hidden = false;
+        if (ui.menuOpen) ui.menuOpen.hidden = false;
         if (ui.matchLog) ui.matchLog.hidden = false;
         /* Hand the top-centre band back to the role strip — but never over a
            screen, so it mirrors #hud-top, the same show/hide gate. */
@@ -5235,12 +5237,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const isOutfield = p.role === 'outfield';
             const squadIdx = isOutfield ? (parseInt(p.num) - 1) : -1;
             const inSquad = isOutfield && squadIdx >= 0 && squadIdx < 5;
-            /* Line-up spots: horizontal rows, yours on the left, CPU's on the right */
+            /* Line-up spots: horizontal rows visible in the zoomed penalty view.
+               Yours on the left of the spot, CPU's on the right. */
             let lx = 50, ly = 50;
             if (inSquad) {
                 const leftSide = p.team === 'you';
-                lx = (leftSide ? 12 : 56) + squadIdx * 5.5;
-                ly = 70;
+                lx = (leftSide ? 33 : 55) + squadIdx * 3;
+                ly = 80;
             }
             if (isKicker || isKeeper || inSquad) {
                 if (p.mesh) p.mesh.visible = true;
@@ -5264,7 +5267,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             if (isKicker && inSquad) {
                 p.soLineX = lx; p.soLineY = ly;
             } else if (isKicker) {
-                p.soLineX = (p.team === 'you' ? 22 : 78); p.soLineY = 76;
+                p.soLineX = (p.team === 'you' ? 33 : 55); p.soLineY = 80;
             }
         });
 
@@ -5333,6 +5336,23 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 SO.t = SO_DIVE_WINDOW;
                 log(isGkKick ? oppShort() + ' Goalkeeper shooting — dive to save!' : oppShort() + ' kicking — drag to choose your keeper dive!', '');
             } else {
+                /* Human is shooting: CPU keeper PRE-DECIDES dive direction now,
+                   before seeing the aim. Higher difficulty = better anticipation,
+                   but it's a guess, not a reaction. */
+                if (!pvpActive) {
+                    const d = state.difficulty;
+                    /* Chance the CPU guesses the right third of the goal */
+                    const guessChance = clamp(0.30 + 0.12 * d, 0.30, 0.65);
+                    const r = Math.random();
+                    if (r < guessChance) {
+                        /* Anticipates correctly: picks a side (not center) */
+                        SO.cpuDiveDir = Math.random() < 0.5 ? 'left' : 'right';
+                    } else {
+                        /* Guesses wrong or stays center */
+                        const r2 = Math.random();
+                        SO.cpuDiveDir = r2 < 0.4 ? 'left' : (r2 < 0.8 ? 'right' : 'center');
+                    }
+                }
                 /* Human is shooting: timer to drag direction line and release */
                 SO.phase = 'aim';
                 SO.t = SO_AIM_WINDOW;
@@ -5408,34 +5428,17 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         SO.t = 0;
         const k = soDefKeeper();
         if (soDefTeam() === 'cpu' && !pvpActive) {
-            /* the CPU's keeper reads the kick with probability scaled by difficulty */
-            const isHard = state.difficulty >= 1.0;
-            const isExtreme = state.difficulty >= 1.5;
-            const isPro = state.difficulty >= 2.2;
-            const isWorld = state.difficulty >= 3.0;
-            const readChance = clamp(0.24 + 0.44 * state.difficulty + (isWorld ? 0.36 : (isPro ? 0.32 : (isExtreme ? 0.28 : (isHard ? 0.14 : 0)))), 0, 0.95);
-            const read = Math.random() < readChance;
+            /* CPU keeper uses its PRE-DECIDED dive direction (set in afterWalk,
+               before seeing the aim). It commits to a side; it doesn't react. */
             const goalX = soGoal().x;
-            const shotDir = SO.aim.x < goalX - 1.5 ? 'left' : (SO.aim.x > goalX + 1.5 ? 'right' : 'center');
+            const dir = SO.cpuDiveDir || 'center';
             let diveX = goalX;
-            if (read) {
-                // Same direction: CPU keeper dives toward the shot with realistic athletic reach
-                if (shotDir === 'left') {
-                    diveX = clamp(goalX - randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), goalX - SO_DIVE_MAX_OFFSET, 48.0);
-                } else if (shotDir === 'right') {
-                    diveX = clamp(goalX + randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), 52.0, goalX + SO_DIVE_MAX_OFFSET);
-                } else {
-                    diveX = goalX;
-                }
+            if (dir === 'left') {
+                diveX = clamp(goalX - randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), goalX - SO_DIVE_MAX_OFFSET, 48.0);
+            } else if (dir === 'right') {
+                diveX = clamp(goalX + randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), 52.0, goalX + SO_DIVE_MAX_OFFSET);
             } else {
-                // Opposite direction: CPU keeper dives the wrong way!
-                if (shotDir === 'left') {
-                    diveX = clamp(goalX + randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), 52.0, goalX + SO_DIVE_MAX_OFFSET);
-                } else if (shotDir === 'right') {
-                    diveX = clamp(goalX - randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), goalX - SO_DIVE_MAX_OFFSET, 48.0);
-                } else {
-                    diveX = Math.random() < 0.5 ? goalX - 5.0 : goalX + 5.0;
-                }
+                diveX = goalX;
             }
             const target = { x: diveX, y: k ? k.y : soGoal().y };
             if (k) k.queuedDive = target;
@@ -5542,21 +5545,17 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             if (vTeam(kicker) === 'you') Sfx.goal(); else Sfx.concede();
             shake(.5);
             fireGoalFx(kicker);
-            banner('GOAL', vTeam(kicker) === 'you' ? CSS.you : CSS.cpu);
+            /* Old text banner suppressed — pens-flash shows GOAL! instead */
         } else if (SO.result.outcome === 'SAVED') {
             const k = soDefKeeper();
             Sfx.save(); shake(.25);
-            /* Big verdict word, same treatment as the goal splash. */
-            splashWord('SAVED!', CSS.warn);
-            banner('SAVED', CSS.warn);
+            /* Old splashWord/banner suppressed — pens-flash shows Saved! instead */
         } else if (SO.result.outcome === 'POST') {
             Sfx.post(); shake(.34);
-            splashWord('POST!', CSS.warn);
-            banner('POST', CSS.warn);
+            /* Old splashWord/banner suppressed — pens-flash shows Wide! instead */
         } else {
             Sfx.bad();
-            splashWord('MISSED!', CSS.bad);
-            banner('MISSED', CSS.bad);
+            /* Old splashWord/banner suppressed — pens-flash shows Wide! instead */
         }
 
         if (kicker === 'you') {
@@ -9731,11 +9730,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             mm.kitMat.color.setHex(keepC);
             mm.ring.material.color.setHex(keepC);
             mm.ring.visible = false; // middle defender has no target ring
-            /* The interceptor walks in — but chases the ball, not the exact
-               centre. They head for the holder's position so the press stays
-               on the ball; a drawn defPick takes over at execute time, so this
-               walk never fights their aim. */
-            if (rondo.phase === 'reveal' || rondo.phase === 'turn' || rondo.phase === 'plan') {
+            /* The interceptor walks in — but ONLY if they're CPU. The human
+               middle moves solely by their own commands, never auto-chased.
+               CPU middles chase the ball holder so the press stays on. */
+            const middleIsHuman = rondo.middle === rondoMyId();
+            if (!middleIsHuman && (rondo.phase === 'reveal' || rondo.phase === 'turn' || rondo.phase === 'plan')) {
                 const pm = rondoMeshes[rondo.possessor];
                 if (pm) {
                     mm.targetGx = pm.gx;
@@ -9745,6 +9744,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     mm.targetGy = 50;
                 }
                 mm.speed = 12;
+            } else if (middleIsHuman) {
+                /* Human middle: hold position, don't auto-chase. Clear any
+                   stale auto-target so they don't get stuck fighting it. */
+                mm.targetGx = mm.gx;
+                mm.targetGy = mm.gy;
             }
         }
     }
@@ -11521,9 +11525,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     });
     if (ui.pensQuit) ui.pensQuit.addEventListener('click', () => {
         if (ui.pensMenu) ui.pensMenu.classList.remove('open');
-        document.dispatchEvent(new CustomEvent('tactik:quit'));
-        /* Fallback: go to menu screen */
-        if (typeof showScreen === 'function') showScreen('menu');
+        /* Quit to menu: clean up shootout and show menu screen */
+        endShootout(true);
+        state.paused = false;
+        while (topScreen()) popScreen();
+        if (typeof endPvpGame === 'function') endPvpGame();
+        state.phase = 'idle';
+        pushScreen('menu', { focus: '#btn-start' });
     });
     /* Penalty result modal */
     if (ui.pensRematch) ui.pensRematch.addEventListener('click', () => {
@@ -11532,8 +11540,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     });
     if (ui.pensToMenu) ui.pensToMenu.addEventListener('click', () => {
         if (ui.pensEnd) ui.pensEnd.hidden = true;
-        document.dispatchEvent(new CustomEvent('tactik:quit'));
-        if (typeof showScreen === 'function') showScreen('menu');
+        /* Quit to menu: clean up shootout and show menu screen */
+        endShootout(true);
+        state.paused = false;
+        while (topScreen()) popScreen();
+        if (typeof endPvpGame === 'function') endPvpGame();
+        state.phase = 'idle';
+        pushScreen('menu', { focus: '#btn-start' });
     });
     /* §17.b — the human's half of the decision window */
     if (ui.done) ui.done.addEventListener('click', humanDone);
