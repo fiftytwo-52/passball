@@ -5404,7 +5404,10 @@ body {
     -webkit-backdrop-filter: blur(8px);
     box-sizing: border-box;
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
+    height: 48px;
+    align-content: center;
 }
 #screen-menu .tk-chip small {
     font: 600 10px Barlow, sans-serif;
