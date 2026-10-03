@@ -11299,6 +11299,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             if (now - lastEmojiSentAt < 2000) return;
             lastEmojiSentAt = now;
             showCooldownRing(btn);
+            /* In Rondo mode, the popup closes — show the cooldown ring on the
+               main trigger button so the 2s delay is visible. */
+            if (state.phase === 'rondo') {
+                const rBtn = document.getElementById('rondo-rbtn');
+                if (rBtn && rBtn !== btn) showCooldownRing(rBtn);
+            }
             const myName = (state.phase === 'rondo' && rondoNet) ? rondoPlayerName(rondoMyId()) : 'You';
             spawnFloatingEmoji(emoji, true, myName);
             if (pvpActive) {
