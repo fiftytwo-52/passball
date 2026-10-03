@@ -10807,6 +10807,23 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     let rondoDrawTarget = null;
 
+    /* Project a circle player's move target onto the outer ring: they
+       shuffle along the perimeter (real keep-away shape) instead of
+       drifting into the middle. Angle clamped to +/-28 deg from home. */
+    function rondoRingTarget(pm, pt) {
+        const cx = 50, cy = 50;
+        const homeR = Math.hypot(pm.homeGx - cx, pm.homeGy - cy);
+        const homeA = Math.atan2(pm.homeGy - cy, pm.homeGx - cx);
+        const dragA = Math.atan2(pt.y - cy, pt.x - cx);
+        let dA = dragA - homeA;
+        while (dA > Math.PI) dA -= Math.PI * 2;
+        while (dA < -Math.PI) dA += Math.PI * 2;
+        const maxA = 0.5;
+        dA = Math.max(-maxA, Math.min(maxA, dA));
+        const a = homeA + dA;
+        return { x: cx + Math.cos(a) * homeR, y: cy + Math.sin(a) * homeR };
+    }
+
     function rondoHandlePointerDown(e, pt) {
         if (!rondo || rondo.phase !== 'plan' || !rondoNet) return;
         const me = rondoMyId();
@@ -10843,11 +10860,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const distFromHome = Math.hypot(pt.x - pm.homeGx, pt.y - pm.homeGy);
             if (distFromMe <= 6.5 || distFromHome <= RONDO_PLAYER_MAX_LEAD * 2.8) {
                 drag.rondoMovingPlayer = me;
-                let nx = pt.x, ny = pt.y;
-                if (distFromHome > RONDO_PLAYER_MAX_LEAD) {
-                    nx = pm.homeGx + ((pt.x - pm.homeGx) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
-                    ny = pm.homeGy + ((pt.y - pm.homeGy) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
-                }
+                const rt = rondoRingTarget(pm, pt);
+                const nx = rt.x, ny = rt.y;
                 pm.targetGx = nx;
                 pm.targetGy = ny;
                 pm.speed = 11;
@@ -10946,15 +10960,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 }
             }
         } else {
-            // Circle player drags slightly to adjust position - ONLY their own player!
+            // Circle player drags to shuffle along the outer ring - ONLY their own player!
             const pm = myMesh;
             if (pm && pm.homeGx !== undefined) {
-                const distFromHome = Math.hypot(pt.x - pm.homeGx, pt.y - pm.homeGy);
-                let nx = pt.x, ny = pt.y;
-                if (distFromHome > RONDO_PLAYER_MAX_LEAD) {
-                    nx = pm.homeGx + ((pt.x - pm.homeGx) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
-                    ny = pm.homeGy + ((pt.y - pm.homeGy) / distFromHome) * RONDO_PLAYER_MAX_LEAD;
-                }
+                const rt = rondoRingTarget(pm, pt);
+                const nx = rt.x, ny = rt.y;
                 pm.targetGx = nx;
                 pm.targetGy = ny;
                 pm.speed = 11;
@@ -11036,13 +11046,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 const step = 0.85;
                 const curTx = pm.targetGx !== undefined ? pm.targetGx : pm.homeGx;
                 const curTy = pm.targetGy !== undefined ? pm.targetGy : pm.homeGy;
-                let nx = curTx + dx * step;
-                let ny = curTy + dy * step;
-                const dist = Math.hypot(nx - pm.homeGx, ny - pm.homeGy);
-                if (dist > RONDO_PLAYER_MAX_LEAD) {
-                    nx = pm.homeGx + ((nx - pm.homeGx) / dist) * RONDO_PLAYER_MAX_LEAD;
-                    ny = pm.homeGy + ((ny - pm.homeGy) / dist) * RONDO_PLAYER_MAX_LEAD;
-                }
+                // Keyboard nudges also stay on the outer ring.
+                const rt = rondoRingTarget(pm, { x: curTx + dx * step, y: curTy + dy * step });
+                const nx = rt.x, ny = rt.y;
                 pm.targetGx = nx;
                 pm.targetGy = ny;
                 pm.speed = 11;
