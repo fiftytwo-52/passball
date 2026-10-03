@@ -1008,8 +1008,8 @@
 
 /* ---- burger menu (mobile / tablet) ---- */
 .info-burger {
-    display: none;
     all: unset;
+    display: none;
     cursor: pointer;
     width: 44px;
     height: 44px;
@@ -1071,3 +1071,29 @@
 @media (prefers-reduced-motion: reduce) {
     .info-burger span, .info-links { transition: none; }
 }
+
+/* ---- theme toggle ---- */
+.info-theme {
+    all: unset;
+    cursor: pointer;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--tk-ink);
+    box-sizing: border-box;
+}
+.info-theme svg { width: 22px; height: 22px; }
+.info-theme .icon-moon { display: none; }
+:root[data-theme="dark"] .info-theme .icon-sun { display: none; }
+:root[data-theme="dark"] .info-theme .icon-moon { display: block; }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .info-theme .icon-sun { display: none; }
+    :root:not([data-theme="light"]) .info-theme .icon-moon { display: block; }
+}
+.info-theme:focus-visible {
+    outline: 3px solid var(--tk-or);
+    outline-offset: 2px;
+}
+.info-nav-actions { display: flex; align-items: center; gap: 4px; }
