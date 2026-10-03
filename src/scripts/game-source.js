@@ -9158,14 +9158,34 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (isCpu(rondo.possessor) && !rondo.passPick) {
             rondo.cpuTimers.push(setTimeout(() => {
                 if (!rondo || rondo.phase !== 'plan' || rondo.passPick) return;
-                const opts = rondo.circle.filter(id => id !== rondo.possessor && id !== rondo.lastCpuTarget);
+                /* Track recent targets to avoid A-B-A-B patterns. */
+                if (!rondo.recentTargets) rondo.recentTargets = [];
+                const opts = rondo.circle.filter(id => {
+                    if (id === rondo.possessor) return false;
+                    if (rondo.recentTargets.includes(id)) return false;
+                    return true;
+                });
                 const pool = opts.length ? opts : rondo.circle.filter(id => id !== rondo.possessor);
                 if (!pool.length) return;
-                const target = pool[Math.floor(Math.random() * pool.length)];
-                rondo.lastCpuTarget = target;
+                /* Score candidates: prefer targets far from the middle (safer passes),
+                   with some randomness to stay unpredictable. */
+                const midMesh = rondoMeshes[rondo.middle];
+                let best = pool[0], bestScore = -1;
+                for (const id of pool) {
+                    const m = rondoMeshes[id];
+                    let score = Math.random() * 0.4; /* base randomness */
+                    if (m && midMesh) {
+                        const d = Math.hypot(m.gx - midMesh.gx, m.gy - midMesh.gy);
+                        score += Math.min(1, d / 20) * 0.6; /* farther from middle = safer */
+                    }
+                    if (score > bestScore) { bestScore = score; best = id; }
+                }
+                const target = best;
+                rondo.recentTargets.push(target);
+                if (rondo.recentTargets.length > 3) rondo.recentTargets.shift();
                 rondo.passPick = { from: rondo.possessor, target };
                 rondoMaybeEarlyResolve();
-            }, beat()));
+            }, 600 + Math.random() * 600)); /* Faster: 0.6-1.2s instead of 1-2.2s */
         }
         if (isCpu(rondo.middle) && !rondo.defPick) {
             rondo.cpuTimers.push(setTimeout(() => {
