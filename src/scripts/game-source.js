@@ -9921,10 +9921,38 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     mm.speed = 12;
                 }
             } else if (middleIsHuman) {
-                /* Human middle: hold position, don't auto-chase. Clear any
-                   stale auto-target so they don't get stuck fighting it. */
-                mm.targetGx = mm.gx;
-                mm.targetGy = mm.gy;
+                /* Human middle: user-drawn line takes precedence. If they drew
+                   an interception target, go there. Otherwise, auto-chase the
+                   ball during planning/flight so they don't stand frozen. */
+                const hasUserLine = rondo.defPick && typeof rondo.defPick.targetGx === 'number';
+                if (hasUserLine) {
+                    /* User's deliberate command wins over automatic movement. */
+                    mm.targetGx = rondo.defPick.targetGx;
+                    mm.targetGy = rondo.defPick.targetGy;
+                    mm.speed = 12;
+                } else if (rondo.phase === 'plan' || rondoBallAnim) {
+                    /* Auto-chase the ball: during planning, head toward the
+                       possessor; during flight, head toward the ball. */
+                    if (rondoBallAnim) {
+                        /* Ball in flight: chase its current position.
+                           worldX(gx) = (gx-50)*KX, so gx = worldX/KX + 50. */
+                        const bx = ballMesh.position.x / KX + 50;
+                        const by = 50 - ballMesh.position.z / ZSTRETCH;
+                        mm.targetGx = bx;
+                        mm.targetGy = by;
+                    } else {
+                        const pm = rondoMeshes[rondo.possessor];
+                        if (pm) {
+                            mm.targetGx = pm.gx;
+                            mm.targetGy = pm.gy;
+                        }
+                    }
+                    mm.speed = 10; /* Slightly slower than CPU so user can override */
+                } else {
+                    /* Hold position */
+                    mm.targetGx = mm.gx;
+                    mm.targetGy = mm.gy;
+                }
                 /* If human reaches center, clear the centering flag */
                 if (rondo.middleCentering) {
                     const dx = (mm.gx || 50) - 50, dy = (mm.gy || 50) - 50;
