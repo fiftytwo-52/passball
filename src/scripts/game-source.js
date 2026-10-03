@@ -5503,16 +5503,26 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const shotTarget = SO.aim || { x: soGoal().x, y: soGoal().y };
         const divePoint = SO.dive || (k ? { x: k.x, y: k.y } : { x: soGoal().x, y: soGoal().y });
 
-        // Physical contact: keeper must actually touch the ball. The keeper's
-        // body is ~2 units wide; if the dive point is further than that from
-        // the shot target, there's no touch — it's a goal.
+        // Physical contact model: the diving keeper's body covers ~3.5 units.
+        // - Solid contact (dist < 1.5): 85% saved, 15% slips through (goal)
+        // - Fingertip (1.5-3.5): 60% parried out (saved), 40% deflects in (goal)
+        // - No touch (dist > 3.5): clean goal
         SO.result = penaltyKickOutcome({
             shotTarget,
             divePoint,
             goalX: soGoal().x,
             goalHalfWidth: GOAL_HALF_WIDTH,
-            reach: 2.0
+            reach: 3.5
         });
+        if (SO.result.outcome === 'SAVED') {
+            const d = SO.result.dist || 0;
+            const r = Math.random();
+            if (d < 1.5) {
+                if (r < 0.15) SO.result.outcome = 'GOAL'; // slips through the grasp
+            } else {
+                if (r < 0.40) SO.result.outcome = 'GOAL'; // fingertip deflection in
+            }
+        }
 
         SO.from = { x: ball.x, y: ball.y };
         if (SO.result.outcome === 'GOAL') {
