@@ -5388,7 +5388,9 @@ body {
 }
 #screen-menu .tk-chips {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    /* Level chip (first) gets the widest share so "World Class" fits;
+       all tracks are fixed fractions — values can never resize the grid. */
+    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
     gap: 6px;
 }
 #screen-menu .tk-chip {
@@ -5498,7 +5500,7 @@ body {
         align-self: center;
         gap: 14px;
     }
-    #screen-menu .tk-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #screen-menu .tk-chips { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
     #screen-menu .tk-chip { padding: 8px 12px; height: auto; min-height: 56px; }
     #screen-menu .tk-chip span { font-size: 20px; }
     #screen-menu .tk-modes { grid-template-columns: 1fr; gap: 12px; }
