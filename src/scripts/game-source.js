@@ -9396,6 +9396,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     /** Host: 5s pause window expired — execute simultaneous pass and defender sprint! */
     function rondoHostResolveTurn() {
         if (!rondo || rondo.phase !== 'plan') return;
+        rondo.holdSince = null;
+        rondo.holdNotified = false;
         rondo.phase = 'action';
         rondoHostClearCpu();
 
@@ -10340,6 +10342,38 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             }
             if (rondoNet && rondoNet.isHost && rondo.planTime <= 0) {
                 rondoHostResolveTurn();
+            }
+        }
+
+        // 0a. Dwell tackle: holder stands on the ball, chaser reaches them.
+        if (rondo.phase === 'plan' && rondoNet && rondoNet.isHost) {
+            const mm = rondoMeshes[rondo.middle];
+            const pm = rondoMeshes[rondo.possessor];
+            if (mm && pm && rondo.middle !== rondo.possessor) {
+                const dHold = Math.hypot(mm.gx - pm.gx, mm.gy - pm.gy);
+                const nowH = Date.now();
+                if (dHold < 5) {
+                    if (!rondo.holdSince) {
+                        rondo.holdSince = nowH;
+                        rondo.holdNotified = false;
+                    } else if (!rondo.holdNotified && nowH - rondo.holdSince > 1500) {
+                        rondo.holdNotified = true;
+                        rondoBanner('warn', '⏳', 'Holding too long!',
+                            `${rondoPlayerName(rondo.middle)} is on you — pass!`, false);
+                    }
+                    if (nowH - rondo.holdSince > 3000) {
+                        rondo.holdSince = null;
+                        rondo.holdNotified = false;
+                        /* Chaser takes the ball; holder goes in. Same swap as
+                           an interception. */
+                        rondoHandleTouchInterception(rondo.possessor, rondo.middle);
+                    }
+                } else {
+                    rondo.holdSince = null;
+                    rondo.holdNotified = false;
+                }
+            } else {
+                rondo.holdSince = null;
             }
         }
 
