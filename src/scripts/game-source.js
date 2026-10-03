@@ -9828,7 +9828,21 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         // Zoom camera in rondo mode for a close-up keep-away framing
         view.zoom = 1.65;
         fitView();
+        /* Lock per-player perspective: rotate the player circle once so this
+           client's own initial seat sits at the bottom. The ground stays
+           fixed; swaps never re-spin the view. */
         rondoSpin.rotation.y = 0;
+        rondo = rondo || {};
+        const meId = rondoNet && rondoNet.myId;
+        const myIdx = circle.indexOf(meId);
+        if (myIdx >= 0) {
+            const a = (myIdx / circle.length) * Math.PI * 2 - Math.PI / 2;
+            const wx = Math.cos(a) * RONDO_WORLD_R;
+            const wz = Math.sin(a) * RONDO_WORLD_R;
+            /* Group rotation.y = θ maps angle a -> a - θ. Want a_me -> π/2. */
+            rondo.spinAz = Math.atan2(wz, wx) - Math.PI / 2;
+            rondoSpin.rotation.y = rondo.spinAz;
+        }
         if (rondoRosterPoll) {
             clearInterval(rondoRosterPoll);
             rondoRosterPoll = null;
@@ -10010,23 +10024,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             m.ring.material.color.setHex(c);
             m.ring.visible = true;
         });
-        /* Per-player perspective: rotate the player circle (not the ground)
-           so this client's own seat sits at the bottom of their screen.
-           The middle keeps their last circle perspective (no snap while
-           hunting). Grid coordinates stay canonical — this is visual only. */
-        if (me && rondo.circle.includes(me)) {
-            const sm = rondoMeshes[me];
-            if (sm && sm.homeGx !== undefined) {
-                const wx = (sm.homeGx - 50) * KX;
-                const wz = (50 - sm.homeGy) * ZSTRETCH;
-                if (Math.hypot(wx, wz) > 0.5) {
-                    /* Group rotation.y = θ maps angle a -> a - θ. Want
-                       a_me -> π/2 (bottom, +Z toward camera). */
-                    rondo.spinAz = Math.atan2(wz, wx) - Math.PI / 2;
-                    rondoSpin.rotation.y = rondo.spinAz;
-                }
-            }
-        }
+        /* Per-player perspective is locked at game start (see rondoBeginLocal):
+           the player circle rotates once so this client's seat sits at the
+           bottom. Swaps move the players, never the viewer's rotation. */
         const mm = rondoMeshes[rondo.middle];
         if (mm) {
             mm.isMiddle = true;
