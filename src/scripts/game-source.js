@@ -10700,15 +10700,15 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 btn.type = 'button';
                 btn.className = 'tk-chip';
                 btn.setAttribute('aria-label', def.label + ', tap to change');
+                /* Build the DOM once; updates only change text, never rebuild,
+                   so the layout can't shift from DOM reconstruction. */
+                const sm = document.createElement('small');
+                sm.textContent = def.label;
+                const sp = document.createElement('span');
+                btn.appendChild(sm);
+                btn.appendChild(sp);
                 const render = () => {
-                    const v = sel.value;
-                    btn.innerHTML = '';
-                    const sm = document.createElement('small');
-                    sm.textContent = def.label;
-                    const sp = document.createElement('span');
-                    sp.textContent = def.short[v] || v;
-                    btn.appendChild(sm);
-                    btn.appendChild(sp);
+                    sp.textContent = def.short[sel.value] || sel.value;
                 };
                 btn.addEventListener('click', () => {
                     const opts = Array.from(sel.options);
