@@ -9649,6 +9649,17 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 rondoRecoverCirclePlayers(rondo.possessor);
                 rondoLayout();
                 break;
+            case 'RONDO_LOBBY': {
+                /* Squad update via the game channel (proven path). */
+                const lp = packet.players || [];
+                rondoRenderRoster(lp);
+                const ln = lp.length;
+                const lbots = lp.filter(p => p.cpu).length;
+                const lcEl = document.getElementById('rondo-guest-count-num');
+                if (lcEl) lcEl.textContent = String(ln);
+                rondoSetStatus(`Squad updated — ${ln} players${lbots ? ` (${lbots} bots)` : ''}.`, true);
+                break;
+            }
             case 'RONDO_SYNC': {
                 if (!rondo) break;
                 if (rondoNet && rondoNet.isHost) break; // host doesn't need its own sync
@@ -10485,6 +10496,16 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 }
             }
         }
+        /* Hold-the-center: after a swap the new middle stays planted until
+           the circle's first pass. Pins them even after middleCentering. */
+        if (rondo.holdCenter) {
+            const hm = rondoMeshes[rondo.middle];
+            if (hm) {
+                hm.targetGx = 50;
+                hm.targetGy = 50;
+                hm.speed = 10;
+            }
+        }
         /* Winner seating: the interceptor walks to the passer's old seat with
            the ball before the next turn. */
         if (rondo.winnerSeating) {
@@ -11161,6 +11182,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (!myMesh || drag.rondoMovingPlayer !== me) return;
 
         if (me === rondo.middle) {
+            if (rondo.holdCenter) return;
             const mm = myMesh;
             if (rondoDefAimLine) {
                 const tx = clamp(pt.x, 50 - RONDO_RX * 0.95, 50 + RONDO_RX * 0.95);
@@ -11305,6 +11327,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (dx === 0 && dy === 0) return;
 
         if (me === rondo.middle) {
+            if (rondo.holdCenter) return;
             const mm = rondoMeshes[rondo.middle];
             if (mm) {
                 const curTx = (rondo.defPick && rondo.defPick.targetGx) || mm.gx;
