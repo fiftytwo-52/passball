@@ -11357,24 +11357,21 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         });
         /* Rondo's expanding reactions: toggle the list, send on pick. */
         const rBtn = document.getElementById('rondo-rbtn');
-        const rReact = document.getElementById('rondo-react');
+        const rCombined = document.getElementById('rondo-combined');
         const rList = document.getElementById('rondo-rlist');
-        if (rBtn && rReact) rBtn.addEventListener('click', () => rReact.classList.toggle('open'));
+        if (rBtn && rCombined) rBtn.addEventListener('click', () => {
+            rCombined.hidden = !rCombined.hidden;
+        });
         if (rList) rList.addEventListener('click', (e) => {
             const b = e.target.closest('button');
             if (!b) return;
             const emoji = b.getAttribute('data-emoji') || b.textContent;
-            if (rReact) rReact.classList.remove('open');
+            if (rCombined) rCombined.hidden = true;
             if (emoji) sendEmoji(emoji, b);
         });
-        /* Rondo's sticker popup: toggle the grid; picking a sticker sends it. */
-        const rSbtn = document.getElementById('rondo-sbtn');
+        /* Rondo's sticker picker: picking a sticker sends it and closes. */
         const rSlist = document.getElementById('rondo-slist');
-        if (rSbtn && rSlist) rSbtn.addEventListener('click', () => {
-            rSlist.hidden = !rSlist.hidden;
-            if (rReact) rReact.classList.remove('open');
-        });
-        if (rSlist) rSlist.addEventListener('click', () => { rSlist.hidden = true; });
+        if (rSlist) rSlist.addEventListener('click', () => { if (rCombined) rCombined.hidden = true; });
 
         // PeerJS Network event listeners
         /* Both sockets up is not a match yet: it is the handshake. The lobby

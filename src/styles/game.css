@@ -3790,6 +3790,10 @@ body {
     width: 76px;
     height: 76px;
     object-fit: contain;
+    /* GIFs have black backgrounds baked in — screen blend makes black
+       transparent for the SENT sticker only. Selection buttons keep
+       their normal background. */
+    mix-blend-mode: screen;
 }
 /* Cooldown sweep: a conic ring showing the 2s resend delay around the button. */
 .btn-emoji,
@@ -5046,22 +5050,44 @@ body {
 }
 .rondo-rlist button:hover { background: #edf2e6; }
 
-/* Rondo sticker grid popup */
-.rondo-slist {
+/* Rondo combined emoji+sticker popup (single button) */
+.rondo-combined {
     position: absolute;
     right: 0;
     bottom: 62px;
-    display: grid;
-    grid-template-columns: repeat(4, 46px);
-    gap: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
     padding: 8px;
     border-radius: 16px;
     background: #fff;
     box-shadow: 0 4px 0 rgba(0, 40, 15, 0.28);
-    max-height: 220px;
+    max-height: 280px;
     overflow-y: auto;
+    z-index: 30;
 }
-.rondo-slist[hidden] { display: none; }
+.rondo-combined[hidden] { display: none; }
+.rondo-combined .rondo-rlist {
+    position: static;
+    display: flex;
+    gap: 2px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+.rondo-combined .rondo-slist {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(4, 46px);
+    gap: 5px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    max-height: none;
+    overflow: visible;
+}
 .rondo-slist .sticker-btn {
     width: 46px;
     height: 46px;
