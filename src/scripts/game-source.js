@@ -6043,7 +6043,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        and gut the board), #menu-sheet and its scrim are a dropdown over the
        pitch that would shove the camera every time it opened, and #goal-fx is
        the goal flash. None of them is docked to an edge. */
-    const NEVER_MEASURE = '#plan-panel, #menu-sheet, .sheet-scrim, #goal-fx';
+    const NEVER_MEASURE = '#plan-panel, #menu-sheet, .sheet-scrim, #goal-fx, #rondo-combined, #rondo-react';
 
     function measureHudInsets(w, h) {
         const t = { t: 0, r: 0, b: 0, l: 0 };
@@ -9715,7 +9715,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     const RONDO_WORLD_R = 15.5;
     const RONDO_RX = RONDO_WORLD_R / KX;        // ~23.9 grid units
     const RONDO_RY = RONDO_WORLD_R / ZSTRETCH;  // ~12.85 grid units
-    const RONDO_PLAYER_MAX_LEAD = 2.4;         // Very small allowed moving area around circle seat
+    const RONDO_PLAYER_MAX_LEAD = 7;           // Circle players can roam a real zone around their seat
 
     function rondoCpuEmote(emoji, senderId) {
         const name = senderId ? rondoPlayerName(senderId) : 'CPU';
@@ -10611,16 +10611,23 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         midMesh.targetGy = res.defTargetGy;
         midMesh.speed = 16; // Committed sprint, but readable — not a blur
 
-        // Receiver steps forward slightly to receive the ball
+        // Receiver steps forward slightly to receive the ball — but never
+        // overwrite a human's deliberately drawn position.
         let targetMesh = res.target ? rondoMeshes[res.target] : null;
         if (targetMesh && !res.isDeadBall && targetMesh.homeGx !== undefined) {
-            const towardX = passerMesh.gx - targetMesh.homeGx;
-            const towardY = passerMesh.gy - targetMesh.homeGy;
-            const dLen = Math.hypot(towardX, towardY) || 1;
-            const leadDist = 1.35;
-            targetMesh.targetGx = targetMesh.homeGx + (towardX / dLen) * leadDist;
-            targetMesh.targetGy = targetMesh.homeGy + (towardY / dLen) * leadDist;
-            targetMesh.speed = 10;
+            const isHumanReceiver = res.target === rondoMyId();
+            const manuallyMoved = isHumanReceiver
+                && targetMesh.targetGx !== undefined
+                && Math.hypot(targetMesh.targetGx - targetMesh.homeGx, targetMesh.targetGy - targetMesh.homeGy) > 1.0;
+            if (!manuallyMoved) {
+                const towardX = passerMesh.gx - targetMesh.homeGx;
+                const towardY = passerMesh.gy - targetMesh.homeGy;
+                const dLen = Math.hypot(towardX, towardY) || 1;
+                const leadDist = 1.35;
+                targetMesh.targetGx = targetMesh.homeGx + (towardX / dLen) * leadDist;
+                targetMesh.targetGy = targetMesh.homeGy + (towardY / dLen) * leadDist;
+                targetMesh.speed = 10;
+            }
         }
 
         const endGx = res.destGx !== undefined ? res.destGx : (targetMesh ? targetMesh.targetGx : 50);
