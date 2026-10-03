@@ -9531,13 +9531,19 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             mm.kitMat.color.setHex(keepC);
             mm.ring.material.color.setHex(keepC);
             mm.ring.visible = false; // middle defender has no target ring
-            /* The interceptor walks into the middle — the human one too, so a
-               touch on their pass visibly sends them inside. They then draw
-               their sprint from the centre; a drawn defPick takes over at
-               execute time, so this walk never fights their aim. */
+            /* The interceptor walks in — but chases the ball, not the exact
+               centre. They head for the holder's position so the press stays
+               on the ball; a drawn defPick takes over at execute time, so this
+               walk never fights their aim. */
             if (rondo.phase === 'reveal' || rondo.phase === 'turn' || rondo.phase === 'plan') {
-                mm.targetGx = 50;
-                mm.targetGy = 50;
+                const pm = rondoMeshes[rondo.possessor];
+                if (pm) {
+                    mm.targetGx = pm.gx;
+                    mm.targetGy = pm.gy;
+                } else {
+                    mm.targetGx = 50;
+                    mm.targetGy = 50;
+                }
                 mm.speed = 12;
             }
         }
@@ -9679,7 +9685,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 to: new THREE.Vector3(worldX(winnerMesh.gx), 0.62, worldZ(winnerMesh.gy)),
                 t: 0,
                 dur: 0.35,
-                arcH: 0.55,
+                arcH: 0.25,
                 onDone: null,
                 canTouch: false,
                 touched: false,
@@ -9771,6 +9777,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             to: new THREE.Vector3(worldX(toGx), 0.62, worldZ(toGy)),
             t: 0,
             dur: dur || 0.65,
+            /* Low arc: a driven ground pass, not a lob. The ball stays near
+               the turf instead of flying. */
+            arcH: 0.22,
             onDone,
             canTouch: !!o.canTouch,
             passer: o.passer,
@@ -9816,7 +9825,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 if (fm) an.to.set(worldX(fm.gx), 0.62, worldZ(fm.gy));
             }
             ballMesh.position.lerpVectors(an.from, an.to, e);
-            ballMesh.position.y = 0.62 + Math.sin(Math.PI * k) * (an.arcH !== undefined ? an.arcH : 1.5);
+            ballMesh.position.y = 0.62 + Math.sin(Math.PI * k) * (an.arcH !== undefined ? an.arcH : 0.22);
 
             // SENSITIVE TOUCH DETECTION:
             const midMesh = rondoMeshes[rondo.middle];
@@ -9907,11 +9916,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     const dx = pm.gx - mm.gx;
                     const dy = pm.gy - mm.gy;
                     const d = Math.hypot(dx, dy) || 1;
-                    const lean = Math.min(6, d);
                     const px = -dy / d, py = dx / d;
                     const lat = (mm.weaveSide || 1) * 3.8;
-                    mm.targetGx = 50 + (dx / d) * lean + px * lat;
-                    mm.targetGy = 50 + (dy / d) * lean + py * lat;
+                    /* Chase the ball holder with a lateral weave — not anchored
+                       to the centre. */
+                    mm.targetGx = pm.gx + px * lat;
+                    mm.targetGy = pm.gy + py * lat;
                     mm.speed = 5;
                 }
             }
@@ -10235,14 +10245,26 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (!standings.length) {
             html = `<p>${reason || 'The rondo ended.'}</p>`;
         } else {
+            const winner = standings[0];
             const rows = standings.map((s, i) => {
-                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-                const you = s.id === me ? ' <b>(you)</b>' : '';
-                return `<div class="rondo-standing-row${s.id === me ? ' me' : ''}">`
-                    + `<span>${medal} ${s.name}${you}</span>`
-                    + `<span>${s.passes} passes · ${s.interceptions} interceptions · ${s.middleTimes}× middle</span></div>`;
+                const rank = i + 1;
+                const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '';
+                const isMe = s.id === me;
+                const isWinner = i === 0;
+                return `<div class="rondo-standing-row${isMe ? ' me' : ''}${isWinner ? ' winner' : ''}">`
+                    + `<span class="rondo-rank">${medal || `<i>${rank}</i>`}</span>`
+                    + `<span class="rondo-player">${s.name}${isMe ? ' <b class="rondo-you">YOU</b>' : ''}</span>`
+                    + `<span class="rondo-stats">`
+                    + `<b>${s.passes}</b><small>passes</small>`
+                    + `<b>${s.interceptions}</b><small>tackles</small>`
+                    + `<b>${s.middleTimes}×</b><small>middle</small>`
+                    + `</span></div>`;
             }).join('');
-            html = `<p class="rondo-winner">🏆 ${standings[0].name} wins the rondo!</p>${rows}`
+            html = `<div class="rondo-winner-banner">`
+                + `<span class="rondo-winner-cup">🏆</span>`
+                + `<div><b>${winner.name}</b><span>wins the rondo</span></div>`
+                + `</div>`
+                + `<div class="rondo-standings">${rows}</div>`
                 + (reason ? `<p class="rondo-hint">${reason}</p>` : '');
         }
         showRondoOver(html);
@@ -10948,10 +10970,27 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const STICKER_COUNT = 21;
         const stickerId = (n) => 'sticker:stickers/gif-' + String(n).padStart(2, '0') + '.gif';
         let lastEmojiSentAt = 0;
-        const sendEmoji = (emoji) => {
+        /* Sweeping cooldown ring around the tapped button for the 2s resend delay. */
+        const showCooldownRing = (btn) => {
+            if (!btn || !btn.classList) return;
+            btn.classList.add('cooling');
+            const t0 = performance.now();
+            const tick = (now) => {
+                const p = Math.max(0, 1 - (now - t0) / 2000);
+                btn.style.setProperty('--cool-p', (p * 100).toFixed(1));
+                if (p > 0) requestAnimationFrame(tick);
+                else {
+                    btn.classList.remove('cooling');
+                    btn.style.removeProperty('--cool-p');
+                }
+            };
+            requestAnimationFrame(tick);
+        };
+        const sendEmoji = (emoji, btn) => {
             const now = Date.now();
             if (now - lastEmojiSentAt < 2000) return;
             lastEmojiSentAt = now;
+            showCooldownRing(btn);
             const myName = (state.phase === 'rondo' && rondoNet) ? rondoPlayerName(rondoMyId()) : 'You';
             spawnFloatingEmoji(emoji, true, myName);
             if (pvpActive) {
@@ -10986,7 +11025,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 const b = e.target.closest('.sticker-btn');
                 if (!b) return;
                 const sid = b.getAttribute('data-sticker');
-                if (sid) sendEmoji(sid);
+                if (sid) sendEmoji(sid, b);
             });
         };
         buildStickerGrid(document.getElementById('dock-stickers'));
@@ -11005,7 +11044,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         document.querySelectorAll('.btn-emoji').forEach(btn => {
             btn.addEventListener('click', () => {
                 const emoji = btn.getAttribute('data-emoji');
-                if (emoji) sendEmoji(emoji);
+                if (emoji) sendEmoji(emoji, btn);
             });
         });
         /* Rondo's expanding reactions: toggle the list, send on pick. */
@@ -11018,7 +11057,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             if (!b) return;
             const emoji = b.getAttribute('data-emoji') || b.textContent;
             if (rReact) rReact.classList.remove('open');
-            if (emoji) sendEmoji(emoji);
+            if (emoji) sendEmoji(emoji, b);
         });
         /* Rondo's sticker popup: toggle the grid; picking a sticker sends it. */
         const rSbtn = document.getElementById('rondo-sbtn');
