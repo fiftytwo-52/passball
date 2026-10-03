@@ -30,3 +30,7 @@ out/
 # Superseded planning documents
 step-by-step-build-prompt.md
 skills-lock.json
+
+# Build output — never commit; deploy from a fresh out/ build.
+dist/
+out/
