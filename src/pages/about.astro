@@ -25,13 +25,16 @@ import '../styles/info.css';
             <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#171717"/><circle cx="16" cy="16" r="6.5" fill="none" stroke="#50e3c2" stroke-width="2.5"/></svg>
             tactik
         </a>
-        <div class="info-links">
+        <div class="info-links" id="info-menu">
             <a href="/tutorial">Tutorial</a>
             <a href="/about" class="active">About</a>
             <a href="/contact">Contact</a>
             <a href="/privacy">Privacy</a>
             <a href="/" class="play">▶ Play</a>
         </div>
+        <button type="button" class="info-burger" aria-label="Menu" aria-expanded="false" aria-controls="info-menu">
+            <span></span><span></span><span></span>
+        </button>
     </nav>
 
     <header class="info-hero">
@@ -123,5 +126,19 @@ import '../styles/info.css';
         }, { threshold: 0.12 });
         document.querySelectorAll('.reveal').forEach(elm => io.observe(elm));
     </script>
+<script>
+(function(){
+  var btn=document.querySelector(".info-burger");
+  var menu=document.getElementById("info-menu");
+  if(!btn||!menu)return;
+  btn.addEventListener("click",function(){
+    var open=menu.classList.toggle("open");
+    btn.setAttribute("aria-expanded",open?"true":"false");
+  });
+  menu.addEventListener("click",function(e){
+    if(e.target.closest("a")){menu.classList.remove("open");btn.setAttribute("aria-expanded","false");}
+  });
+})();
+</script>
 </body>
 </html>

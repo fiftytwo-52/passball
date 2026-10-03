@@ -970,7 +970,6 @@
 }
 
 @media (max-width: 640px) {
-    .info-links a:not(.play):not(.active) { display: none; }
     .info-hero { padding: 52px 16px 44px; }
     .hero-sticker { width: 70px; }
     .info-wrap { padding: 8px 16px 64px; }
@@ -1005,4 +1004,70 @@
     .pitch-svg-shoot .goal-spark,
     .anim-shot-path,
     .live-dot { animation: none; }
+}
+
+/* ---- burger menu (mobile / tablet) ---- */
+.info-burger {
+    display: none;
+    all: unset;
+    cursor: pointer;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    position: relative;
+    box-sizing: border-box;
+}
+.info-burger span {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    height: 3px;
+    background: var(--tk-ink);
+    transition: transform .25s ease, opacity .2s ease;
+}
+.info-burger span:nth-child(1) { top: 13px; }
+.info-burger span:nth-child(2) { top: 20.5px; }
+.info-burger span:nth-child(3) { top: 28px; }
+.info-burger[aria-expanded="true"] span:nth-child(1) { transform: translateY(7.5px) rotate(45deg); }
+.info-burger[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+.info-burger[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7.5px) rotate(-45deg); }
+.info-burger:focus-visible {
+    outline: 3px solid var(--tk-or);
+    outline-offset: 2px;
+}
+
+@media (max-width: 860px) {
+    .info-burger { display: block; }
+    .info-nav { position: sticky; }
+    .info-links {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+        background: var(--tk-bg);
+        border-bottom: 1.5px solid var(--tk-line);
+        box-shadow: 0 18px 32px rgba(0,0,0,.18);
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height .3s ease;
+        z-index: 20;
+    }
+    .info-links.open { max-height: 400px; }
+    .info-links a {
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--tk-line);
+        font-size: 18px;
+    }
+    .info-links a.active { border-bottom: 1px solid var(--tk-line); border-left: 4px solid var(--tk-or); }
+    .info-links a.play {
+        margin: 12px 20px 16px;
+        text-align: center;
+        border-bottom: none;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .info-burger span, .info-links { transition: none; }
 }
