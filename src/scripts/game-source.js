@@ -1609,6 +1609,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         new THREE.SphereGeometry(.42, 16, 14),
         new THREE.MeshLambertMaterial({ color: 0xffffff })
     );
+    /* Ball size: slightly bigger (1.18x) in quick match vs computer only.
+       Penalties (SO.active), Rondo, and PvP keep the standard size. */
+    function updateBallScale() {
+        const isQuickVsCpu = (state.phase === 'play' || state.phase === 'plan') && !pvpActive && !SO.active && state.phase !== 'rondo';
+        ballMesh.scale.setScalar(isQuickVsCpu ? 1.18 : 1);
+    }
     /* The rim: a dark annulus in the ball's own equatorial plane, just outside
        its silhouette, so the ball keeps a hard edge whether it is crossing the
        dark turf or running straight over a white painted line — the one place a
@@ -3318,6 +3324,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         ball.mode = 'held';
         ball.holder = carrier;
         ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
+        updateBallScale();
         ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
         setCarrier(carrier);
         hideOverlays();
@@ -4028,6 +4035,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 ball.h = 0.42;
                 ball.s = 0;
                 ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
+        updateBallScale();
                 ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
 
                 if (progress >= 1) {
@@ -4239,6 +4247,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             if (best) { setCarrier(best); return; }
         }
         ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
+        updateBallScale();
         ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
         const s = 1 - clamp(ball.h / 4, 0, .6);
         ballShadow.scale.setScalar(s);
@@ -7261,6 +7270,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (pvpActive && pvpRole === 'guest') {
             allPlayers.forEach(p => { animatePlayer(p, dt); syncToMesh(p); });
             ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
+        updateBallScale();
             ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
             updateCursor();
             tutorTick(dt);
@@ -7327,6 +7337,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         } else if (state.phase === 'shootout') {
             soUpdate(dt);
             ballMesh.position.set(worldX(ball.x), ball.h, worldZ(ball.y));
+        updateBallScale();
             ballShadow.position.set(worldX(ball.x), 0.04, worldZ(ball.y));
         }
 
@@ -9387,6 +9398,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const pm = rondoMeshes[rondo.possessor];
             if (pm && typeof ballMesh !== 'undefined' && ballMesh) {
                 ballMesh.position.set(worldX(pm.gx), 0.22, worldZ(pm.gy));
+        updateBallScale();
             }
         }
 
@@ -10165,6 +10177,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                 const bx = pm.gx + ux * 1.5;
                 const by = pm.gy + uy * 1.5;
                 ballMesh.position.set(worldX(bx), 0.62, worldZ(by));
+        updateBallScale();
             }
         }
 
@@ -11952,3 +11965,4 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         test: { cpuShotQuality, cpuChoosePass, keeperSkill, cpuShotAim }
     };
 })();
+        updateBallScale();
