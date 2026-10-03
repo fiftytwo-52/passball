@@ -5388,7 +5388,7 @@ body {
 }
 #screen-menu .tk-chips {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
 }
 #screen-menu .tk-chip {
@@ -5396,13 +5396,15 @@ body {
     cursor: pointer;
     display: grid;
     gap: 1px;
-    padding: 5px 8px 6px;
+    padding: 5px 6px 6px;
     background: var(--tk-panel);
     border: 1.5px solid var(--tk-line);
     border-bottom: 3px solid var(--tk-or);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     box-sizing: border-box;
+    min-width: 0;
+    overflow: hidden;
 }
 #screen-menu .tk-chip small {
     font: 600 10px Barlow, sans-serif;
@@ -5410,11 +5412,16 @@ body {
     letter-spacing: .08em;
     text-transform: uppercase;
     font-style: normal;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 #screen-menu .tk-chip span {
-    font-size: 17px;
+    font-size: 16px;
     line-height: 1.05;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 #screen-menu .tk-modes {
     display: grid;
@@ -5487,7 +5494,7 @@ body {
         align-self: center;
         gap: 14px;
     }
-    #screen-menu .tk-chips { grid-template-columns: 1fr 1fr; }
+    #screen-menu .tk-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     #screen-menu .tk-chip { padding: 8px 12px; }
     #screen-menu .tk-chip span { font-size: 20px; }
     #screen-menu .tk-modes { grid-template-columns: 1fr; gap: 12px; }
