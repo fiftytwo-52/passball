@@ -147,6 +147,14 @@ export class RondoNet extends EventTarget {
             }
             if (data.type === 'RONDO_JOIN') {
                 this._admitGuest(conn, String(data.name || 'Player').slice(0, 16) || 'Player', String(data.id || ''));
+            } else if (data.type === 'RONDO_ROSTER_REQ') {
+                /* Guest explicitly asks for the current squad (pull fallback). */
+                try {
+                    conn.send({
+                        type: 'RONDO_LOBBY',
+                        players: this._lobbyPlayers ? this._lobbyPlayers() : this.roster(),
+                    });
+                } catch (e) {}
             } else if (data.type && typeof data.type === 'string' && data.type.startsWith('RONDO_')) {
                 const guest = this._guestByConn(conn);
                 this.emit('guestmsg', { from: guest ? guest.id : null, msg: data });

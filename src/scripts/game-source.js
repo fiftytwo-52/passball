@@ -8605,6 +8605,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     let rondoNet = null;
     let rondo = null;           // live game state, null when not playing
+    let rondoRosterPoll = null; // guest lobby roster pull timer
     let rondoLobby = null;      // { isHost, code } while in the lobby
     let rondoMeshes = {};       // playerId -> { group, label }
     let rondoBallAnim = null;   // { from, to, t, dur, onDone }
@@ -9052,6 +9053,14 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const jf = document.getElementById('rondo-join-form');
             if (jf) jf.hidden = true;
             document.getElementById('btn-rondo-join').disabled = false;
+            /* Pull fallback: ask the host for the squad every 3s while we're
+               waiting in the lobby, so bot/player changes always show up. */
+            if (rondoRosterPoll) clearInterval(rondoRosterPoll);
+            rondoRosterPoll = setInterval(() => {
+                if (!rondoNet || rondoNet.isHost) return;
+                if (rondo && state.phase === 'rondo') return; // in game, not lobby
+                try { rondoNet.sendToHost({ type: 'RONDO_ROSTER_REQ' }); } catch (e) {}
+            }, 3000);
         } catch (err) {
             rondoSetStatus(err.message || 'Could not join.');
             document.getElementById('btn-rondo-join').disabled = false;
@@ -9060,6 +9069,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     /** Leave the lobby or an in-progress game. `fromGame` also tears down the 3D. */
     function rondoLeave(fromGame) {
+        if (rondoRosterPoll) {
+            clearInterval(rondoRosterPoll);
+            rondoRosterPoll = null;
+        }
         const inGame = rondo && state.phase === 'rondo';
         if (rondoNet && rondoLobby && !rondoLobby.isHost && inGame) {
             rondoNet.sendToHost({ type: 'RONDO_LEAVE' });
@@ -9772,6 +9785,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         view.zoom = 1.65;
         fitView();
         rondoSpin.rotation.y = 0;
+        if (rondoRosterPoll) {
+            clearInterval(rondoRosterPoll);
+            rondoRosterPoll = null;
+        }
         /* Ping badge: show live RTT while playing. Guests see RTT to host;
            the host sees the worst guest RTT. */
         if (rondoNet && !rondoNet._pingWired) {
