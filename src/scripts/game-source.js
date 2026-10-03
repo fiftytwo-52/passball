@@ -872,6 +872,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        The camera, the projection math and every world-space placement stay
        untouched; only the guest's pointer mapping un-flips the gesture. */
     const world = new THREE.Group();
+    /* Rondo perspective: player meshes and aim lines live in this group, which
+       rotates per-client so each viewer sees their own seat at the bottom.
+       The ground/pitch stays fixed. */
+    const rondoSpin = new THREE.Group();
+    world.add(rondoSpin);
     scene.add(world);
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -400, 400);
     camera.position.set(0, 130 * Math.cos(TILT), 130 * Math.sin(TILT));
@@ -1765,11 +1770,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     carrierMark.add(pinGlow, carrierPinMesh, collarMesh, crownMesh);
     carrierMark.visible = false;
     carrierMark.scale.setScalar(0);
-    world.add(carrierMark);
+    rondoSpin.add(carrierMark);
 
     let carrierMarkScale = 0;
     const ballShadow = makeBlobShadow(0.6);
-    world.add(ballMesh, ballShadow);
+    rondoSpin.add(ballMesh, ballShadow);
     const ball = {
         x: 50, y: 50, h: 0.42,
         mode: 'held',            // held | pass | shot | loose
@@ -1918,6 +1923,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     rondoDefAimLine.visible = false;
     const rondoMoveAimLine = groundLine(0x35c4ff, 2.5);
     rondoMoveAimLine.visible = false;
+    rondoSpin.add(rondoPassAimLine, rondoDefAimLine, rondoMoveAimLine);
 
     /* --- §8.b the stacked moves (§17.b) -------------------------------------
        A ring per queued run, plus one line for the queued ball. These show the
@@ -7704,18 +7710,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             }
         }
         const pz = worldZ(view.panY);
-        /* Rondo perspective: swing the camera around the centre so the
-           viewer's own player is at the bottom of their screen. */
-        let camAz = 0;
-        if (state.phase === 'rondo' && rondo && typeof rondo.viewAz === 'number') {
-            camAz = rondo.viewAz;
-        }
-        const camR = 130 * Math.sin(TILT);
-        camera.position.set(
-            Math.sin(camAz) * camR,
-            130 * Math.cos(TILT),
-            pz + Math.cos(camAz) * camR
-        );
+        camera.position.set(0, 130 * Math.cos(TILT), pz + 130 * Math.sin(TILT));
         camera.rotation.z = 0;
         camera.lookAt(0, 0, pz);
     }
@@ -9771,6 +9766,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         // Zoom camera in rondo mode for a close-up keep-away framing
         view.zoom = 1.65;
         fitView();
+        rondoSpin.rotation.y = 0;
         /* Ping badge: show live RTT while playing. Guests see RTT to host;
            the host sees the worst guest RTT. */
         if (rondoNet && !rondoNet._pingWired) {
@@ -9840,7 +9836,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             ring.position.set(0, 0.06, 0); // Positioned locally at player's feet
             if (isMiddle) ring.visible = false;
             mesh.add(ring);
-            world.add(mesh);
+            rondoSpin.add(mesh);
 
             let gx = 50, gy = 50;
             if (!isMiddle) {
@@ -9948,17 +9944,20 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             m.ring.material.color.setHex(c);
             m.ring.visible = true;
         });
-        /* Per-player perspective: this client's camera azimuth puts their own
-           seat at the bottom of the screen. Everyone sees the same game, but
-           from behind their own player. The middle keeps their last circle
-           perspective (no camera snap while hunting). */
+        /* Per-player perspective: rotate the player circle (not the ground)
+           so this client's own seat sits at the bottom of their screen.
+           The middle keeps their last circle perspective (no snap while
+           hunting). Grid coordinates stay canonical — this is visual only. */
         if (me && rondo.circle.includes(me)) {
             const sm = rondoMeshes[me];
             if (sm && sm.homeGx !== undefined) {
                 const wx = (sm.homeGx - 50) * KX;
                 const wz = (50 - sm.homeGy) * ZSTRETCH;
                 if (Math.hypot(wx, wz) > 0.5) {
-                    rondo.viewAz = Math.atan2(wx, wz);
+                    /* Group rotation.y = θ maps angle a -> a - θ. Want
+                       a_me -> π/2 (bottom, +Z toward camera). */
+                    rondo.spinAz = Math.atan2(wz, wx) - Math.PI / 2;
+                    rondoSpin.rotation.y = rondo.spinAz;
                 }
             }
         }
@@ -10134,6 +10133,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     }
 
     function rondoTeardown() {
+        rondoSpin.rotation.y = 0;
         rondoTeardownScene();
         pushScreen('menu', { focus: '#btn-rondo' });
     }
@@ -10947,8 +10947,23 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         };
     }
 
+    /* Un-spin a pointer grid point: the player circle is visually rotated
+       by rondo.spinAz, but game logic uses the canonical grid. */
+    function rondoUnspin(pt) {
+        const az = (rondo && rondo.spinAz) || 0;
+        if (!az) return pt;
+        const wx = (pt.x - 50) * KX;
+        const wz = (50 - pt.y) * ZSTRETCH;
+        const c = Math.cos(az), s = Math.sin(az);
+        /* Inverse of the group rotation (angle a -> a - θ): rotate by +θ. */
+        const ux = wx * c - wz * s;
+        const uz = wx * s + wz * c;
+        return { x: ux / KX + 50, y: 50 - uz / ZSTRETCH };
+    }
+
     function rondoHandlePointerDown(e, pt) {
         if (!rondo || rondo.phase !== 'plan' || !rondoNet) return;
+        pt = rondoUnspin(pt);
         const me = rondoMyId();
         if (!me) return;
         const myMesh = rondoMeshes[me];
@@ -10999,6 +11014,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     function rondoHandlePointerMove(e, pt) {
         if (!rondo || rondo.phase !== 'plan') return;
+        pt = rondoUnspin(pt);
         const me = rondoMyId();
         if (!me) return;
         const myMesh = rondoMeshes[me];
