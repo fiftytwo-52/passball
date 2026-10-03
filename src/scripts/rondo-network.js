@@ -53,10 +53,18 @@ export class RondoNet extends EventTarget {
     /** Host: push the current full lobby list to every guest. */
     pushLobby() {
         if (!this.isHost) return;
-        this.broadcast({
-            type: 'RONDO_LOBBY',
-            players: this._lobbyPlayers ? this._lobbyPlayers() : this.roster(),
-        });
+        const send = () => {
+            try {
+                this.broadcast({
+                    type: 'RONDO_LOBBY',
+                    players: this._lobbyPlayers ? this._lobbyPlayers() : this.roster(),
+                });
+            } catch (e) {}
+        };
+        send();
+        /* Blast it 3x to punch through transient send failures. */
+        setTimeout(send, 500);
+        setTimeout(send, 1200);
     }
 
     emit(name, detail) {

@@ -9035,6 +9035,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             if (countEl) countEl.textContent = String(n);
             rondoSetStatus(`Squad updated — ${n} players${bots ? ` (${bots} bots)` : ''}.`, true);
         });
+        const btnRefresh = document.getElementById('btn-rondo-refresh-squad');
+        if (btnRefresh) btnRefresh.addEventListener('click', () => {
+            try { rondoNet.sendToHost({ type: 'RONDO_ROSTER_REQ' }); } catch (e) {}
+            rondoSetStatus('Refreshing squad…', true);
+        });
         rondoNet.on('status', (msg) => rondoSetStatus(msg, true));
         rondoNet.on('error', (msg) => {
             rondoSetStatus(msg);
