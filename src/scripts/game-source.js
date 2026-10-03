@@ -9030,7 +9030,12 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         rondoSetStatus('Joining...');
         document.getElementById('btn-rondo-join').disabled = true;
 
-        rondoNet.on('lobby', (players) => rondoRenderRoster(players));
+        rondoNet.on('lobby', (players) => {
+            rondoRenderRoster(players);
+            const n = (players || []).length;
+            const bots = (players || []).filter(p => p.cpu).length;
+            rondoSetStatus(`Squad updated — ${n} players${bots ? ` (${bots} bots)` : ''}.`, true);
+        });
         rondoNet.on('status', (msg) => rondoSetStatus(msg, true));
         rondoNet.on('error', (msg) => {
             rondoSetStatus(msg);
