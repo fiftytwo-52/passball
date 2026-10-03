@@ -5501,6 +5501,9 @@ body {
         grid-column: 2;
         align-self: center;
         gap: 14px;
+        /* Nudge down to align with the pitch's visual center
+           (the title above the pitch pushes the optical center down) */
+        margin-top: 4dvh;
     }
     #screen-menu .tk-chips { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
     #screen-menu .tk-chip { padding: 8px 12px; height: auto; min-height: 56px; }
@@ -6216,4 +6219,10 @@ body {
 @media (prefers-reduced-motion: reduce) {
     #screen-pvp .pvp-spinner { animation: none; }
     #screen-pvp .btn-primary:hover { transform: none; }
+}
+#screen-pvp .pvp-desc {
+    font-size: 15px;
+    color: var(--tk-mute, #4d6b5b);
+    margin: 0 0 4px;
+    line-height: 1.4;
 }

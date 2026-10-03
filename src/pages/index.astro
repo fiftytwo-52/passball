@@ -655,7 +655,7 @@ import '../styles/global.css';
 
                     <div id="pvp-create-active" hidden>
                         <div class="room-code-display">
-                            <span class="room-code-label">ROOM CODE</span>
+                            <span class="room-code-label">Room open · share this code</span>
                             <span class="room-code-num" id="pvp-room-code-val">----</span>
                             <span id="pvp-room-settings-summary" class="pvp-summary-chip">10s Turns · 4:00 Min Match</span>
                         </div>
@@ -665,7 +665,7 @@ import '../styles/global.css';
                         </div>
                         <div class="pvp-wait-box">
                             <span class="pvp-spinner"></span>
-                            <span>Waiting for opponent to connect...</span>
+                            <span>Waiting for opponent</span>
                         </div>
                     </div>
                 </div>
@@ -690,7 +690,9 @@ import '../styles/global.css';
             <div class="pvp-pane" id="pane-open" hidden>
                 <div id="pvp-open-idle">
                     <div class="pvp-section">
-                        <span class="pvp-section-title">Match Settings</span>
+                        <span class="pvp-section-title">Quick Match</span>
+                        <p class="pvp-desc">Match with a random player at your chosen pace.</p>
+                        <span class="pvp-section-title" style="margin-top: 12px;">Match Settings</span>
                         <!-- The same two dials the private room carries: a
                              matchmade game is configured before a challenger is
                              picked, and the challenger's pair is the one the
