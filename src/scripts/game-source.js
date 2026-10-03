@@ -9163,9 +9163,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         begin until the middle has reached the center. */
     function rondoHostNextTurn() {
         if (!rondo || rondo.phase === 'over') return;
-        if (rondo.middleCentering) {
-            /* Still centering — retry in 500ms. The middle's movement code
-               clears the flag on arrival. */
+        if (rondo.middleCentering || rondo.winnerSeating) {
+            /* Still seating — retry in 500ms. The movement code clears the
+               flags on arrival: new middle at center, winner at the seat. */
             setTimeout(() => {
                 if (rondo && rondo.phase !== 'over') rondoHostNextTurn();
             }, 500);
@@ -10155,6 +10155,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.defPick = null;
             rondo.middleCentering = true;
             rondo.centeringSince = Date.now();
+            /* The interceptor (now possessor) walks to the passer's old seat
+               with the ball. The next turn waits for BOTH arrivals. */
+            rondo.winnerSeating = true;
+            rondo.winnerSeatId = prevMiddle;
+            rondo.seatingSince = Date.now();
             /* If the new middle is human, prompt them to move to center manually. */
             if (rondo.middle === rondoMyId()) {
                 rondoBanner('mid', '🎯', "You're in the middle", 'Heading to the center…', true);
@@ -10247,6 +10252,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             rondo.defPick = null;
             rondo.middleCentering = true;
             rondo.centeringSince = Date.now();
+            /* The interceptor (now possessor) walks to the passer's old seat
+               with the ball. The next turn waits for BOTH arrivals. */
+            rondo.winnerSeating = true;
+            rondo.winnerSeatId = prevMiddle;
+            rondo.seatingSince = Date.now();
             /* If the new middle is human, prompt them to move to center manually. */
             if (rondo.middle === rondoMyId()) {
                 rondoBanner('mid', '🎯', "You're in the middle", 'Heading to the center…', true);
@@ -10347,8 +10357,24 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     cmm.targetGy = 50;
                     cmm.speed = 12;
                 }
+            }
+        }
+        /* Winner seating: the interceptor walks to the passer's old seat with
+           the ball before the next turn. */
+        if (rondo.winnerSeating) {
+            const wm = rondoMeshes[rondo.winnerSeatId];
+            if (wm && wm.homeGx !== undefined) {
+                const dw = Math.hypot((wm.gx || 50) - wm.homeGx, (wm.gy || 50) - wm.homeGy);
+                const wTimedOut = rondo.seatingSince && (Date.now() - rondo.seatingSince > 10000);
+                if (dw < 2 || wTimedOut) {
+                    rondo.winnerSeating = false;
+                } else {
+                    wm.targetGx = wm.homeGx;
+                    wm.targetGy = wm.homeGy;
+                    wm.speed = 12;
+                }
             } else {
-                rondo.middleCentering = false;
+                rondo.winnerSeating = false;
             }
         }
 
