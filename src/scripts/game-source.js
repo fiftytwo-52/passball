@@ -2902,9 +2902,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            *seen* colours — friendly when I scored, even as the guest. */
         const vt = vTeam(team);
         goalBurst.material.color.set(vt === 'you' ? COL.you : COL.cpu);
-        /* the celebration sticker: ball + party popper flanking the word,
+        /* the celebration word: clean takTIK-style GOAL without emoji,
            blinking via the goal-word keyframes for the full two seconds */
-        splashWord('\u26BD GOAL! \uD83C\uDF89', vt === 'you' ? CSS.you : CSS.cpu);
+        splashWord('GOAL!', vt === 'you' ? CSS.you : CSS.cpu);
         /* §18.b — start the 3D pitch burst (the update loop animates it while
            FIRE.goal > 0). It starts here, after the word, so only real goals
            ever light it — SAVED / POST / MISSED show the word alone. */

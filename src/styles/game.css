@@ -1374,15 +1374,18 @@ body {
 }
 
 #goal-fx-word {
-    font-family: var(--f-sans);
-    font-weight: 700;
+    font-family: var(--f-cond);
+    font-weight: 800;
+    font-style: italic;
     font-size: clamp(44px, 16vmin, 140px);
     line-height: 1;
-    letter-spacing: -0.05em;
+    letter-spacing: -0.02em;
     text-transform: uppercase;
     color: var(--goal-fx, #ffffff);
     text-shadow: 0 2px 0 rgba(0, 0, 0, 0.3), 0 20px 52px rgba(0, 0, 0, 0.6);
-    transform: scale(0.6);
+    transform: scale(0.6) skewX(-8deg);
+    background: rgba(0, 0, 0, 0.35);
+    padding: 0.1em 0.3em;
 }
 
 /* the shockwave — a ring that grows out of the centre spot */
@@ -1431,17 +1434,17 @@ body {
 
 @keyframes goal-word {
     0% {
-        transform: scale(0.55) translateY(16px);
+        transform: scale(0.55) translateY(16px) skewX(-8deg);
         opacity: 0;
     }
 
     14% {
-        transform: scale(1.09) translateY(0);
+        transform: scale(1.09) translateY(0) skewX(-8deg);
         opacity: 1;
     }
 
     24% {
-        transform: scale(1) translateY(0);
+        transform: scale(1) translateY(0) skewX(-8deg);
         opacity: 1;
     }
 
@@ -1472,12 +1475,12 @@ body {
 
     70% {
         opacity: 1;
-        transform: scale(1) translateY(0);
+        transform: scale(1) translateY(0) skewX(-8deg);
     }
 
     82% {
         opacity: 1;
-        transform: scale(1) translateY(0);
+        transform: scale(1) translateY(0) skewX(-8deg);
     }
 
     100% {
@@ -1557,7 +1560,7 @@ body {
     }
     to {
         opacity: 1;
-        transform: scale(1) translateY(0);
+        transform: scale(1) translateY(0) skewX(-8deg);
     }
 }
 
