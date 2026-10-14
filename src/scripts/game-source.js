@@ -535,7 +535,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
          ball in the air: `contestFlight` skips the outfield cut entirely for
          `ball.air`. The keeper is deliberately NOT exempt — pulling a chip out
          of the air inside his own reach is a catch, not a disruption. */
-    const STROKE_MAX = 96;        // points kept per freehand stroke
+    const STROKE_MAX = 160;       // points kept per freehand stroke (higher resolution for smooth curves)
     const STROKE_MIN = 2;         // minimum distance to register stroke power smoothly
     const POWER_LEN = 46;         // stroke length (canonical units) that reads as a full kick
     const AIR_LEN = 34;           // length at which a long stroke goes over the top
@@ -587,7 +587,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             struck from the SAME rolled profile as a ground pass — only 8% harder,
             via CHIP_GAIN — because the roll is what makes the ball, the flight
             time and the strike point all read the same distance. */
-    const AIR_ARC = 0.30;         // the chip's whole lift: a visual "over the top"
+    const AIR_ARC = 2.20;         // the chip's whole lift: rises over defenders (ball.h > 1.1 in mid-flight)
     const CHIP_GAIN = 1.08;       // a chip is struck this much harder than a ground pass
     /* --- and how it is *drawn*, which is the half nobody could see ------------
        The ball is a 0.42-unit sphere on a board 100 units wide, and it was also
@@ -606,7 +606,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        bug the defender table below had. */
     const LANE_OFFSET = [-30, -14, 14, 30, -22, 22];
     const LANE_DEPTH = [0.55, 0.82, 0.62, 0.34, 0.40, 0.74];
-    const TAP_SLOP = 1.2;         // game units a pointer must travel to be a drag (~12px)
+    const TAP_SLOP = 0.85;        // game units a pointer must travel to be a drag (~8px for responsive touch)
     const DOUBLE_TAP_MS = 340;    // §5 — double-tap to shoot
     const SO_ZOOM = 2.6, SO_PAN_Y = 92;   // §10 penalty view: one end, magnified
     /* --- §11.b the coached opening --------------------------------------- */
@@ -1859,7 +1859,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const r = passArrivalFrac(d);
             ball.total = PASS_REACH * d / Math.max(1e-6, passMeanSpeed(v0, d));
             ball.dec = v0 * (1 - r) / Math.max(1e-6, ball.total);
-            ball.arc = BALL_ROLL_ARC;
+            ball.arc = ball.air ? AIR_ARC : BALL_ROLL_ARC;
         } else {
             ball.total = d / Math.max(1e-6, speed);
             ball.dec = 0;
@@ -2143,7 +2143,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     /** Drop every stacked move, and every line that was drawn for them. Called
         whenever a window opens, closes, or a ball spills loose. */
     function clearIntents() {
-        allPlayers.forEach(p => { p.queued = null; p.userMove = false; });
+        allPlayers.forEach(p => { p.queued = null; p.userMove = false; p.autoMove = false; });
         hideQueueMarkers();
         aimReset();
     }
@@ -2263,12 +2263,25 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         half*. `home` is therefore the attacking side's own goal, not the one it
         is attacking: lining attackers up along the direction of the attack is
         what crowded both teams into one half and left the human's half empty. */
-    function attackingSpot(from, home, i) {
+    function attackingSpot(from, targetGoal, i) {
         const off = LANE_OFFSET[i % LANE_OFFSET.length];
         const t = LANE_DEPTH[i % LANE_DEPTH.length];
+        /* If targetGoal is the attacked goal (during live play), keep 3 runners
+           pressing forward into space and 2 support options offering width/depth
+           around the ball carrier so the carrier never runs out of passing angles. */
+        const isAttackGoal = PLAY && targetGoal && targetGoal.y === PLAY.goal.y;
+        if (isAttackGoal) {
+            const side = attackSide(PLAY.atk);
+            const depthOffsets = [18, 28, 14, -8, 8, 22];
+            const dy = depthOffsets[i % depthOffsets.length] * side;
+            return {
+                x: clamp(lerp(from.x, 50, 0.35) + off * 0.72, 8, 92),
+                y: clamp(from.y + dy, 6, 94)
+            };
+        }
         return {
-            x: clamp(lerp(from.x, home.x, t) + off * 0.55, 8, 92),
-            y: clamp(lerp(from.y, home.y, t), 6, 94)
+            x: clamp(lerp(from.x, targetGoal.x, t) + off * 0.55, 8, 92),
+            y: clamp(lerp(from.y, targetGoal.y, t), 6, 94)
         };
     }
 
@@ -2460,27 +2473,58 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         to sit visibly a little off the line it was drawn as; the tail beyond the
         drawn distance is re-aimed at the same point along the ball's own ray, so
         the destination is exactly the drawn one and the path is exactly straight. */
-    function anchored(stroke, from) {
-        if (!stroke) return null;
-        if (from.x === stroke.pts[0].x && from.y === stroke.pts[0].y) return stroke;
-        const dx = stroke.end.x - from.x, dy = stroke.end.y - from.y;
-        const d = Math.hypot(dx, dy);
-        const pts = stroke.pts.slice();
-        if (d > 1e-6) {
-            for (let i = 0; i < pts.length; i++) {
-                const t = Math.max(0, (pts[i].x - from.x) * dx + (pts[i].y - from.y) * dy) / (d * d);
-                pts[i] = { x: from.x + dx * t, y: from.y + dy * t };
+    /** Smooth a freehand polyline with Chaikin corner-cutting while keeping endpoints fixed. */
+    function smoothStrokePts(rawPts) {
+        if (!rawPts || rawPts.length < 3) return rawPts ? rawPts.slice() : [];
+        let pts = rawPts.slice();
+        const out = [pts[0]];
+        for (let i = 0; i < pts.length - 1; i++) {
+            const p0 = pts[i], p1 = pts[i + 1];
+            out.push({ x: 0.75 * p0.x + 0.25 * p1.x, y: 0.75 * p0.y + 0.25 * p1.y });
+            if (i < pts.length - 2) {
+                out.push({ x: 0.25 * p0.x + 0.75 * p1.x, y: 0.25 * p0.y + 0.75 * p1.y });
             }
-        } else {
-            for (let i = 0; i < pts.length; i++) pts[i] = { x: from.x, y: from.y };
         }
-        /* pts[0] is on the ball by construction; the last is the drawn point */
+        out.push(pts[pts.length - 1]);
+        if (out.length > STROKE_MAX) {
+            const step = (out.length - 1) / (STROKE_MAX - 1);
+            const dec = [];
+            for (let i = 0; i < STROKE_MAX - 1; i++) dec.push(out[Math.round(i * step)]);
+            dec.push(out[out.length - 1]);
+            return dec;
+        }
+        return out;
+    }
+
+    function anchored(stroke, from) {
+        if (!stroke || !stroke.pts || !stroke.pts.length) return null;
+        const p0 = stroke.pts[0];
+        const end = stroke.end || stroke.pts[stroke.pts.length - 1];
+        const shiftX = from.x - p0.x, shiftY = from.y - p0.y;
+        const n = stroke.pts.length;
+        const pts = new Array(n);
+        /* Preserve the user's drawn curve shape by tapering the origin shift smoothly
+           from 1 at the start (ball) to 0 at the release endpoint, instead of collapsing
+           the curve onto a straight line (which previously broke curved air chips). */
+        for (let i = 0; i < n; i++) {
+            const w = n > 1 ? 1 - (i / (n - 1)) : 1;
+            pts[i] = {
+                x: stroke.pts[i].x + shiftX * w,
+                y: stroke.pts[i].y + shiftY * w
+            };
+        }
         pts[0] = { x: from.x, y: from.y };
-        pts[pts.length - 1] = { x: stroke.end.x, y: stroke.end.y };
+        pts[n - 1] = { x: end.x, y: end.y };
+        const smoothed = smoothStrokePts(pts);
+        const len = pathLength(smoothed);
+        const chord = Math.hypot(end.x - from.x, end.y - from.y);
         return {
-            pts, end: stroke.end,
-            len: pathLength(pts), chord: Math.hypot(stroke.end.x - from.x, stroke.end.y - from.y),
-            power: stroke.power, air: stroke.air
+            pts: smoothed,
+            end: { x: end.x, y: end.y },
+            len,
+            chord,
+            power: strokePower(len),
+            air: strokeIsAir(len, chord)
         };
     }
 
@@ -2844,7 +2888,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         matchLog: el('match-log'),
         matchLogEntries: el('match-log-entries'),
         difficultyStart: el('difficulty-start'), planWinStart: el('plan-window-start'),
-        halfLen: el('half-length'), halfLenStart: el('half-length-start'),
+        halfLen: el('half-length'), halfLenStart: el('match-length-start') || el('half-length-start'),
         soundStart: el('sound-start'),
         menuOpen: el('btn-menu-open'), menuClose: el('btn-menu-close'),
         menuRestart: el('btn-menu-restart'), menuQuit: el('btn-menu-quit'),
@@ -4195,7 +4239,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                ball on the drawn line for every frame in between. `arc` is a lie
                about height and nothing else; at 0 — every rolled ball — the ball
                never leaves the deck. */
-            ball.h = 0.42 + frac * ball.arc;
+            ball.h = 0.42 + Math.sin(Math.PI * frac) * ball.arc;
 
             /* Check boundary bounce during flight: if a pass or wide shot crosses the pitch line,
                 it immediately rebounds back into the pitch instead of flying into run-off.
@@ -4563,20 +4607,27 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         }
         const chasing = p => chasers.indexOf(p) >= 0;
 
-        /* 1.c when a pass is in flight, the intended receiver runs to meet the ball */
+        /* 1.c when a pass is in flight, the intended receiver (or nearest teammate
+               to the landing spot) runs to meet the ball — while respecting any
+               deliberate run (`userMove`) the player drew until they arrive or the
+               ball comes within their control zone. */
         let passReceiver = null;
         if (ball.mode === 'pass' && ball.alive && ball.target) {
-            passReceiver = (PLAY && PLAY.receiver) || ball.passTarget;
-            if (!passReceiver && PLAY && PLAY.atk) {
+            passReceiver = ball.passTarget || (PLAY && PLAY.receiver);
+            if (PLAY && PLAY.atk) {
                 const candidates = teamOutfield(PLAY.atk).filter(p => p !== ball.lastTouch);
                 candidates.sort((a, b) => dist(a, ball.target) - dist(b, ball.target));
-                passReceiver = candidates[0] || null;
+                const closestToTarget = candidates[0] || null;
+                if (!passReceiver || (closestToTarget && dist(closestToTarget, ball.target) + 4 < dist(passReceiver, ball.target))) {
+                    passReceiver = closestToTarget;
+                }
             }
             if (passReceiver) {
-                passReceiver.dest = null;
-                /* the receiver meets the ball at full pace too — he is running
-                   a drawn ball's line, not jogging into shape */
-                moveToward(passReceiver, ball.target.x, ball.target.y, passReceiver.speed || PLAYER_SPEED, dt, true);
+                const hasActiveUserRun = passReceiver.dest && passReceiver.userMove && dist(passReceiver, ball.target) > CATCH_RADIUS * 2.2;
+                if (!hasActiveUserRun) {
+                    passReceiver.dest = null;
+                    moveToward(passReceiver, ball.target.x, ball.target.y, passReceiver.speed || PLAYER_SPEED, dt, true);
+                }
             }
         }
 
@@ -5300,13 +5351,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             const isKeeper = p === k;
             const isOutfield = p.role === 'outfield';
             const squadIdx = isOutfield ? (parseInt(p.num) - 1) : -1;
-            const inSquad = isOutfield && squadIdx >= 0 && squadIdx < 5;
+            const inSquad = isOutfield && squadIdx >= 0 && squadIdx < 6;
             /* Line-up spots: horizontal rows visible in the zoomed penalty view.
                Yours on the left of the spot, CPU's on the right. */
             let lx = 50, ly = 50;
             if (inSquad) {
                 const leftSide = p.team === 'you';
-                lx = (leftSide ? 33 : 55) + squadIdx * 3;
+                lx = (leftSide ? 31 : 54) + squadIdx * 2.6;
                 ly = 80;
             }
             if (isKicker || isKeeper || inSquad) {
@@ -5406,17 +5457,11 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                    but it's a guess, not a reaction. */
                 if (!pvpActive) {
                     const d = state.difficulty;
-                    /* Chance the CPU guesses the right third of the goal */
-                    const guessChance = clamp(0.30 + 0.12 * d, 0.30, 0.65);
-                    const r = Math.random();
-                    if (r < guessChance) {
-                        /* Anticipates correctly: picks a side (not center) */
-                        SO.cpuDiveDir = Math.random() < 0.5 ? 'left' : 'right';
-                    } else {
-                        /* Guesses wrong or stays center */
-                        const r2 = Math.random();
-                        SO.cpuDiveDir = r2 < 0.4 ? 'left' : (r2 < 0.8 ? 'right' : 'center');
-                    }
+                    /* Chance the CPU keeper reads the kicker's body language accurately */
+                    const guessChance = clamp(0.26 + 0.12 * d, 0.26, 0.68);
+                    SO.cpuReadCorrect = Math.random() < guessChance;
+                    const r2 = Math.random();
+                    SO.cpuDiveDir = r2 < 0.42 ? 'left' : (r2 < 0.84 ? 'right' : 'center');
                 }
                 /* Human is shooting: timer to drag direction line and release */
                 SO.phase = 'aim';
@@ -5473,7 +5518,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
      * Maximum realistic dive travel for the goalkeeper's body (in pitch units from center x = 50).
      * The torso/hips lunge up to 6.2 units laterally; outstretched body and arms reach the post.
      */
-    const SO_DIVE_MAX_OFFSET = 6.2;
+    const SO_DIVE_MAX_OFFSET = 9.6;
+    const SO_SAVE_REACH = 3.2;
 
     /** CHECK_ON_TARGET then DIVE. */
     function soCommitAim() {
@@ -5493,17 +5539,22 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         SO.t = 0;
         const k = soDefKeeper();
         if (soDefTeam() === 'cpu' && !pvpActive) {
-            /* CPU keeper uses its PRE-DECIDED dive direction (set in afterWalk,
-               before seeing the aim). It commits to a side; it doesn't react. */
+            /* CPU keeper uses its pre-rolled anticipation flag (SO.cpuReadCorrect):
+               if it read the kicker, it dives toward the aimed side with realistic
+               depth variance; otherwise it commits to its blind guess (SO.cpuDiveDir). */
             const goalX = soGoal().x;
-            const dir = SO.cpuDiveDir || 'center';
+            const shotDx = SO.aim.x - goalX;
+            const shotDir = Math.abs(shotDx) <= 2.2 ? 'center' : (shotDx < 0 ? 'left' : 'right');
+            const dir = SO.cpuReadCorrect ? shotDir : (SO.cpuDiveDir || 'center');
             let diveX = goalX;
             if (dir === 'left') {
-                diveX = clamp(goalX - randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), goalX - SO_DIVE_MAX_OFFSET, 48.0);
+                const ideal = SO.cpuReadCorrect ? Math.min(SO_DIVE_MAX_OFFSET, Math.max(3.5, Math.abs(shotDx) * 0.88)) : randRange(Math.random, 4.5, SO_DIVE_MAX_OFFSET);
+                diveX = clamp(goalX - ideal + (Math.random() - 0.5) * 2.2, goalX - SO_DIVE_MAX_OFFSET, 48.0);
             } else if (dir === 'right') {
-                diveX = clamp(goalX + randRange(Math.random, 4.2, SO_DIVE_MAX_OFFSET), 52.0, goalX + SO_DIVE_MAX_OFFSET);
+                const ideal = SO.cpuReadCorrect ? Math.min(SO_DIVE_MAX_OFFSET, Math.max(3.5, Math.abs(shotDx) * 0.88)) : randRange(Math.random, 4.5, SO_DIVE_MAX_OFFSET);
+                diveX = clamp(goalX + ideal + (Math.random() - 0.5) * 2.2, 52.0, goalX + SO_DIVE_MAX_OFFSET);
             } else {
-                diveX = goalX;
+                diveX = goalX + (Math.random() - 0.5) * 1.4;
             }
             const target = { x: diveX, y: k ? k.y : soGoal().y };
             if (k) k.queuedDive = target;
@@ -5517,21 +5568,21 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     }
 
     /**
-     * Compute keeper dive target from drawn line:
-     * Natural athletic lunge capped at SO_DIVE_MAX_OFFSET so the keeper stays realistically within the goal area.
-     * Drawing longer lines dives the keeper to the maximum realistic distance;
-     * drawing short lines dives the keeper in a short distance.
+     * Compute keeper dive target from tap or drawn line:
+     * Supports tapping directly on a goal corner, dragging from the keeper,
+     * dragging across the goal mouth, or swiping left/right lower on the screen.
      */
     function calcSoDiveTarget(pt, origin, k) {
         const kx = k ? k.x : 50;
         const ky = k ? k.y : 100;
         let deltaX = 0;
-        if (origin && Math.abs(origin.x - kx) < 8 && origin.y > 80) {
+        const dragDist = origin ? Math.hypot(pt.x - origin.x, pt.y - origin.y) : 0;
+        if (!origin || dragDist <= TAP_SLOP * 1.5 || origin.y >= 84 || Math.abs(origin.x - kx) < 10) {
+            /* Direct target in goal mouth or drag starting near keeper/goal line */
             deltaX = pt.x - kx;
-        } else if (origin) {
-            deltaX = pt.x - origin.x;
         } else {
-            deltaX = pt.x - kx;
+            /* Thumb swipe lower on the pitch: scale horizontal swipe into full dive */
+            deltaX = (pt.x - origin.x) * 1.45;
         }
         const clampedDelta = clamp(deltaX, -SO_DIVE_MAX_OFFSET, SO_DIVE_MAX_OFFSET);
         return { x: kx + clampedDelta, y: ky };
@@ -5568,17 +5619,15 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         const shotTarget = SO.aim || { x: soGoal().x, y: soGoal().y };
         const divePoint = SO.dive || (k ? { x: k.x, y: k.y } : { x: soGoal().x, y: soGoal().y });
 
-        /* Keeper save: the dive point is where the keeper's center ends up.
-           The keeper is 0.8 scale (~1.6 units tall); a diving keeper's body
-           plus outstretched arms covers ~2.2 units from center. If the ball
-           passes within this realistic body reach, it's a save — no arbitrary
-           6-unit circle. */
+        /* Keeper save: SO_DIVE_MAX_OFFSET (9.6) + SO_SAVE_REACH (3.2) = 12.8 >= 12.5,
+           so a full-stretch dive to the correct corner covers the post while a center
+           or half-dive leaves the corners open. */
         SO.result = penaltyKickOutcome({
             shotTarget,
             divePoint,
             goalX: soGoal().x,
             goalHalfWidth: GOAL_HALF_WIDTH,
-            reach: 2.2
+            reach: SO_SAVE_REACH
         });
 
         SO.from = { x: ball.x, y: ball.y };
@@ -6157,27 +6206,45 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            drawn on their screen lands on the opposite board point. Un-flip it
            back to world coordinates before anything consumes it. */
         if (pvpMirrored()) { gx = 100 - gx; gy = 100 - gy; }
-        return { x: gx, y: gy, px, py, rect: r, frame: F };
+        return { x: gx, y: gy, px, py, rect: r, frame: F, isTouch: e && e.pointerType === 'touch' };
     }
-    const screenRadius = rect => Math.max(18, rect.height * 0.055 * view.zoom);
+    const screenRadius = (rect, isTouch) => {
+        const base = isTouch || isTouchDevice() ? 0.068 : 0.055;
+        const minPx = isTouch || isTouchDevice() ? 28 : 20;
+        return Math.max(minPx, rect.height * base * view.zoom);
+    };
 
     function pickPlayer(pt) {
         let best = null, bd = Infinity;
-        const r = screenRadius(pt.rect);
+        const r = screenRadius(pt.rect, pt.isTouch);
         const F = pt.frame || viewFrame(pt.rect);
         const scale = (2 * view.hh) / F.availH;
         const cx = F.l + F.availW / 2, cy = F.t + F.availH / 2;
-        allPlayers.forEach(p => {
-            /* PvP mirror: project where the player is *seen*, not where the
-               world says they are — the guest's board is rendered rotated. */
-            const sx = pvpMirrored() ? 100 - p.x : p.x;
-            const sy = pvpMirrored() ? 100 - p.y : p.y;
-            const a = {
+        const toScreen = (gx, gy) => {
+            const sx = pvpMirrored() ? 100 - gx : gx;
+            const sy = pvpMirrored() ? 100 - gy : gy;
+            return {
                 x: cx + ((sx - 50) * KX) / scale,
                 y: cy - ((sy - view.panY) / (2 * view.hh)) * F.availH
             };
-            const d = Math.hypot(a.x - pt.px, a.y - pt.py);
-            if (d > r) return;
+        };
+        allPlayers.forEach(p => {
+            /* Test both feet and torso center (3D players stand upright under the
+               34° camera tilt, so their torso projects ~1.8 game-y units higher on screen). */
+            const feet = toScreen(p.x, p.y);
+            const torso = toScreen(p.x, p.y + (pvpMirrored() ? -1.8 : 1.8));
+            let d = Math.min(
+                Math.hypot(feet.x - pt.px, feet.y - pt.py),
+                Math.hypot(torso.x - pt.px, torso.y - pt.py)
+            );
+            /* If this player is the ball carrier, also allow touching the ball directly! */
+            if (PLAY && p === PLAY.carrier && p.team === myTeam()) {
+                const bp = ballPoint();
+                const bs = toScreen(bp.x, bp.y);
+                d = Math.min(d, Math.hypot(bs.x - pt.px, bs.y - pt.py));
+            }
+            const effR = (PLAY && p === PLAY.carrier && p.team === myTeam()) ? r * 1.18 : r;
+            if (d > effR) return;
             /* Never let an opponent standing on top of one of your players
                swallow the gesture: while the human is on the ball, a tap on a
                stack resolves to the human's player, not to the defender pressed
@@ -6197,6 +6264,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     function onDown(e) {
         if (rotateHold || topScreen() || state.paused) return;
         if (e.button !== undefined && e.button !== 0) return;
+        /* Ignore secondary multi-touch fingers while a primary drag is already active */
+        if (drag.kind && drag.id !== null && e.pointerId !== undefined && e.pointerId !== drag.id) return;
         /* Rondo taps: the possessor taps a teammate to pass, the middle taps
            their guess. Handled here so the match's drag logic never sees it. */
         if (state.phase === 'rondo') {
@@ -6244,14 +6313,28 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     k.queuedDive = target;
                 }
             } else {
-                drag.kind = null;
+                drag.kind = null; drag.id = null;
             }
             return;
+        }
+        /* §0.4 / §6 — Live reaction window on opponent shots: while an opponent
+           shot is in flight toward our goal, allow dragging or tapping to dive
+           our goalkeeper in real time! */
+        if (state.phase === 'play' && ball.mode === 'shot' && ball.alive && state.possession !== myTeam()) {
+            const myKeeper = keeperOf(myTeam());
+            if (myKeeper) {
+                drag.kind = 'keeper';
+                drag.player = myKeeper;
+                const target = { x: clamp(clampDiveX(pt.x, myKeeper.x), 8, 92), y: myKeeper.y };
+                myKeeper.held = true;
+                myKeeper.dive = target;
+                return;
+            }
         }
         /* §17.b — a gesture only means anything while the decision window is open.
            Everything it can do now *stacks* a move instead of making one, so the
            board stays frozen until both sides have finished deciding. */
-        if (state.phase !== 'play' || !PLAN || PLAN.armed) { drag.kind = null; return; }
+        if (state.phase !== 'play' || !PLAN || PLAN.armed) { drag.kind = null; drag.id = null; return; }
 
         const p = pickPlayer(pt);
         if (humanAttacking() && p === PLAY.carrier) {
@@ -6290,9 +6373,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     function onMove(e) {
         if (!drag.kind) return;
+        if (drag.id !== null && e.pointerId !== undefined && e.pointerId !== drag.id) return;
         const pt = canvasPoint(e);
         drag.x = pt.x; drag.y = pt.y;
-        drag.moved = Math.hypot(pt.x - drag.x0, pt.y - drag.y0);
+        drag.moved = Math.max(drag.moved || 0, Math.hypot(pt.x - drag.x0, pt.y - drag.y0));
 
         if (drag.kind === 'rondo' || state.phase === 'rondo') {
             rondoHandlePointerMove(e, pt);
@@ -6300,22 +6384,25 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         }
 
         if (drag.kind === 'aim' && drag.moved > TAP_SLOP) {
-            /* §12.d — the drawing IS the plan. The stroke under the finger is kept
-               point for point (a 0.8-unit gap filter, capped at STROKE_MAX) and
-               handed straight back to a freehand line, so what the player sees on
-               the grass is exactly the path they drew: not a chord, and not a
-               snap onto whichever teammate the drag went near. The colour says
-               what the line will DO — slot 1 glows amber when the drawn angle is
-               on target or a mate is in the lane, dims to grey when it is neither
-               (a shot that is going to miss), and slot 2, the carrier's own run,
-               is drawn faint because it is a plan and not a ball. aimLine stays
-               hidden for the whole gesture: two lines for one gesture would read
-               as two different instructions. */
+            /* §12.d — the drawing IS the plan. Process coalesced pointer events
+               for high-rate touch screens (120Hz+) with a fine 0.45-unit filter
+               and smooth the preview polyline so curves feel fluid under the thumb. */
             const path = drag.path;
             if (path) {
-                const last = path[path.length - 1];
-                if (Math.hypot(drag.x - last.x, drag.y - last.y) >= 0.8 && path.length < STROKE_MAX) {
-                    path.push({ x: drag.x, y: drag.y });
+                const events = (typeof e.getCoalescedEvents === 'function') ? e.getCoalescedEvents() : null;
+                if (events && events.length > 1) {
+                    for (let i = 0; i < events.length; i++) {
+                        const cpt = canvasPoint(events[i]);
+                        const last = path[path.length - 1];
+                        if (Math.hypot(cpt.x - last.x, cpt.y - last.y) >= 0.45 && path.length < STROKE_MAX) {
+                            path.push({ x: cpt.x, y: cpt.y });
+                        }
+                    }
+                } else {
+                    const last = path[path.length - 1];
+                    if (Math.hypot(drag.x - last.x, drag.y - last.y) >= 0.45 && path.length < STROKE_MAX) {
+                        path.push({ x: drag.x, y: drag.y });
+                    }
                 }
                 const mate = AIM.slot === 2 ? null : mateInDirection(drag.x0, drag.y0, drag.x, drag.y);
                 // Store the locked receiver candidate during the drag
@@ -6422,6 +6509,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
     function onUp(e) {
         if (!drag.kind) { drag.id = null; return; }
+        if (drag.id !== null && e.pointerId !== undefined && e.pointerId !== drag.id) return;
+        try { canvas.releasePointerCapture && canvas.releasePointerCapture(e.pointerId); } catch (err) {}
         const pt = canvasPoint(e);
         canvas.classList.remove('grabbing');
         const moved = Math.hypot(pt.x - drag.x0, pt.y - drag.y0);
@@ -6452,6 +6541,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             if (moved > TAP_SLOP) {
                 if (pts.length < 2) {
                     pts.push({ x: pt.x, y: pt.y });
+                } else {
+                    const lastPt = pts[pts.length - 1];
+                    if (Math.hypot(pt.x - lastPt.x, pt.y - lastPt.y) > 0.2) {
+                        pts.push({ x: pt.x, y: pt.y });
+                    } else {
+                        pts[pts.length - 1] = { x: pt.x, y: pt.y };
+                    }
                 }
                 const stroke = readStroke(pts);
                 if (AIM.slot === 2) {
@@ -6496,6 +6592,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     strokeLine.visible = false;
                     const t = shotTargetFor(ballPoint(), landed.end);
 
+                    // Clear any previous auto-assigned receiver run before assigning the new one
+                    allPlayers.forEach(p => {
+                        if (p.team === myTeam() && p.autoMove && !p.userMove) {
+                            p.queued = null;
+                            p.autoMove = false;
+                        }
+                    });
                     // If a teammate was locked during the pass, assign them as receiver and set run intent
                     if (lockedReceiver && PLAY) {
                         PLAY.receiver = lockedReceiver;
@@ -6504,33 +6607,33 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                            drew a line for this player, that line wins over the
                            auto run-to-pass-target. */
                         if (!lockedReceiver.userMove) {
-                            setIntent(lockedReceiver, landed.end);
+                            setIntent(lockedReceiver, landed.end, false, true);
                         }
+                    } else if (PLAY) {
+                        const nearMates = teamOutfield(myTeam()).filter(m => m !== PLAY.carrier);
+                        nearMates.sort((a, b) => dist(a, landed.end) - dist(b, landed.end));
+                        PLAY.receiver = nearMates[0] || null;
+                        if (PLAY.receiver) PLAY.receiver.duty = 'receiver';
                     }
 
                     /* §12.f — THE DRAWN LINE IS ALWAYS THE QUEUED BALL.
-                       This is the whole of the "passing to my own half instead of
-                       the forward line I drew" report. An angle that had a
-                       goal-line answer used to queue NOTHING: it was "held" for
-                       the SHOOT button and the double-tap, and if the player
-                       closed the window with MOVES DONE instead, the plan held no
-                       pass at all and beginExecution() fell through to
-                       autoPass() — a random delivery that could point at the
-                       passer's OWN half while the forward line he had just drawn
-                       sat on the grass meaning nothing. Straight up the pitch is
-                       exactly where the goal is, so almost every forward line has
-                       a goal-line answer and almost every forward pass was being
-                       thrown away. The queue therefore happens FIRST and
-                       unconditionally; SHOOT and the double-tap re-queue the shot
-                       on top of it and null the pass again (queueShot), which is
-                       what makes an angle an upgrade of a pass into a shot rather
-                       than the replacement of one. */
+                       In both solo and PvP, drawing a line from the carrier queues
+                       the pass to `landed.end` (and only upgrades to a shot if the
+                       player presses SHOOT, double-taps, or drags directly across
+                       the opponent's goal mouth inside shooting range with no receiver). */
+                    const c = PLAY && PLAY.carrier;
+                    const directGoalDrag = !lockedReceiver && c && dist(c, PLAY.goal) <= SHOT_RANGE
+                        && t && isOnTarget(t.x, PLAY.goal.x, GOAL_HALF_WIDTH)
+                        && (PLAY.goal.y === 100 ? landed.end.y >= 94 : landed.end.y <= 6);
                     const queued = queuePass(landed.end, landed, t ? true : false);
+                    if (directGoalDrag) {
+                        queueShot();
+                    }
                     if (pvpActive && pvpRole === 'guest') {
-                        if (t) {
+                        if (directGoalDrag && t) {
                             pvp.sendInput({
                                 type: 'shot',
-                                target: landed.end,
+                                target: t,
                                 power: landed.power
                             });
                         } else {
@@ -6623,12 +6726,16 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     keeperDragLine.visible = false;
                     diveMarker.visible = false;
                 }
+            } else if (isLiveShot) {
+                const target = { x: clamp(clampDiveX(pt.x, player.x), 8, 92), y: player.y };
+                player.held = true;
+                player.dive = target;
+                keeperDragLine.visible = false;
+                diveMarker.visible = false;
             } else {
                 player.held = false;
                 player.queuedDive = null;
-                if (!isLiveShot) {
-                    player.dive = null;
-                }
+                player.dive = null;
                 keeperDragLine.visible = false;
                 diveMarker.visible = false;
             }
@@ -6748,7 +6855,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
        half, 1 by default (a 2:00 match). rules.js keeps its own HALF_LENGTH = 60
        for the rulebook's property tests (the verify summary reads the rulebook,
        not the engine); the engine reads `halfLength`. */
-    const HALF_LENGTH_STEPS = [60, 120, 180];
+    const HALF_LENGTH_STEPS = [30, 60, 120, 180];
     const HALF_LENGTH_DEFAULT = 60;
     let halfLength = HALF_LENGTH_DEFAULT;
 
@@ -6831,12 +6938,13 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     }
 
     /** Stack a run. Nothing moves until the window closes. */
-    function setIntent(p, dest, isUserDrawn) {
+    function setIntent(p, dest, isUserDrawn, isAutoReceiver) {
         if (!p || !dest) return;
         p.queued = { x: clamp(dest.x, 5, 95), y: clamp(dest.y, 5, 95) };
         /* A user-drawn move takes precedence: a later pass locking onto this
            player must not overwrite the line they deliberately drew. */
-        if (isUserDrawn) p.userMove = true;
+        if (isUserDrawn) { p.userMove = true; p.autoMove = false; }
+        else if (isAutoReceiver) { p.autoMove = true; }
         bus.emit('plan-markers');
     }
 
@@ -7402,7 +7510,9 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
                     if (!state.pendingHalfT) state.pendingHalfT = 0;
                     state.pendingHalfT += dt;
 
-                    if (ball.mode === 'held' || ball.mode === 'loose' || state.pendingHalfT >= 2.0) {
+                    const activeBoxScramble = ball.mode === 'loose' && ball.alive && ball.s > 3.5
+                        && (ball.y <= 22 || ball.y >= 78) && state.pendingHalfT < 2.2;
+                    if (ball.mode === 'held' || (ball.mode === 'loose' && !activeBoxScramble) || state.pendingHalfT >= 2.5) {
                         state.pendingHalfT = 0;
                         endHalf();
                     }
@@ -7456,7 +7566,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     function canShootNow() {
         if (rotateHold || SO.active || state.paused) return false;
         if (state.phase !== 'play' || !PLAN || PLAN.armed) return false;
-        if (PLAN.shot[myTeam()]) return false;
+        if (PLAN.shot[myTeam()] && !AIM.pass) return false;
         if (!topScreen() && PLAY && PLAY.atk === myTeam() && PLAY.carrier) {
             return ball.mode === 'held' && ball.holder === PLAY.carrier
                 && dist(PLAY.carrier, PLAY.goal) <= SHOT_RANGE;
@@ -7770,7 +7880,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
            even when it is still. */
         blinkT += dt;
         const beat = 0.5 + 0.5 * Math.sin(blinkT * 4.2);
-        ballMesh.scale.setScalar(BALL_VIS * (1 + beat * 0.12));
+        const modeScale = ((state.phase === 'play' || state.phase === 'plan') && !pvpActive && !SO.active && state.phase !== 'rondo') ? 1.18 : 1;
+        ballMesh.scale.setScalar(BALL_VIS * modeScale * (1 + beat * 0.12));
         ballRim.material.opacity = 0.42 + beat * 0.3;
         if (state.phase !== 'rondo') {
             const cyc = (blinkT % BALL_PING) / BALL_PING;
@@ -8698,9 +8809,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     }
 
     function openRondoLobby() {
-        /* The handle is dealt fresh every visit — the field is read-only. */
         const input = document.getElementById('rondo-name');
-        if (input) input.value = generateTactikName();
+        if (input && !input.value.trim()) input.value = generateTactikName();
         pushScreen('rondo', {});
         setupRondoUI();
     }
@@ -8850,8 +8960,22 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         if (btnStart) btnStart.addEventListener('click', rondoHostStart);
 
         // Quit mid-game — the rondo goes with it, for everyone, so it asks.
+        const onRondoQuitClick = async () => {
+            const hosting = !!(rondoNet && rondoNet.isHost);
+            const ok = await confirmAction({
+                title: 'Leave the rondo?',
+                message: hosting
+                    ? 'The game ends for everyone in the room — you are the host.'
+                    : 'The game in progress will be lost and you will drop out of the circle.',
+                confirmLabel: 'LEAVE',
+            });
+            if (ok) rondoLeave(true);
+        };
         const btnQuit = document.getElementById('btn-rondo-menu');
-        if (btnQuit) btnQuit.addEventListener('click', async () => {
+        if (btnQuit) btnQuit.addEventListener('click', onRondoQuitClick);
+        const btnQuitLegacy = document.getElementById('btn-rondo-quit');
+        if (btnQuitLegacy) btnQuitLegacy.addEventListener('click', onRondoQuitClick);
+        if (false) btnQuit.addEventListener('click', async () => {
             const hosting = !!(rondoNet && rondoNet.isHost);
             const ok = await confirmAction({
                 title: 'Leave the rondo?',
@@ -8903,6 +9027,8 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
 
         const n = players.length;
         if (countNum) countNum.textContent = n;
+        const legacyCount = document.getElementById('rondo-player-count');
+        if (legacyCount) legacyCount.textContent = `(${n}/${RONDO_MAX_PLAYERS})`;
         const canStart = n >= RONDO_MIN_PLAYERS;
         if (hint) {
             hint.textContent = canStart
@@ -11384,16 +11510,29 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         rondoRaycaster.setFromCamera({ x: nx, y: ny }, camera);
         const groups = Object.entries(rondoMeshes).map(([id, m]) => m.group);
         const hits = rondoRaycaster.intersectObjects(groups, true);
-        if (!hits.length) return false;
-        // Walk up to the group that carries the player id.
-        let obj = hits[0].object;
         let pid = null;
-        while (obj) {
-            for (const [id, m] of Object.entries(rondoMeshes)) {
-                if (m.group === obj) { pid = id; break; }
+        if (hits.length) {
+            let obj = hits[0].object;
+            while (obj) {
+                for (const [id, m] of Object.entries(rondoMeshes)) {
+                    if (m.group === obj) { pid = id; break; }
+                }
+                if (pid) break;
+                obj = obj.parent;
             }
-            if (pid) break;
-            obj = obj.parent;
+        }
+        /* Touch fallback: if the 3D raycast missed the narrow stick-figure mesh,
+           check 2D unspun grid proximity so mobile taps on teammates always register. */
+        if (!pid || !rondo.circle.includes(pid) || pid === me) {
+            const pt = rondoUnspin(canvasPoint({ clientX, clientY, pointerType: 'touch' }));
+            let bestD = 6.2;
+            for (const id of rondo.circle) {
+                if (id === me) continue;
+                const m = rondoMeshes[id];
+                if (!m) continue;
+                const d = Math.hypot(pt.x - m.gx, pt.y - m.gy);
+                if (d < bestD) { bestD = d; pid = id; }
+            }
         }
         if (!pid || !rondo.circle.includes(pid)) return false;
 
@@ -11424,8 +11563,10 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
     /** Two soft tones through the existing WebAudio path: pass vs interception. */
     function playRondoWhistle(good) {
         try {
-            if (typeof playGoalTone === 'function') playGoalTone(good);
-            else if (typeof beep === 'function') beep(good ? 660 : 220, 0.12);
+            if (typeof Sfx !== 'undefined') {
+                if (good && Sfx.good) Sfx.good();
+                else if (!good && Sfx.bad) Sfx.bad();
+            }
         } catch (e) {}
     }
 
@@ -11490,7 +11631,7 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
             { select: 'difficulty-start', label: 'Level',
               short: { '0.35': 'Amateur', '1.85': 'Semi-Pro', '2.6': 'Pro', '3.4': 'World Class' } },
             { select: 'plan-window-start', label: 'Timer',
-              short: { '3': '3s', '5': '5s', '10': '10s', '20': '20s' } },
+              short: { '3': '3s', '5': '5s', '10': '10s', '15': '15s', '20': '20s' } },
             { select: 'match-length-start', label: 'Match',
               short: { '30': '1:00', '60': '2:00', '120': '4:00', '180': '6:00' } },
             { select: 'sound-start', label: 'Sound',
@@ -12370,12 +12511,31 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         } catch (e) { /* old browser: the resize/orientation hooks still cover rotation. */ }
     }
     fitView();
-    /* the settings pills start pressed from their markup, but state is the
-       truth — sync every surface from it before the first frame */
+    /* Restore saved preferences from localStorage (if any) and sync surfaces */
+    try {
+        const savedDiff = parseFloat(localStorage.getItem('tk-difficulty'));
+        if (Number.isFinite(savedDiff) && savedDiff >= 0.3 && savedDiff <= 3.5) state.difficulty = savedDiff;
+        const savedPlan = parseInt(localStorage.getItem('tk-plan-window'), 10);
+        if (PLAN_WINDOW_STEPS.indexOf(savedPlan) >= 0) planWindow = savedPlan;
+        const savedHalf = parseInt(localStorage.getItem('tk-half-length'), 10);
+        if (HALF_LENGTH_STEPS.indexOf(savedHalf) >= 0) halfLength = savedHalf;
+        const savedMute = localStorage.getItem('tk-muted');
+        if (savedMute === '1' && !Sfx.muted) Sfx.toggle();
+    } catch (e) {}
     syncDifficulty();
     syncSound();
-    setHalfLength(HALF_LENGTH_DEFAULT);
-    setPlanWindow(PLAN_WINDOW_DEFAULT);
+    setHalfLength(halfLength);
+    setPlanWindow(planWindow);
+    [ui.difficulty, ui.difficultyStart].forEach(g => {
+        if (g) g.addEventListener('change', () => { try { localStorage.setItem('tk-difficulty', String(state.difficulty)); } catch (e) {} });
+    });
+    [ui.planWin, ui.planWinStart].forEach(g => {
+        if (g) g.addEventListener('change', () => { try { localStorage.setItem('tk-plan-window', String(planWindow)); } catch (e) {} });
+    });
+    [ui.halfLen, ui.halfLenStart].forEach(g => {
+        if (g) g.addEventListener('change', () => { try { localStorage.setItem('tk-half-length', String(halfLength)); } catch (e) {} });
+    });
+    if (ui.soundStart) ui.soundStart.addEventListener('change', () => { try { localStorage.setItem('tk-muted', Sfx.muted ? '1' : '0'); } catch (e) {} });
     allPlayers.forEach(p => { syncToMesh(p); refreshRings(); });
     setCarrier(teamOutfield('you')[0]);
     state.phase = 'idle';
@@ -12473,4 +12633,3 @@ import { RondoNet, RONDO_MIN_PLAYERS, RONDO_MAX_PLAYERS } from './rondo-network.
         test: { cpuShotQuality, cpuChoosePass, keeperSkill, cpuShotAim }
     };
 })();
-        updateBallScale();

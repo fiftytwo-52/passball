@@ -129,6 +129,7 @@ import '../styles/global.css';
                                      second and must not be announced each tick. -->
                                 <div class="clock-row">
                                     <span id="clock" role="timer" class="clock-num">2:00</span>
+                                    <span id="clock-extra" class="clock-extra" style="display:none">+1</span>
                                 </div>
                             </div>
 
@@ -266,6 +267,7 @@ import '../styles/global.css';
                 <!-- Hidden: legacy hooks the engine updates -->
                 <div hidden aria-hidden="true">
                     <span id="rondo-turn">WAITING</span>
+                    <button id="btn-rondo-quit" type="button" tabindex="-1">Leave</button>
                     <span id="rondo-ball-name">–</span>
                     <span id="rondo-middle-name">–</span>
                 </div>
@@ -486,6 +488,7 @@ import '../styles/global.css';
                 <option value="3">3s (Speed)</option>
                 <option value="5" selected>5s (Rapid)</option>
                 <option value="10">10s (Standard)</option>
+                <option value="15">15s (Tactical)</option>
                 <option value="20">20s (Relaxed)</option>
             </select>
             <select id="match-length-start" tabindex="-1" aria-hidden="true">
@@ -818,7 +821,7 @@ import '../styles/global.css';
                     <div>
                         <label class="rondo-label" for="rondo-name">Your name</label>
                         <div class="rondo-name-row">
-                            <input id="rondo-name" class="rondo-input" readonly maxlength="16" autocomplete="off" spellcheck="false" aria-readonly="true">
+                            <input id="rondo-name" class="rondo-input" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Your handle">
                             <button class="rondo-sq" id="btn-rondo-shuffle" type="button" aria-label="Random name">🎲</button>
                         </div>
                     </div>
@@ -861,7 +864,7 @@ import '../styles/global.css';
                             <div class="rondo-desk-right" id="rondo-roster-box" hidden>
                                 <div class="rondo-lineup-head">
                                     <span class="rondo-label" style="margin:0">Starting lineup</span>
-                                    <span class="rondo-count"><b id="rondo-player-count-num">1</b>/10 · min 4</span>
+                                    <span class="rondo-count"><b id="rondo-player-count-num">1</b>/10 · min 4 <span id="rondo-player-count" hidden>(1/10)</span></span>
                                 </div>
                                 <div class="rondo-pitch"><div class="rondo-team" id="rondo-player-list"></div></div>
                                 <div class="rondo-legend">
